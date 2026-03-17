@@ -1,0 +1,14 @@
+global using System;
+global using System.IO;
+global using System.Linq;
+global using System.Runtime.Versioning;
+global using System.Threading;
+global using System.Threading.Tasks;
+global using ForRest.Domain;
+global using ForRest.Infrastructure.Sqlite;
+global using ForRest.Models;
+global using ForRest.Repositories;
+global using ForRest.Scripting;
+global using ForRest.Services;
+global using Microsoft.Extensions.Logging.Abstractions;
+global using Microsoft.VisualStudio.TestTools.UnitTesting;

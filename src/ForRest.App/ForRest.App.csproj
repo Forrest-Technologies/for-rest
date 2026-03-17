@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>ForRest.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="Exists('C:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\Microsoft.Build.Packaging.Pri.Tasks.dll')">
+    <AppxMSBuildToolsPath>C:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\</AppxMSBuildToolsPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250909003" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ForRest.Shared\ForRest.Shared.csproj" />
+    <ProjectReference Include="..\ForRest.Models\ForRest.Models.csproj" />
+    <ProjectReference Include="..\ForRest.Services\ForRest.Services.csproj" />
+    <ProjectReference Include="..\ForRest.Infrastructure.Sqlite\ForRest.Infrastructure.Sqlite.csproj" />
+    <ProjectReference Include="..\ForRest.Plugins.Host\ForRest.Plugins.Host.csproj" />
+    <ProjectReference Include="..\ForRest.Domain\ForRest.Domain.csproj" />
+    <ProjectReference Include="..\ForRest.Repositories\ForRest.Repositories.csproj" />
+  </ItemGroup>
+  
+</Project>

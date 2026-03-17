@@ -1,0 +1,712 @@
+<Window
+    x:Class="ForRest.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="For-Rest">
+    <Grid x:Name="RootLayout" Background="{ThemeResource ShellBackgroundBrush}" Loaded="OnLoaded">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{ThemeResource ShellChromeBrush}" BorderBrush="{ThemeResource ShellHairlineBrush}" BorderThickness="0,0,0,1">
+            <Grid
+                x:Name="TitleBarDragRegion"
+                Height="42"
+                Padding="14,0,140,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border
+                        Width="30"
+                        Height="30"
+                        Background="{ThemeResource ShellAccentBrush}"
+                        CornerRadius="8">
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontFamily="{ThemeResource ShellDisplayFontFamily}"
+                            FontSize="14"
+                            FontWeight="Bold"
+                            Text="F/" />
+                    </Border>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontFamily="{ThemeResource ShellDisplayFontFamily}"
+                        FontSize="17"
+                        FontWeight="SemiBold"
+                        Text="For-Rest" />
+                </StackPanel>
+
+                <TextBlock
+                    Grid.Column="1"
+                    Margin="18,0,0,0"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource ShellMutedTextBrush}"
+                    Text="local API workbench  /  scripts  /  tests  /  future traffic tooling" />
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="12">
+                    <Border
+                        Padding="10,4"
+                        Background="{ThemeResource ShellAccentSoftBrush}"
+                        BorderBrush="{ThemeResource ShellHairlineBrush}"
+                        BorderThickness="1"
+                        CornerRadius="999">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="ENV" />
+                            <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding SelectedEnvironment.Name}" />
+                        </StackPanel>
+                    </Border>
+                    <Border
+                        Padding="10,4"
+                        Background="{Binding StatusBrush}"
+                        CornerRadius="999">
+                        <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding ResponseStatusText}" />
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="TIME" />
+                        <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding ResponseTimeText}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="SIZE" />
+                        <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding ResponseSizeText}" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Background="{ThemeResource ShellPanelAltBrush}" BorderBrush="{ThemeResource ShellHairlineBrush}" BorderThickness="0,0,0,1">
+            <Grid Padding="14,12" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="180" />
+                    <ColumnDefinition Width="96" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ComboBox
+                    Grid.Column="0"
+                    Style="{StaticResource WorkbenchComboBoxStyle}"
+                    DisplayMemberPath="Name"
+                    ItemsSource="{Binding Workspaces}"
+                    SelectedItem="{Binding SelectedWorkspace, Mode=TwoWay}"
+                    SelectionChanged="WorkspaceSelectionChanged" />
+
+                <ComboBox
+                    Grid.Column="1"
+                    Style="{StaticResource WorkbenchComboBoxStyle}"
+                    DisplayMemberPath="Name"
+                    ItemsSource="{Binding Environments}"
+                    SelectedItem="{Binding SelectedEnvironment, Mode=TwoWay}" />
+
+                <ComboBox
+                    Grid.Column="2"
+                    Style="{StaticResource WorkbenchComboBoxStyle}"
+                    ItemsSource="{Binding HttpMethods}"
+                    SelectedItem="{Binding SelectedRequest.Method, Mode=TwoWay}" />
+
+                <Border
+                    Grid.Column="3"
+                    Background="{ThemeResource ShellCodeSurfaceBrush}"
+                    BorderBrush="{ThemeResource ShellHairlineBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <Grid ColumnSpacing="10" Padding="12,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Style="{StaticResource WorkbenchMetaLabelStyle}"
+                            Text="TARGET" />
+                        <TextBox
+                            Grid.Column="1"
+                            Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            FontSize="14"
+                            PlaceholderText="https://api.example.test/resource"
+                            Text="{Binding SelectedRequest.Url, Mode=TwoWay}" />
+                    </Grid>
+                </Border>
+
+                <Button Grid.Column="4" Command="{Binding SendCommand}" Content="Send" Style="{StaticResource WorkbenchPrimaryButtonStyle}" />
+                <Button Grid.Column="5" Command="{Binding SaveCommand}" Content="Save" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+                <Button Grid.Column="6" Command="{Binding CancelCommand}" Content="Cancel" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+                <Button Grid.Column="7" Command="{Binding FormatRequestJsonCommand}" Content="Format Body" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+                <Button Grid.Column="8" Command="{Binding FormatResponseJsonCommand}" Content="Format Response" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="286" />
+                <ColumnDefinition Width="1" />
+                <ColumnDefinition Width="760" />
+                <ColumnDefinition Width="1" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{ThemeResource ShellPanelBrush}" BorderBrush="{ThemeResource ShellHairlineBrush}" BorderThickness="0,0,0,0">
+                <Grid Padding="10,12,10,10" RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="190" />
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="2">
+                            <TextBlock Style="{StaticResource WorkbenchPaneTitleStyle}" Text="Explorer" />
+                            <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding SelectedWorkspace.Name}" />
+                        </StackPanel>
+                        <TextBlock
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            FontFamily="{ThemeResource CodeFontFamily}"
+                            Foreground="{ThemeResource ShellMutedTextBrush}"
+                            Text="{Binding SelectedEnvironment.Name}" />
+                    </Grid>
+
+                    <TextBox
+                        Grid.Row="1"
+                        Style="{StaticResource WorkbenchTextBoxStyle}"
+                        PlaceholderText="Filter requests or folders"
+                        Text="{Binding ExplorerFilter, Mode=TwoWay}" />
+
+                    <ListView
+                        Grid.Row="2"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        IsItemClickEnabled="True"
+                        ItemClick="ExplorerItemClick"
+                        ItemsSource="{Binding ExplorerRows}"
+                        SelectionMode="None">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Border
+                                    Margin="0,0,0,1"
+                                    Padding="8,8,6,8"
+                                    Background="{ThemeResource ShellPanelBrush}"
+                                    BorderBrush="{ThemeResource ShellHairlineBrush}"
+                                    BorderThickness="0,0,0,1">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border
+                                            MinWidth="44"
+                                            Padding="6,3"
+                                            Background="{Binding BadgeBrush}"
+                                            CornerRadius="6">
+                                            <TextBlock
+                                                HorizontalAlignment="Center"
+                                                FontFamily="{ThemeResource CodeFontFamily}"
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Text="{Binding BadgeText}" />
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontSize="13" Text="{Binding DisplayName}" />
+                                            <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" FontSize="12" Text="{Binding SecondaryText}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <TextBlock Grid.Row="3" Style="{StaticResource WorkbenchPaneTitleStyle}" Text="History" />
+                    <ListView
+                        Grid.Row="4"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        IsItemClickEnabled="True"
+                        ItemClick="HistoryItemClick"
+                        ItemsSource="{Binding HistoryRuns}"
+                        SelectionMode="None">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Border
+                                    Margin="0,0,0,1"
+                                    Padding="8,8,6,8"
+                                    Background="{ThemeResource ShellPanelBrush}"
+                                    BorderBrush="{ThemeResource ShellHairlineBrush}"
+                                    BorderThickness="0,0,0,1">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock FontWeight="SemiBold" Text="{Binding RequestName}" />
+                                        <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding StartedUtc}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1" Background="{ThemeResource ShellHairlineBrush}" />
+
+            <Border Grid.Column="2" Background="{ThemeResource ShellBackgroundBrush}">
+                <Grid Padding="12,12,12,10" RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource WorkbenchPaneTitleStyle}" Text="Request Surface" />
+                        <TextBlock Grid.Column="1" FontFamily="{ThemeResource CodeFontFamily}" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding PluginSummary}" />
+                    </Grid>
+
+                    <ListView
+                        Grid.Row="1"
+                        Height="52"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        ItemsSource="{Binding OpenRequests}"
+                        SelectedItem="{Binding SelectedRequest, Mode=TwoWay}"
+                        SelectionMode="Single">
+                        <ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <ItemsStackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ListView.ItemsPanel>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Border
+                                    Margin="0,0,8,0"
+                                    Padding="10,8"
+                                    Background="{ThemeResource ShellPanelBrush}"
+                                    BorderBrush="{ThemeResource ShellHairlineBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border
+                                            Padding="6,3"
+                                            Background="{Binding MethodBadgeBrush}"
+                                            CornerRadius="5">
+                                            <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontSize="12" FontWeight="SemiBold" Text="{Binding Method}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock FontWeight="SemiBold" Text="{Binding DisplayTitle}" />
+                                            <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" FontFamily="{ThemeResource CodeFontFamily}" FontSize="12" Text="{Binding UrlHost}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <Border
+                        Grid.Row="2"
+                        Padding="12,10"
+                        Background="{ThemeResource ShellPanelBrush}"
+                        BorderBrush="{ThemeResource ShellHairlineBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="METHOD" />
+                                <Border
+                                    Padding="8,4"
+                                    Background="{Binding SelectedRequest.MethodBadgeBrush}"
+                                    CornerRadius="999">
+                                    <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding SelectedRequest.Method}" />
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="HOST" />
+                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding SelectedRequest.UrlHost}" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Spacing="4">
+                                <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="REQUEST" />
+                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding SelectedRequest.RequestSummary}" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="3" Spacing="4">
+                                <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="EXECUTION" />
+                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding SelectedRequest.RuntimeOptionsSummary}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Pivot Grid.Row="3">
+                        <PivotItem Header="Request">
+                            <ScrollViewer>
+                                <StackPanel Padding="0,0,8,0" Spacing="12">
+                                    <TextBox Header="Name" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.Name, Mode=TwoWay}" />
+                                    <TextBox Header="URL" Style="{StaticResource WorkbenchCodeTextBoxStyle}" Text="{Binding SelectedRequest.Url, Mode=TwoWay}" />
+                                    <CheckBox Content="Save responses to history" IsChecked="{Binding SelectedRequest.SaveResponseToHistory, Mode=TwoWay}" />
+                                    <CheckBox Content="Follow redirects" IsChecked="{Binding SelectedRequest.FollowRedirects, Mode=TwoWay}" />
+                                    <CheckBox Content="Validate SSL certificates" IsChecked="{Binding SelectedRequest.ValidateSsl, Mode=TwoWay}" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </PivotItem>
+
+                        <PivotItem Header="Params">
+                            <Grid RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Button Command="{Binding AddQueryParameterCommand}" HorizontalAlignment="Left" Content="Add Query Parameter" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+                                <ListView Grid.Row="1" Background="Transparent" BorderThickness="0" ItemsSource="{Binding SelectedRequest.QueryParameters}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Padding="0,0,0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="110" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="90" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox Header="Key" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Key, Mode=TwoWay}" />
+                                                <TextBox Grid.Column="1" Header="Value" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Value, Mode=TwoWay}" />
+                                                <CheckBox Grid.Column="2" Content="Enabled" IsChecked="{Binding IsEnabled, Mode=TwoWay}" VerticalAlignment="Bottom" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </PivotItem>
+
+                        <PivotItem Header="Headers">
+                            <Grid RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Button Command="{Binding AddHeaderCommand}" HorizontalAlignment="Left" Content="Add Header" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+                                <ListView Grid.Row="1" Background="Transparent" BorderThickness="0" ItemsSource="{Binding SelectedRequest.Headers}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Padding="0,0,0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="140" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="90" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox Header="Key" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Key, Mode=TwoWay}" />
+                                                <TextBox Grid.Column="1" Header="Value" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Value, Mode=TwoWay}" />
+                                                <CheckBox Grid.Column="2" Content="Enabled" IsChecked="{Binding IsEnabled, Mode=TwoWay}" VerticalAlignment="Bottom" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </PivotItem>
+
+                        <PivotItem Header="Auth">
+                            <ScrollViewer>
+                                <StackPanel Padding="0,0,8,0" Spacing="12">
+                                    <ComboBox Header="Mode" Style="{StaticResource WorkbenchComboBoxStyle}" ItemsSource="{Binding AuthModes}" SelectedItem="{Binding SelectedRequest.AuthMode, Mode=TwoWay}" />
+                                    <TextBox Header="Username" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.Username, Mode=TwoWay}" />
+                                    <TextBox Header="Password" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.Password, Mode=TwoWay}" />
+                                    <TextBox Header="Bearer Token" Style="{StaticResource WorkbenchCodeTextBoxStyle}" Text="{Binding SelectedRequest.BearerToken, Mode=TwoWay}" />
+                                    <TextBox Header="API Key Name" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.ApiKeyName, Mode=TwoWay}" />
+                                    <TextBox Header="API Key Value" Style="{StaticResource WorkbenchCodeTextBoxStyle}" Text="{Binding SelectedRequest.ApiKeyValue, Mode=TwoWay}" />
+                                    <ComboBox Header="API Key Location" Style="{StaticResource WorkbenchComboBoxStyle}" ItemsSource="{Binding ApiKeyLocations}" SelectedItem="{Binding SelectedRequest.ApiKeyLocation, Mode=TwoWay}" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </PivotItem>
+
+                        <PivotItem Header="Body">
+                            <ScrollViewer>
+                                <StackPanel Padding="0,0,8,0" Spacing="12">
+                                    <ComboBox Header="Body Mode" Style="{StaticResource WorkbenchComboBoxStyle}" ItemsSource="{Binding BodyModes}" SelectedItem="{Binding SelectedRequest.BodyMode, Mode=TwoWay}" />
+                                    <TextBox Header="Content Type" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.ContentType, Mode=TwoWay}" />
+                                    <TextBox
+                                        AcceptsReturn="True"
+                                        Header="Body"
+                                        Height="260"
+                                        Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                                        Text="{Binding SelectedRequest.BodyContent, Mode=TwoWay}"
+                                        TextWrapping="Wrap" />
+                                    <Button Command="{Binding AddFormValueCommand}" HorizontalAlignment="Left" Content="Add Form Value" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+                                    <ListView Background="Transparent" BorderThickness="0" ItemsSource="{Binding SelectedRequest.FormValues}">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Padding="0,0,0,8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="140" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="90" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Header="Key" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Key, Mode=TwoWay}" />
+                                                    <TextBox Grid.Column="1" Header="Value" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Value, Mode=TwoWay}" />
+                                                    <CheckBox Grid.Column="2" Content="Enabled" IsChecked="{Binding IsEnabled, Mode=TwoWay}" VerticalAlignment="Bottom" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </PivotItem>
+
+                        <PivotItem Header="Variables">
+                            <Grid RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="200" />
+                                </Grid.RowDefinitions>
+                                <Button Command="{Binding AddVariableCommand}" HorizontalAlignment="Left" Content="Add Variable" Style="{StaticResource WorkbenchSecondaryButtonStyle}" />
+                                <ListView Grid.Row="1" Background="Transparent" BorderThickness="0" ItemsSource="{Binding SelectedRequest.Variables}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Padding="0,0,0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="80" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox Header="Key" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Key, Mode=TwoWay}" />
+                                                <TextBox Grid.Column="1" Header="Value" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding Value, Mode=TwoWay}" />
+                                                <TextBlock Grid.Column="2" Margin="12,24,0,0" Text="{Binding Scope}" />
+                                                <CheckBox Grid.Column="3" Content="Secret" IsChecked="{Binding IsSecret, Mode=TwoWay}" VerticalAlignment="Bottom" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <TextBlock Grid.Row="2" FontSize="16" FontWeight="SemiBold" Text="Resolved Preview" />
+                                <ListView Grid.Row="3" Background="Transparent" BorderThickness="0" ItemsSource="{Binding VariablePreview}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Padding="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="140" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="110" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Text="{Binding Key}" />
+                                                <TextBlock Grid.Column="1" FontFamily="{ThemeResource CodeFontFamily}" Text="{Binding Value}" />
+                                                <TextBlock Grid.Column="2" Text="{Binding EffectiveScope}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </PivotItem>
+
+                        <PivotItem Header="Pre-Request Script">
+                            <TextBox
+                                AcceptsReturn="True"
+                                Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                                Text="{Binding SelectedRequest.PreRequestScript, Mode=TwoWay}"
+                                TextWrapping="Wrap" />
+                        </PivotItem>
+
+                        <PivotItem Header="Tests">
+                            <TextBox
+                                AcceptsReturn="True"
+                                Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                                Text="{Binding SelectedRequest.TestsScript, Mode=TwoWay}"
+                                TextWrapping="Wrap" />
+                        </PivotItem>
+
+                        <PivotItem Header="Schedule">
+                            <ScrollViewer>
+                                <StackPanel Padding="0,0,8,0" Spacing="12">
+                                    <TextBox Header="Repeat Count" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.RepeatCount, Mode=TwoWay}" />
+                                    <TextBox Header="Delay (ms)" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.DelayMilliseconds, Mode=TwoWay}" />
+                                    <TextBox Header="Interval (ms)" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.IntervalMilliseconds, Mode=TwoWay}" />
+                                    <TextBox Header="Timeout (ms)" Style="{StaticResource WorkbenchTextBoxStyle}" Text="{Binding SelectedRequest.TimeoutMilliseconds, Mode=TwoWay}" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </PivotItem>
+                    </Pivot>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="3" Background="{ThemeResource ShellHairlineBrush}" />
+
+            <Border Grid.Column="4" Background="{ThemeResource ShellPanelBrush}">
+                <Grid Padding="12,12,12,10" RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource WorkbenchPaneTitleStyle}" Text="Response Inspector" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16">
+                            <Border Padding="10,4" Background="{Binding StatusBrush}" CornerRadius="999">
+                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding ResponseStatusText}" />
+                            </Border>
+                            <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding ResponseTimeText}" />
+                            <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding ResponseSizeText}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border
+                        Grid.Row="1"
+                        Padding="12,10"
+                        Background="{ThemeResource ShellPanelAltBrush}"
+                        BorderBrush="{ThemeResource ShellHairlineBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4">
+                                <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="TYPE" />
+                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" FontWeight="SemiBold" Text="{Binding ResponseTypeText}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="DETAILS" />
+                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding ResponseDetailText}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Spacing="4">
+                                <TextBlock Style="{StaticResource WorkbenchMetaLabelStyle}" Text="SUMMARY" />
+                                <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding ResponseSummary}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Pivot Grid.Row="2">
+                        <PivotItem Header="Body">
+                            <TextBox
+                                AcceptsReturn="True"
+                                Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                                Text="{Binding ResponseBody, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </PivotItem>
+                        <PivotItem Header="Headers">
+                            <TextBox
+                                AcceptsReturn="True"
+                                Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                                Text="{Binding ResponseHeaders, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </PivotItem>
+                        <PivotItem Header="Cookies">
+                            <TextBox
+                                AcceptsReturn="True"
+                                Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                                Text="{Binding ResponseCookies, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </PivotItem>
+                        <PivotItem Header="Test Results">
+                            <ListView Background="Transparent" BorderThickness="0" ItemsSource="{Binding LatestTests}">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Padding="6" Spacing="2">
+                                            <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                                            <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding Message}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </PivotItem>
+                        <PivotItem Header="Extracted Variables">
+                            <ListView Background="Transparent" BorderThickness="0" ItemsSource="{Binding LatestRuntimeVariables}">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Padding="6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock FontFamily="{ThemeResource CodeFontFamily}" Text="{Binding Key}" />
+                                            <TextBlock Grid.Column="1" FontFamily="{ThemeResource CodeFontFamily}" Text="{Binding Value}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </PivotItem>
+                        <PivotItem Header="Console">
+                            <ListView Background="Transparent" BorderThickness="0" ItemsSource="{Binding LatestConsoleEntries}">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Padding="6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Level}" />
+                                            <TextBlock Grid.Column="1" FontFamily="{ThemeResource CodeFontFamily}" Text="{Binding Message}" TextWrapping="WrapWholeWords" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </PivotItem>
+                        <PivotItem Header="Raw">
+                            <TextBox
+                                AcceptsReturn="True"
+                                Style="{StaticResource WorkbenchCodeTextBoxStyle}"
+                                Text="{Binding ResponseRaw, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </PivotItem>
+                    </Pivot>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="3" Background="{ThemeResource ShellChromeBrush}" BorderBrush="{ThemeResource ShellHairlineBrush}" BorderThickness="0,1,0,0">
+            <Grid Padding="12,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <TextBlock FontWeight="SemiBold" Text="for-rest" />
+                    <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" Text="workspace state local" />
+                    <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" Text="request execution real" />
+                    <TextBlock Foreground="{ThemeResource ShellMutedTextBrush}" Text="scripts/tests available" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="1" Foreground="{ThemeResource ShellMutedTextBrush}" Text="{Binding ResponseSummary}" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,16 @@
+global using System.Diagnostics;
+global using System.Collections;
+global using System.Net;
+global using System.Net.Http;
+global using System.Net.Http.Headers;
+global using System.Net.Security;
+global using System.Security.Cryptography.X509Certificates;
+global using System.Text;
+global using Microsoft.Extensions.DependencyInjection;
+global using ForRest.Domain;
+global using ForRest.Models;
+global using ForRest.Plugins.Abstractions;
+global using ForRest.Repositories;
+global using ForRest.Scripting;
+global using ForRest.Shared;
+global using Microsoft.Extensions.Logging;
