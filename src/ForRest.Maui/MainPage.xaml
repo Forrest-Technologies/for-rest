@@ -18,36 +18,78 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="1" Style="{StaticResource ChromeBorderStyle}">
-            <Grid ColumnDefinitions="140,92,*,Auto,Auto,Auto,Auto" ColumnSpacing="6">
-                <Border Style="{StaticResource InputBorderStyle}" Padding="8,2"><Picker Title="Environment" ItemsSource="{Binding EnvironmentOptions}" SelectedItem="{Binding SelectedEnvironment}" /></Border>
-                <Border Grid.Column="1" Style="{StaticResource InputBorderStyle}" Padding="8,2"><Picker Title="Method" ItemsSource="{Binding MethodOptions}" SelectedItem="{Binding SelectedMethod}" /></Border>
-                <Border Grid.Column="2" Style="{StaticResource InputBorderStyle}" Padding="8,2"><Entry Placeholder="https://target" Text="{Binding RequestUrl}" /></Border>
-                <Button Grid.Column="3" Text="Send" Style="{StaticResource PrimaryToolbarButtonStyle}" />
-                <Button Grid.Column="4" Text="Save" Style="{StaticResource SubtleToolbarButtonStyle}" />
-                <Button Grid.Column="5" Text="Cancel" Style="{StaticResource SubtleToolbarButtonStyle}" />
-                <Button Grid.Column="6" Text="Format" Style="{StaticResource SubtleToolbarButtonStyle}" />
+        <Grid Grid.Row="1">
+            <Border IsVisible="{Binding IsDesktopLayout}" Style="{StaticResource ChromeBorderStyle}">
+                <Grid ColumnDefinitions="140,92,*,Auto,Auto,Auto,Auto" ColumnSpacing="6">
+                    <Border Style="{StaticResource InputBorderStyle}" Padding="8,2"><Picker Title="Environment" ItemsSource="{Binding EnvironmentOptions}" SelectedItem="{Binding SelectedEnvironment}" /></Border>
+                    <Border Grid.Column="1" Style="{StaticResource InputBorderStyle}" Padding="8,2"><Picker Title="Method" ItemsSource="{Binding MethodOptions}" SelectedItem="{Binding SelectedMethod}" /></Border>
+                    <Border Grid.Column="2" Style="{StaticResource InputBorderStyle}" Padding="8,2"><Entry Placeholder="https://target" Text="{Binding RequestUrl}" /></Border>
+                    <Button Grid.Column="3" Text="Send" Style="{StaticResource PrimaryToolbarButtonStyle}" />
+                    <Button Grid.Column="4" Text="Save" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                    <Button Grid.Column="5" Text="Cancel" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                    <Button Grid.Column="6" Text="Format" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                </Grid>
+            </Border>
+
+            <Border IsVisible="{Binding IsCompactLayout}" Style="{StaticResource ChromeBorderStyle}">
+                <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto,Auto" RowSpacing="6" ColumnSpacing="6">
+                    <Border Style="{StaticResource InputBorderStyle}" Padding="8,2"><Picker Title="Environment" ItemsSource="{Binding EnvironmentOptions}" SelectedItem="{Binding SelectedEnvironment}" /></Border>
+                    <Border Grid.Column="1" Style="{StaticResource InputBorderStyle}" Padding="8,2"><Picker Title="Method" ItemsSource="{Binding MethodOptions}" SelectedItem="{Binding SelectedMethod}" /></Border>
+                    <Button Grid.Column="2" Text="Send" Style="{StaticResource PrimaryToolbarButtonStyle}" />
+
+                    <Border Grid.Row="1" Grid.ColumnSpan="3" Style="{StaticResource InputBorderStyle}" Padding="8,2"><Entry Placeholder="https://target" Text="{Binding RequestUrl}" /></Border>
+
+                    <Grid Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="*,*,*" ColumnSpacing="6">
+                        <Button Text="Save" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                        <Button Grid.Column="1" Text="Cancel" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                        <Button Grid.Column="2" Text="Format" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2" x:Name="WorkbenchHost" SizeChanged="OnWorkbenchHostSizeChanged">
+            <Grid x:Name="WorkbenchGrid" ColumnSpacing="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="{Binding LeftPaneWidth}" />
+                    <ColumnDefinition Width="{Binding LeftSplitterWidth}" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="{Binding RightSplitterWidth}" />
+                    <ColumnDefinition Width="{Binding RightPaneWidth}" />
+                </Grid.ColumnDefinitions>
+
+                <controls:ExplorerPane Grid.Column="0" IsVisible="{Binding IsLeftPaneVisible}" />
+                <BoxView Grid.Column="1" IsVisible="{Binding IsLeftPaneVisible}" Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
+                    <BoxView.GestureRecognizers>
+                        <PanGestureRecognizer PanUpdated="OnLeftSplitterPanUpdated" />
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+                <controls:WorkbenchCenterPane Grid.Column="2" Margin="6,0" />
+                <BoxView Grid.Column="3" IsVisible="{Binding IsRightPaneVisible}" Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
+                    <BoxView.GestureRecognizers>
+                        <PanGestureRecognizer PanUpdated="OnRightSplitterPanUpdated" />
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+                <controls:InspectorPane Grid.Column="4" IsVisible="{Binding IsRightPaneVisible}" />
             </Grid>
-        </Border>
 
-        <Grid Grid.Row="2" x:Name="WorkbenchGrid" ColumnSpacing="0" SizeChanged="OnWorkbenchGridSizeChanged">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="{Binding LeftPaneWidth}" />
-                <ColumnDefinition Width="{Binding LeftSplitterWidth}" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="{Binding RightSplitterWidth}" />
-                <ColumnDefinition Width="{Binding RightPaneWidth}" />
-            </Grid.ColumnDefinitions>
+            <Grid IsVisible="{Binding IsOverlayBackdropVisible}" BackgroundColor="#220F172A" ZIndex="5">
+                <Grid.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnOverlayBackdropTapped" />
+                </Grid.GestureRecognizers>
+            </Grid>
 
-            <controls:ExplorerPane Grid.Column="0" IsVisible="{Binding IsLeftPaneVisible}" />
-            <BoxView Grid.Column="1" IsVisible="{Binding IsLeftPaneVisible}" Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
-                <BoxView.GestureRecognizers><PanGestureRecognizer PanUpdated="OnLeftSplitterPanUpdated" /></BoxView.GestureRecognizers>
-            </BoxView>
-            <controls:WorkbenchCenterPane Grid.Column="2" Margin="6,0" />
-            <BoxView Grid.Column="3" IsVisible="{Binding IsRightPaneVisible}" Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
-                <BoxView.GestureRecognizers><PanGestureRecognizer PanUpdated="OnRightSplitterPanUpdated" /></BoxView.GestureRecognizers>
-            </BoxView>
-            <controls:InspectorPane Grid.Column="4" IsVisible="{Binding IsRightPaneVisible}" />
+            <controls:ExplorerPane IsVisible="{Binding IsExplorerOverlayVisible}"
+                                   WidthRequest="{Binding CompactPaneWidth}"
+                                   HorizontalOptions="Start"
+                                   VerticalOptions="Fill"
+                                   ZIndex="6" />
+
+            <controls:InspectorPane IsVisible="{Binding IsInspectorOverlayVisible}"
+                                    WidthRequest="{Binding CompactPaneWidth}"
+                                    HorizontalOptions="End"
+                                    VerticalOptions="Fill"
+                                    ZIndex="6" />
         </Grid>
 
         <Border Grid.Row="3" Style="{StaticResource ChromeBorderStyle}">

@@ -17,9 +17,19 @@ public partial class App : Application
 	{
 		MainPage mainPage = _services.GetRequiredService<MainPage>();
 
-		return new Window(mainPage)
+		Window window = new(mainPage)
 		{
 			Title = "For-Rest"
 		};
+
+		if (DeviceInfo.Platform == DevicePlatform.WinUI)
+		{
+			window.Width = 1480;
+			window.Height = 920;
+			window.MinimumWidth = 1120;
+			window.MinimumHeight = 720;
+		}
+
+		return window;
 	}
 }

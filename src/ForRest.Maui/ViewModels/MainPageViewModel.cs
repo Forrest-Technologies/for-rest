@@ -12,6 +12,9 @@ public sealed class MainPageViewModel : ObservableObject
 	private const double MinRightPanePixels = 220d;
 	private const double MinCenterPanePixels = 360d;
 	private const double SplitterPixels = 6d;
+	private const double CompactLayoutBreakpoint = 980d;
+	private const double CompactPaneMinWidth = 280d;
+	private const double CompactPaneMaxWidth = 420d;
 
 	private readonly Color _methodGet = Color.FromArgb("#1565C0");
 	private readonly Color _methodPost = Color.FromArgb("#2E7D32");
@@ -23,8 +26,12 @@ public sealed class MainPageViewModel : ObservableObject
 	private double _rightPanePixels = DefaultRightPanePixels;
 	private double _leftRestorePixels = DefaultLeftPanePixels;
 	private double _rightRestorePixels = DefaultRightPanePixels;
+	private double _workbenchWidth = 1280d;
 	private bool _leftPaneCollapsed;
 	private bool _rightPaneCollapsed;
+	private bool _isCompactLayout;
+	private bool _isExplorerOverlayOpen;
+	private bool _isInspectorOverlayOpen;
 	private string _selectedWorkspace;
 	private string _selectedEnvironment;
 	private string _selectedMethod;
@@ -238,17 +245,36 @@ public sealed class MainPageViewModel : ObservableObject
 		set => SetProperty(ref _responseState, value);
 	}
 
-	public bool IsLeftPaneVisible => !_leftPaneCollapsed;
+	public bool IsCompactLayout => _isCompactLayout;
 
-	public bool IsRightPaneVisible => !_rightPaneCollapsed;
+	public bool IsDesktopLayout => !_isCompactLayout;
 
-	public GridLength LeftPaneWidth => new(_leftPaneCollapsed ? 0d : _leftPanePixels, GridUnitType.Absolute);
+	public bool IsLeftPaneVisible => !_isCompactLayout && !_leftPaneCollapsed;
 
-	public GridLength RightPaneWidth => new(_rightPaneCollapsed ? 0d : _rightPanePixels, GridUnitType.Absolute);
+	public bool IsRightPaneVisible => !_isCompactLayout && !_rightPaneCollapsed;
 
-	public GridLength LeftSplitterWidth => new(_leftPaneCollapsed ? 0d : SplitterPixels, GridUnitType.Absolute);
+	public bool IsExplorerOverlayVisible => _isCompactLayout && _isExplorerOverlayOpen;
 
-	public GridLength RightSplitterWidth => new(_rightPaneCollapsed ? 0d : SplitterPixels, GridUnitType.Absolute);
+	public bool IsInspectorOverlayVisible => _isCompactLayout && _isInspectorOverlayOpen;
+
+	public bool IsOverlayBackdropVisible => IsExplorerOverlayVisible || IsInspectorOverlayVisible;
+
+	public double CompactPaneWidth
+	{
+		get
+		{
+			double available = Math.Max(CompactPaneMinWidth, _workbenchWidth - 20d);
+			return Math.Min(CompactPaneMaxWidth, available);
+		}
+	}
+
+	public GridLength LeftPaneWidth => new(IsLeftPaneVisible ? _leftPanePixels : 0d, GridUnitType.Absolute);
+
+	public GridLength RightPaneWidth => new(IsRightPaneVisible ? _rightPanePixels : 0d, GridUnitType.Absolute);
+
+	public GridLength LeftSplitterWidth => new(IsLeftPaneVisible ? SplitterPixels : 0d, GridUnitType.Absolute);
+
+	public GridLength RightSplitterWidth => new(IsRightPaneVisible ? SplitterPixels : 0d, GridUnitType.Absolute);
 
 	public string WorkspaceBadge => SelectedWorkspace;
 
@@ -258,7 +284,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public string OpenTabsStatus => $"{OpenDocuments.Count} request tabs";
 
-	public string TimingStatus => "Phase 1 shell";
+	public string TimingStatus => _isCompactLayout ? "Compact pane layout" : "Desktop pane layout";
 
 	public bool IsExplorerTabVisible => IsTabSelected(LeftPaneTabs, "explorer");
 
@@ -294,6 +320,15 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public void ToggleLeftPane()
 	{
+		if (_isCompactLayout)
+		{
+			bool nextState = !_isExplorerOverlayOpen;
+			_isExplorerOverlayOpen = nextState;
+			_isInspectorOverlayOpen = false;
+			NotifyOverlayChanged();
+			return;
+		}
+
 		if (_leftPaneCollapsed)
 		{
 			_leftPaneCollapsed = false;
@@ -310,6 +345,15 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public void ToggleRightPane()
 	{
+		if (_isCompactLayout)
+		{
+			bool nextState = !_isInspectorOverlayOpen;
+			_isInspectorOverlayOpen = nextState;
+			_isExplorerOverlayOpen = false;
+			NotifyOverlayChanged();
+			return;
+		}
+
 		if (_rightPaneCollapsed)
 		{
 			_rightPaneCollapsed = false;
@@ -324,9 +368,21 @@ public sealed class MainPageViewModel : ObservableObject
 		NotifyPaneLayoutChanged();
 	}
 
+	public void DismissOverlays()
+	{
+		if (!_isCompactLayout || (!_isExplorerOverlayOpen && !_isInspectorOverlayOpen))
+		{
+			return;
+		}
+
+		_isExplorerOverlayOpen = false;
+		_isInspectorOverlayOpen = false;
+		NotifyOverlayChanged();
+	}
+
 	public void ResizeLeftPane(double requestedWidth, double totalWidth)
 	{
-		if (_leftPaneCollapsed)
+		if (_isCompactLayout || _leftPaneCollapsed)
 		{
 			return;
 		}
@@ -337,7 +393,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public void ResizeRightPane(double requestedWidth, double totalWidth)
 	{
-		if (_rightPaneCollapsed)
+		if (_isCompactLayout || _rightPaneCollapsed)
 		{
 			return;
 		}
@@ -346,9 +402,48 @@ public sealed class MainPageViewModel : ObservableObject
 		NotifyPaneLayoutChanged();
 	}
 
+	public void UpdateLayoutMode(double availableWidth)
+	{
+		if (availableWidth <= 0)
+		{
+			return;
+		}
+
+		_workbenchWidth = availableWidth;
+		bool isCompact = availableWidth < CompactLayoutBreakpoint;
+		bool layoutChanged = _isCompactLayout != isCompact;
+		_isCompactLayout = isCompact;
+
+		if (!_isCompactLayout)
+		{
+			_isExplorerOverlayOpen = false;
+			_isInspectorOverlayOpen = false;
+		}
+		else if (layoutChanged)
+		{
+			_isExplorerOverlayOpen = false;
+			_isInspectorOverlayOpen = false;
+		}
+
+		OnPropertyChanged(nameof(IsCompactLayout));
+		OnPropertyChanged(nameof(IsDesktopLayout));
+		OnPropertyChanged(nameof(CompactPaneWidth));
+		OnPropertyChanged(nameof(TimingStatus));
+
+		if (!_isCompactLayout)
+		{
+			ConstrainPaneLayout(availableWidth);
+		}
+		else
+		{
+			NotifyPaneLayoutChanged();
+			NotifyOverlayChanged();
+		}
+	}
+
 	public void ConstrainPaneLayout(double totalWidth)
 	{
-		if (totalWidth <= 0)
+		if (_isCompactLayout || totalWidth <= 0)
 		{
 			return;
 		}
@@ -488,5 +583,12 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(RightPaneWidth));
 		OnPropertyChanged(nameof(LeftSplitterWidth));
 		OnPropertyChanged(nameof(RightSplitterWidth));
+	}
+
+	private void NotifyOverlayChanged()
+	{
+		OnPropertyChanged(nameof(IsExplorerOverlayVisible));
+		OnPropertyChanged(nameof(IsInspectorOverlayVisible));
+		OnPropertyChanged(nameof(IsOverlayBackdropVisible));
 	}
 }

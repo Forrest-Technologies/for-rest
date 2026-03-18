@@ -15,9 +15,9 @@ public partial class MainPage : ContentPage
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
 
-	private void OnWorkbenchGridSizeChanged(object? sender, EventArgs e)
+	private void OnWorkbenchHostSizeChanged(object? sender, EventArgs e)
 	{
-		ViewModel.ConstrainPaneLayout(WorkbenchGrid.Width);
+		ViewModel.UpdateLayoutMode(WorkbenchHost.Width);
 	}
 
 	private void OnToggleLeftPaneClicked(object? sender, EventArgs e)
@@ -32,6 +32,11 @@ public partial class MainPage : ContentPage
 
 	private void OnLeftSplitterPanUpdated(object? sender, PanUpdatedEventArgs e)
 	{
+		if (!ViewModel.IsDesktopLayout)
+		{
+			return;
+		}
+
 		switch (e.StatusType)
 		{
 			case GestureStatus.Started:
@@ -45,6 +50,11 @@ public partial class MainPage : ContentPage
 
 	private void OnRightSplitterPanUpdated(object? sender, PanUpdatedEventArgs e)
 	{
+		if (!ViewModel.IsDesktopLayout)
+		{
+			return;
+		}
+
 		switch (e.StatusType)
 		{
 			case GestureStatus.Started:
@@ -54,5 +64,10 @@ public partial class MainPage : ContentPage
 				ViewModel.ResizeRightPane(_rightPaneWidthOnDragStart - e.TotalX, WorkbenchGrid.Width);
 				break;
 		}
+	}
+
+	private void OnOverlayBackdropTapped(object? sender, TappedEventArgs e)
+	{
+		ViewModel.DismissOverlays();
 	}
 }
