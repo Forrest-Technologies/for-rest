@@ -9,9 +9,12 @@ Date: 2026-03-18
 - Left and right panes use absolute pixel widths while the center pane remains star-sized so the active drafting surface stays dominant.
 - Splitters are implemented with `PanGestureRecognizer` and clamp against minimum left, center, and right widths to keep the layout usable while dragging.
 - Collapse and expand are stateful in the page view-model so width restoration later can be persisted without reworking the layout model.
+- The shell is forced to a light theme in Phase 1 to keep the visual direction aligned with the requested white, textual reference.
+- The command lane stays compact and request-focused, while the full center and right tab sets are present as shell placeholders so the pane system feels real without pulling in deeper product work.
 
 ## Why This Fits Phase 1
 
 - It delivers a real pane system now instead of static columns.
 - It keeps the shell compact, text-first, and obvious about pane boundaries.
 - It avoids speculative infrastructure while leaving a clean path for persisting workspace-specific pane widths later.
+- It keeps the editing surfaces usable now with MAUI `Editor` controls, which is enough to validate the shell before replacing internals with a richer editor host.

@@ -6,17 +6,17 @@ namespace ForRest.Maui.ViewModels;
 
 public sealed class MainPageViewModel : ObservableObject
 {
-	private const double DefaultLeftPanePixels = 304d;
-	private const double DefaultRightPanePixels = 340d;
+	private const double DefaultLeftPanePixels = 288d;
+	private const double DefaultRightPanePixels = 320d;
 	private const double MinLeftPanePixels = 220d;
-	private const double MinRightPanePixels = 240d;
+	private const double MinRightPanePixels = 220d;
 	private const double MinCenterPanePixels = 360d;
 	private const double SplitterPixels = 6d;
 
 	private readonly Color _methodGet = Color.FromArgb("#1565C0");
 	private readonly Color _methodPost = Color.FromArgb("#2E7D32");
-	private readonly Color _methodPut = Color.FromArgb("#00838F");
-	private readonly Color _methodDelete = Color.FromArgb("#C62828");
+	private readonly Color _methodPut = Color.FromArgb("#8C4B0F");
+	private readonly Color _methodDelete = Color.FromArgb("#B03C36");
 	private readonly Color _methodOpt = Color.FromArgb("#616161");
 
 	private double _leftPanePixels = DefaultLeftPanePixels;
@@ -32,6 +32,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _requestName;
 	private string _requestNotes;
 	private string _bodyEditorText;
+	private string _preRequestEditorText;
 	private string _testsEditorText;
 	private string _responseBodyText;
 	private string _responseRawText;
@@ -47,7 +48,7 @@ public sealed class MainPageViewModel : ObservableObject
 		];
 		EnvironmentOptions =
 		[
-			"Develop",
+			"Local",
 			"Stage",
 			"Prod"
 		];
@@ -64,10 +65,11 @@ public sealed class MainPageViewModel : ObservableObject
 		_selectedEnvironment = EnvironmentOptions[0];
 		_selectedMethod = "POST";
 		_requestUrl = "https://{{host}}/echo/post?age={{age}}&country={{country}}";
-		_requestName = "NativeRest Echo POST";
-		_requestNotes = "Minimal shell draft. Keep the structure compact and textual before adding deeper request features.";
+		_requestName = "Echo POST";
+		_requestNotes = "Phase 1 shell only. Keep the layout compact, textual, and pane-driven before adding execution features.";
 		_bodyEditorText = "{\n  \"firstName\": \"Ada\",\n  \"country\": \"Spain\",\n  \"age\": 30\n}";
-		_testsEditorText = "# Check response time\nresponse.time < 2000\n\n# Check status\nresponse.status == 200";
+		_preRequestEditorText = "vars.country = env.country ?? \"Spain\"\nvars.age = 30";
+		_testsEditorText = "response.status == 200\nresponse.time < 2000";
 		_responseBodyText = "{\n  \"args\": {\n    \"age\": \"30\",\n    \"country\": \"Spain\"\n  },\n  \"json\": {\n    \"firstName\": \"Ada\",\n    \"country\": \"Spain\",\n    \"age\": 30\n  }\n}";
 		_responseRawText = "HTTP/1.1 200 OK\ncontent-type: application/json\ncontent-length: 504\n\n{\n  \"args\": {\n    \"age\": \"30\",\n    \"country\": \"Spain\"\n  }\n}";
 		_responseState = "Idle";
@@ -80,14 +82,19 @@ public sealed class MainPageViewModel : ObservableObject
 
 		OpenDocuments =
 		[
-			new RequestDocumentViewModel("Echo POST", "POST", "Active request", true, true),
-			new RequestDocumentViewModel("Text XML", "GET", "Secondary placeholder", false)
+			new RequestDocumentViewModel("Echo POST", "POST", "Current request surface", true, true),
+			new RequestDocumentViewModel("Text XML", "GET", "Secondary request tab", false)
 		];
 
 		CenterTabs =
 		[
 			new PaneTabViewModel("request", "Request", true),
+			new PaneTabViewModel("params", "Params"),
+			new PaneTabViewModel("headers", "Headers"),
+			new PaneTabViewModel("auth", "Auth"),
 			new PaneTabViewModel("body", "Body"),
+			new PaneTabViewModel("variables", "Variables"),
+			new PaneTabViewModel("pre-request", "Pre-Request Script"),
 			new PaneTabViewModel("tests", "Tests")
 		];
 
@@ -95,23 +102,26 @@ public sealed class MainPageViewModel : ObservableObject
 		[
 			new PaneTabViewModel("body", "Body", true),
 			new PaneTabViewModel("headers", "Headers"),
+			new PaneTabViewModel("cookies", "Cookies"),
+			new PaneTabViewModel("test-results", "Test Results"),
+			new PaneTabViewModel("extracted", "Extracted Variables"),
 			new PaneTabViewModel("raw", "Raw")
 		];
 
 		ExplorerItems =
 		[
 			new ExplorerItemViewModel("GET", "Get Test Xml", "Simple XML smoke request", _methodGet),
-			new ExplorerItemViewModel("POST", "NativeRest Echo POST", "Multipart and JSON echo", _methodPost, true),
-			new ExplorerItemViewModel("GET", "NativeRest Load Test", "Textual request draft", _methodGet),
-			new ExplorerItemViewModel("POST", "Cookies Test", "Cookie handling stub", _methodPost),
+			new ExplorerItemViewModel("POST", "Echo POST", "Current working draft", _methodPost, true),
+			new ExplorerItemViewModel("GET", "Load Test", "Text-heavy placeholder request", _methodGet),
+			new ExplorerItemViewModel("POST", "Cookies Test", "Cookie flow placeholder", _methodPost),
 			new ExplorerItemViewModel("PUT", "New PUT Request", "Empty request shell", _methodPut),
 			new ExplorerItemViewModel("DEL", "Delete Users", "Dangerous placeholder", _methodDelete),
-			new ExplorerItemViewModel("OPT", "Post Form Data", "Form preview", _methodOpt)
+			new ExplorerItemViewModel("OPT", "Post Form Data", "Options and form preview", _methodOpt)
 		];
 
 		HistoryItems =
 		[
-			new HistoryEntryViewModel("POST", "NativeRest Echo POST", "200 OK in 9.06 ms", "Today", _methodPost),
+			new HistoryEntryViewModel("POST", "Echo POST", "200 OK in 9.06 ms", "Today", _methodPost),
 			new HistoryEntryViewModel("GET", "Get Test Xml", "200 OK in 18.44 ms", "Today", _methodGet),
 			new HistoryEntryViewModel("PUT", "New PUT Request", "No execution yet", "Draft", _methodPut)
 		];
@@ -159,7 +169,13 @@ public sealed class MainPageViewModel : ObservableObject
 	public string SelectedEnvironment
 	{
 		get => _selectedEnvironment;
-		set => SetProperty(ref _selectedEnvironment, value);
+		set
+		{
+			if (SetProperty(ref _selectedEnvironment, value))
+			{
+				OnPropertyChanged(nameof(EnvironmentBadge));
+			}
+		}
 	}
 
 	public string SelectedMethod
@@ -190,6 +206,12 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		get => _bodyEditorText;
 		set => SetProperty(ref _bodyEditorText, value);
+	}
+
+	public string PreRequestEditorText
+	{
+		get => _preRequestEditorText;
+		set => SetProperty(ref _preRequestEditorText, value);
 	}
 
 	public string TestsEditorText
@@ -230,13 +252,13 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public string WorkspaceBadge => SelectedWorkspace;
 
-	public string LayoutSummary => $"L {_leftPanePixels:0}px  C dominant  R {_rightPanePixels:0}px";
+	public string EnvironmentBadge => $"Env {SelectedEnvironment}";
 
-	public string RequestStateStatus => "Idle";
+	public string RequestStateStatus => "State: Idle";
 
 	public string OpenTabsStatus => $"{OpenDocuments.Count} request tabs";
 
-	public string TimingStatus => "Pane view";
+	public string TimingStatus => "Phase 1 shell";
 
 	public bool IsExplorerTabVisible => IsTabSelected(LeftPaneTabs, "explorer");
 
@@ -244,13 +266,29 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool IsRequestTabVisible => IsTabSelected(CenterTabs, "request");
 
+	public bool IsParamsTabVisible => IsTabSelected(CenterTabs, "params");
+
+	public bool IsHeadersTabVisible => IsTabSelected(CenterTabs, "headers");
+
+	public bool IsAuthTabVisible => IsTabSelected(CenterTabs, "auth");
+
 	public bool IsBodyTabVisible => IsTabSelected(CenterTabs, "body");
+
+	public bool IsVariablesTabVisible => IsTabSelected(CenterTabs, "variables");
+
+	public bool IsPreRequestTabVisible => IsTabSelected(CenterTabs, "pre-request");
 
 	public bool IsTestsTabVisible => IsTabSelected(CenterTabs, "tests");
 
 	public bool IsInspectorBodyVisible => IsTabSelected(RightPaneTabs, "body");
 
 	public bool IsInspectorHeadersVisible => IsTabSelected(RightPaneTabs, "headers");
+
+	public bool IsInspectorCookiesVisible => IsTabSelected(RightPaneTabs, "cookies");
+
+	public bool IsInspectorTestResultsVisible => IsTabSelected(RightPaneTabs, "test-results");
+
+	public bool IsInspectorExtractedVariablesVisible => IsTabSelected(RightPaneTabs, "extracted");
 
 	public bool IsInspectorRawVisible => IsTabSelected(RightPaneTabs, "raw");
 
@@ -349,7 +387,12 @@ public sealed class MainPageViewModel : ObservableObject
 
 		SetSelected(CenterTabs, tab);
 		OnPropertyChanged(nameof(IsRequestTabVisible));
+		OnPropertyChanged(nameof(IsParamsTabVisible));
+		OnPropertyChanged(nameof(IsHeadersTabVisible));
+		OnPropertyChanged(nameof(IsAuthTabVisible));
 		OnPropertyChanged(nameof(IsBodyTabVisible));
+		OnPropertyChanged(nameof(IsVariablesTabVisible));
+		OnPropertyChanged(nameof(IsPreRequestTabVisible));
 		OnPropertyChanged(nameof(IsTestsTabVisible));
 	}
 
@@ -363,6 +406,9 @@ public sealed class MainPageViewModel : ObservableObject
 		SetSelected(RightPaneTabs, tab);
 		OnPropertyChanged(nameof(IsInspectorBodyVisible));
 		OnPropertyChanged(nameof(IsInspectorHeadersVisible));
+		OnPropertyChanged(nameof(IsInspectorCookiesVisible));
+		OnPropertyChanged(nameof(IsInspectorTestResultsVisible));
+		OnPropertyChanged(nameof(IsInspectorExtractedVariablesVisible));
 		OnPropertyChanged(nameof(IsInspectorRawVisible));
 	}
 
@@ -442,6 +488,5 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(RightPaneWidth));
 		OnPropertyChanged(nameof(LeftSplitterWidth));
 		OnPropertyChanged(nameof(RightSplitterWidth));
-		OnPropertyChanged(nameof(LayoutSummary));
 	}
 }

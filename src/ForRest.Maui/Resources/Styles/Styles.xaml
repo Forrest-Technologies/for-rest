@@ -21,9 +21,9 @@
 
     <Style TargetType="Button">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="Padding" Value="10,7" />
-        <Setter Property="MinimumHeightRequest" Value="34" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="9,6" />
+        <Setter Property="MinimumHeightRequest" Value="32" />
         <Setter Property="BorderWidth" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource SurfaceMutedLight}, Dark={StaticResource SurfaceMutedDark}}" />
@@ -33,7 +33,7 @@
 
     <Style TargetType="Entry">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource TextPrimaryLight}, Dark={StaticResource TextPrimaryDark}}" />
         <Setter Property="PlaceholderColor" Value="{AppThemeBinding Light={StaticResource TextMutedLight}, Dark={StaticResource TextMutedDark}}" />
         <Setter Property="BackgroundColor" Value="Transparent" />
@@ -42,7 +42,7 @@
 
     <Style TargetType="Picker">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource TextPrimaryLight}, Dark={StaticResource TextPrimaryDark}}" />
         <Setter Property="TitleColor" Value="{AppThemeBinding Light={StaticResource TextMutedLight}, Dark={StaticResource TextMutedDark}}" />
         <Setter Property="BackgroundColor" Value="Transparent" />
@@ -54,7 +54,7 @@
     </Style>
 
     <Style x:Key="ChromeBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="Padding" Value="8,6" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource SurfaceRaisedLight}, Dark={StaticResource SurfaceRaisedDark}}" />
         <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource DividerLight}, Dark={StaticResource DividerDark}}" />
     </Style>
@@ -66,32 +66,31 @@
     </Style>
 
     <Style x:Key="SectionBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="8" />
-        <Setter Property="Margin" Value="0,0,0,10" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource SurfaceLight}, Dark={StaticResource SurfaceRaisedDark}}" />
         <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource BorderLight}, Dark={StaticResource BorderDark}}" />
     </Style>
 
     <Style x:Key="InputBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="8,4" />
-        <Setter Property="BackgroundColor" Value="{StaticResource SurfaceLight}" />
-        <Setter Property="Stroke" Value="{StaticResource BorderLight}" />
-        <Setter Property="StrokeThickness" Value="1" />
-    </Style>
-
-    <Style x:Key="ListRowBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="8,7" />
-        <Setter Property="Margin" Value="0" />
+        <Setter Property="Padding" Value="8,3" />
         <Setter Property="BackgroundColor" Value="{StaticResource SurfaceLight}" />
         <Setter Property="Stroke" Value="{StaticResource DividerLight}" />
         <Setter Property="StrokeThickness" Value="1" />
     </Style>
 
+    <Style x:Key="ListRowBorderStyle" TargetType="Border">
+        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="StrokeThickness" Value="0" />
+    </Style>
+
     <Style x:Key="DenseTabButtonStyle" TargetType="Button">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="Padding" Value="10,6" />
-        <Setter Property="MinimumHeightRequest" Value="32" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="MinimumHeightRequest" Value="28" />
         <Setter Property="BorderWidth" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BackgroundColor" Value="Transparent" />
@@ -101,9 +100,9 @@
 
     <Style x:Key="DocumentTabButtonStyle" TargetType="Button">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="Padding" Value="12,7" />
-        <Setter Property="MinimumHeightRequest" Value="34" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="MinimumHeightRequest" Value="30" />
         <Setter Property="BorderWidth" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource SurfaceMutedLight}, Dark={StaticResource SurfaceMutedDark}}" />
@@ -113,9 +112,9 @@
 
     <Style x:Key="PrimaryToolbarButtonStyle" TargetType="Button">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="Padding" Value="10,7" />
-        <Setter Property="MinimumHeightRequest" Value="34" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="MinimumHeightRequest" Value="32" />
         <Setter Property="BorderWidth" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource AccentLight}, Dark={StaticResource AccentDark}}" />
@@ -125,9 +124,9 @@
 
     <Style x:Key="SubtleToolbarButtonStyle" TargetType="Button">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="Padding" Value="10,7" />
-        <Setter Property="MinimumHeightRequest" Value="34" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="9,6" />
+        <Setter Property="MinimumHeightRequest" Value="32" />
         <Setter Property="BorderWidth" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource SurfaceRaisedLight}, Dark={StaticResource SurfaceRaisedDark}}" />
@@ -137,19 +136,19 @@
 
     <Style x:Key="PaneTitleStyle" TargetType="Label">
         <Setter Property="FontFamily" Value="OpenSansSemibold" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource TextPrimaryLight}, Dark={StaticResource TextPrimaryDark}}" />
     </Style>
 
     <Style x:Key="PaneMetaStyle" TargetType="Label">
         <Setter Property="FontFamily" Value="OpenSansRegular" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource TextSecondaryLight}, Dark={StaticResource TextSecondaryDark}}" />
     </Style>
 
     <Style x:Key="SectionTitleStyle" TargetType="Label">
         <Setter Property="FontFamily" Value="OpenSansSemibold" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource TextSecondaryLight}, Dark={StaticResource TextSecondaryDark}}" />
     </Style>
 

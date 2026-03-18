@@ -6,11 +6,10 @@
 
     <Border Style="{StaticResource PaneBorderStyle}">
         <Grid RowDefinitions="Auto,Auto,*">
-            <Grid Padding="10,8"
-                  ColumnDefinitions="*,Auto,Auto">
+            <Grid Padding="10,8" ColumnDefinitions="*,Auto,Auto">
                 <VerticalStackLayout Spacing="1">
                     <Label Text="Response Inspector" Style="{StaticResource PaneTitleStyle}" />
-                    <Label Text="Status, headers, and body preview" Style="{StaticResource PaneMetaStyle}" />
+                    <Label Text="Status, headers, and textual result panes" Style="{StaticResource PaneMetaStyle}" />
                 </VerticalStackLayout>
                 <Label Grid.Column="1"
                        VerticalTextAlignment="Center"
@@ -23,10 +22,8 @@
                         Clicked="OnHideClicked" />
             </Grid>
 
-            <ScrollView Grid.Row="1"
-                        Orientation="Horizontal"
-                        HorizontalScrollBarVisibility="Never">
-                <HorizontalStackLayout Padding="8,0,8,6"
+            <ScrollView Grid.Row="1" Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                <HorizontalStackLayout Padding="8,4,8,6"
                                        Spacing="4"
                                        BindableLayout.ItemsSource="{Binding RightPaneTabs}">
                     <BindableLayout.ItemTemplate>
@@ -59,28 +56,66 @@
                 </ScrollView>
 
                 <ScrollView IsVisible="{Binding IsInspectorHeadersVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10"
-                                         Spacing="0">
-                        <Border Style="{StaticResource SectionBorderStyle}">
-                            <Grid ColumnDefinitions="130,*" RowDefinitions="Auto">
-                                <Label Text="Header" Style="{StaticResource SectionTitleStyle}" />
-                                <Label Grid.Column="1" Text="Value" Style="{StaticResource SectionTitleStyle}" />
-                            </Grid>
-                        </Border>
+                    <VerticalStackLayout Padding="10,0,10,10" Spacing="0">
+                        <Grid ColumnDefinitions="130,*" Padding="0,0,0,6">
+                            <Label Text="Header" Style="{StaticResource SectionTitleStyle}" />
+                            <Label Grid.Column="1" Text="Value" Style="{StaticResource SectionTitleStyle}" />
+                        </Grid>
 
-                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding ResponseHeaderRows}"
-                                             Spacing="0">
+                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding ResponseHeaderRows}" Spacing="0">
                             <BindableLayout.ItemTemplate>
                                 <DataTemplate>
                                     <Border Style="{StaticResource ListRowBorderStyle}">
-                                        <Grid ColumnDefinitions="130,*">
-                                            <Label Text="{Binding Name}" FontFamily="OpenSansSemibold" FontSize="12" />
-                                            <Label Grid.Column="1" Text="{Binding Value}" />
+                                        <Grid RowDefinitions="Auto,1">
+                                            <Grid ColumnDefinitions="130,*">
+                                                <Label Text="{Binding Name}" FontFamily="OpenSansSemibold" FontSize="12" />
+                                                <Label Grid.Column="1" Text="{Binding Value}" />
+                                            </Grid>
+                                            <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
                             </BindableLayout.ItemTemplate>
                         </VerticalStackLayout>
+                    </VerticalStackLayout>
+                </ScrollView>
+
+                <ScrollView IsVisible="{Binding IsInspectorCookiesVisible}">
+                    <VerticalStackLayout Padding="10,0,10,10" Spacing="6">
+                        <Label Text="Cookies" Style="{StaticResource PaneTitleStyle}" />
+                        <Label Text="Cookie capture and storage are intentionally deferred. This tab is in place so the right pane structure matches the intended tool layout." Style="{StaticResource PaneMetaStyle}" />
+                    </VerticalStackLayout>
+                </ScrollView>
+
+                <ScrollView IsVisible="{Binding IsInspectorTestResultsVisible}">
+                    <VerticalStackLayout Padding="10,0,10,10" Spacing="0">
+                        <Label Text="Test Results" Style="{StaticResource PaneTitleStyle}" />
+                        <Label Margin="0,2,0,10" Text="Assertions will report here once request execution is wired in." Style="{StaticResource PaneMetaStyle}" />
+                        <Border Style="{StaticResource ListRowBorderStyle}">
+                            <Grid RowDefinitions="Auto,1">
+                                <Grid ColumnDefinitions="90,*">
+                                    <Label Text="State" FontFamily="OpenSansSemibold" FontSize="12" />
+                                    <Label Grid.Column="1" Text="No tests executed" />
+                                </Grid>
+                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
+                            </Grid>
+                        </Border>
+                    </VerticalStackLayout>
+                </ScrollView>
+
+                <ScrollView IsVisible="{Binding IsInspectorExtractedVariablesVisible}">
+                    <VerticalStackLayout Padding="10,0,10,10" Spacing="0">
+                        <Label Text="Extracted Variables" Style="{StaticResource PaneTitleStyle}" />
+                        <Label Margin="0,2,0,10" Text="Response-to-variable extraction will appear here later." Style="{StaticResource PaneMetaStyle}" />
+                        <Border Style="{StaticResource ListRowBorderStyle}">
+                            <Grid RowDefinitions="Auto,1">
+                                <Grid ColumnDefinitions="130,*">
+                                    <Label Text="lastId" FontFamily="OpenSansSemibold" FontSize="12" />
+                                    <Label Grid.Column="1" Text="pending" />
+                                </Grid>
+                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
+                            </Grid>
+                        </Border>
                     </VerticalStackLayout>
                 </ScrollView>
 
