@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ForRest.Maui.Controls.ExplorerPane">
+
+    <Border Style="{StaticResource PaneBorderStyle}">
+        <Grid RowDefinitions="Auto,Auto,Auto,*">
+            <Grid Padding="10,8" ColumnDefinitions="*,Auto">
+                <VerticalStackLayout Spacing="1">
+                    <Label Text="Explorer" Style="{StaticResource PaneTitleStyle}" />
+                    <Label Text="workspace://local/demo" Style="{StaticResource PaneMetaStyle}" />
+                </VerticalStackLayout>
+                <Button Grid.Column="1" Text="Hide" Style="{StaticResource DenseTabButtonStyle}" Clicked="OnHideClicked" />
+            </Grid>
+
+            <ScrollView Grid.Row="1" Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                <HorizontalStackLayout Padding="8,0,8,8" Spacing="4" BindableLayout.ItemsSource="{Binding LeftPaneTabs}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate>
+                            <Button Text="{Binding Title}" Style="{StaticResource DenseTabButtonStyle}" Clicked="OnTabClicked" CommandParameter="{Binding .}">
+                                <Button.Triggers>
+                                    <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
+                                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource AccentSoftLight}, Dark={StaticResource AccentSoftDark}}" />
+                                        <Setter Property="BorderColor" Value="{AppThemeBinding Light={StaticResource DividerLight}, Dark={StaticResource DividerDark}}" />
+                                        <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource AccentStrongLight}, Dark={StaticResource AccentStrongDark}}" />
+                                    </DataTrigger>
+                                </Button.Triggers>
+                            </Button>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </HorizontalStackLayout>
+            </ScrollView>
+
+            <Border Grid.Row="2" Style="{StaticResource SectionBorderStyle}" Margin="8,0,8,8" Padding="8,4">
+                <Entry Placeholder="Filter requests or history" />
+            </Border>
+
+            <Grid Grid.Row="3">
+                <ScrollView IsVisible="{Binding IsExplorerTabVisible}">
+                    <VerticalStackLayout Padding="8,0,8,8" Spacing="8">
+                        <VerticalStackLayout Spacing="6" BindableLayout.ItemsSource="{Binding ExplorerItems}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource ListRowBorderStyle}">
+                                        <Border.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnItemTapped" CommandParameter="{Binding .}" />
+                                        </Border.GestureRecognizers>
+                                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                            <Border Padding="7,2" BackgroundColor="{Binding BadgeBackground}" StrokeThickness="0">
+                                                <Label Text="{Binding Kind}" FontFamily="OpenSansSemibold" FontSize="10" TextColor="White" />
+                                            </Border>
+                                            <VerticalStackLayout Grid.Column="1" Spacing="1">
+                                                <Label Text="{Binding Title}" FontFamily="OpenSansSemibold" FontSize="12" />
+                                                <Label Text="{Binding Detail}" Style="{StaticResource PaneMetaStyle}" />
+                                            </VerticalStackLayout>
+                                            <Label Grid.Column="2" Text=">" FontSize="16" VerticalOptions="Center" TextColor="{AppThemeBinding Light={StaticResource TextMutedLight}, Dark={StaticResource TextMutedDark}}" />
+                                        </Grid>
+                                        <Border.Triggers>
+                                            <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                                <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource AccentSoftLight}, Dark={StaticResource AccentSoftDark}}" />
+                                                <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource AccentLight}, Dark={StaticResource AccentDark}}" />
+                                            </DataTrigger>
+                                        </Border.Triggers>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+
+                        <Border Style="{StaticResource SectionBorderStyle}" Padding="8">
+                            <VerticalStackLayout Spacing="8">
+                                <Label Text="Recent History" Style="{StaticResource SectionTitleStyle}" />
+                                <VerticalStackLayout Spacing="0" BindableLayout.ItemsSource="{Binding HistoryItems}">
+                                    <BindableLayout.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource ListRowBorderStyle}">
+                                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                                    <Border Padding="6,2" BackgroundColor="{Binding BadgeBackground}" StrokeThickness="0">
+                                                        <Label Text="{Binding Method}" FontFamily="OpenSansSemibold" FontSize="10" TextColor="White" />
+                                                    </Border>
+                                                    <VerticalStackLayout Grid.Column="1" Spacing="1">
+                                                        <Label Text="{Binding Title}" FontFamily="OpenSansSemibold" FontSize="12" />
+                                                        <Label Text="{Binding Summary}" Style="{StaticResource PaneMetaStyle}" />
+                                                    </VerticalStackLayout>
+                                                    <Label Grid.Column="2" Text="{Binding When}" Style="{StaticResource PaneMetaStyle}" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </BindableLayout.ItemTemplate>
+                                </VerticalStackLayout>
+                            </VerticalStackLayout>
+                        </Border>
+                    </VerticalStackLayout>
+                </ScrollView>
+
+                <ScrollView IsVisible="{Binding IsHistoryTabVisible}">
+                    <VerticalStackLayout Padding="8,0,8,8" Spacing="8" BindableLayout.ItemsSource="{Binding HistoryItems}">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource ListRowBorderStyle}">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                        <Border Padding="6,2" BackgroundColor="{Binding BadgeBackground}" StrokeThickness="0">
+                                            <Label Text="{Binding Method}" FontFamily="OpenSansSemibold" FontSize="10" TextColor="White" />
+                                        </Border>
+                                        <VerticalStackLayout Grid.Column="1" Spacing="1">
+                                            <Label Text="{Binding Title}" FontFamily="OpenSansSemibold" FontSize="12" />
+                                            <Label Text="{Binding Summary}" Style="{StaticResource PaneMetaStyle}" />
+                                        </VerticalStackLayout>
+                                        <Label Grid.Column="2" Text="{Binding When}" Style="{StaticResource PaneMetaStyle}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </VerticalStackLayout>
+                </ScrollView>
+            </Grid>
+        </Grid>
+    </Border>
+</ContentView>

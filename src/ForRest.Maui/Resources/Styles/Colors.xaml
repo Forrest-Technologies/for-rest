@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+
+    <Color x:Key="CanvasLight">#F6F7F9</Color>
+    <Color x:Key="CanvasDark">#151922</Color>
+    <Color x:Key="SurfaceLight">#FFFFFF</Color>
+    <Color x:Key="SurfaceDark">#202631</Color>
+    <Color x:Key="SurfaceRaisedLight">#FAFBFC</Color>
+    <Color x:Key="SurfaceRaisedDark">#1A1F28</Color>
+    <Color x:Key="SurfaceMutedLight">#F2F4F6</Color>
+    <Color x:Key="SurfaceMutedDark">#272E39</Color>
+    <Color x:Key="BorderLight">#D4D9E0</Color>
+    <Color x:Key="BorderDark">#3A4554</Color>
+    <Color x:Key="DividerLight">#E0E4E9</Color>
+    <Color x:Key="DividerDark">#313948</Color>
+    <Color x:Key="TextPrimaryLight">#111827</Color>
+    <Color x:Key="TextPrimaryDark">#F3F6FA</Color>
+    <Color x:Key="TextSecondaryLight">#465467</Color>
+    <Color x:Key="TextSecondaryDark">#AAB6C7</Color>
+    <Color x:Key="TextMutedLight">#6E7D90</Color>
+    <Color x:Key="TextMutedDark">#8492A4</Color>
+    <Color x:Key="AccentLight">#1976D2</Color>
+    <Color x:Key="AccentDark">#72B6FF</Color>
+    <Color x:Key="AccentSoftLight">#DCEBFA</Color>
+    <Color x:Key="AccentSoftDark">#12314B</Color>
+    <Color x:Key="AccentStrongLight">#0D5EA6</Color>
+    <Color x:Key="AccentStrongDark">#9FD0FF</Color>
+    <Color x:Key="SuccessLight">#0F7B59</Color>
+    <Color x:Key="SuccessDark">#68C9A1</Color>
+    <Color x:Key="WarningLight">#A05A00</Color>
+    <Color x:Key="WarningDark">#F0B35B</Color>
+    <Color x:Key="DangerLight">#B03C36</Color>
+    <Color x:Key="DangerDark">#F48B86</Color>
+    <Color x:Key="EditorBackgroundLight">#FFFFFF</Color>
+    <Color x:Key="EditorBackgroundDark">#141A22</Color>
+    <Color x:Key="EditorGutterLight">#F4F6F8</Color>
+    <Color x:Key="EditorGutterDark">#1B2230</Color>
+    <Color x:Key="SplitterLight">#CDD3DA</Color>
+    <Color x:Key="SplitterDark">#485669</Color>
+    <Color x:Key="MethodGet">#13795B</Color>
+    <Color x:Key="MethodPost">#0B63B6</Color>
+    <Color x:Key="MethodPut">#8C4B0F</Color>
+    <Color x:Key="MethodPatch">#7D4AC7</Color>
+    <Color x:Key="MethodDelete">#B13C36</Color>
+    <Color x:Key="MethodDir">#49586A</Color>
+</ResourceDictionary>

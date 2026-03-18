@@ -1,6 +1,8 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/ForRest.App/ForRest.App.csproj" />
+    <Project Path="src/ForRest.App/ForRest.App.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/ForRest.Maui/ForRest.Maui.csproj" />
     <Project Path="src/ForRest.Domain/ForRest.Domain.csproj" />
     <Project Path="src/ForRest.Infrastructure.Sqlite/ForRest.Infrastructure.Sqlite.csproj" />
     <Project Path="src/ForRest.Models/ForRest.Models.csproj" />
@@ -10,7 +12,6 @@
     <Project Path="src/ForRest.Scripting/ForRest.Scripting.csproj" />
     <Project Path="src/ForRest.Services/ForRest.Services.csproj" />
     <Project Path="src/ForRest.Shared/ForRest.Shared.csproj" />
-  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ForRest.Tests/ForRest.Tests.csproj" />
   </Folder>

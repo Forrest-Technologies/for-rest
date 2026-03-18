@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:ForRest.Maui.Controls"
+             x:Class="ForRest.Maui.MainPage">
+
+    <Grid Padding="12" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="8">
+        <Border Style="{StaticResource ChromeBorderStyle}">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+                <Label Text="For-Rest" FontFamily="OpenSansSemibold" FontSize="14" />
+                <Label Grid.Column="1" Margin="16,0,0,0" Text="{Binding WorkspaceBadge}" Style="{StaticResource PaneMetaStyle}" />
+                <Border Grid.Column="2" Margin="12,0,0,0" Padding="8,2" BackgroundColor="{AppThemeBinding Light={StaticResource AccentSoftLight}, Dark={StaticResource AccentSoftDark}}" StrokeThickness="0">
+                    <Label Text="{Binding SelectedEnvironment}" FontFamily="OpenSansSemibold" FontSize="11" TextColor="{AppThemeBinding Light={StaticResource AccentStrongLight}, Dark={StaticResource AccentStrongDark}}" />
+                </Border>
+                <Label Grid.Column="3" HorizontalOptions="Center" HorizontalTextAlignment="Center" Text="{Binding LayoutSummary}" Style="{StaticResource PaneMetaStyle}" />
+                <Button Grid.Column="4" Margin="0,0,8,0" Text="Explorer" Style="{StaticResource SubtleToolbarButtonStyle}" Clicked="OnToggleLeftPaneClicked" />
+                <Button Grid.Column="5" Text="Inspector" Style="{StaticResource SubtleToolbarButtonStyle}" Clicked="OnToggleRightPaneClicked" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Style="{StaticResource ChromeBorderStyle}">
+            <Grid ColumnDefinitions="180,150,96,*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                <Border Style="{StaticResource SectionBorderStyle}" Padding="8,2" Margin="0"><Picker Title="Workspace" ItemsSource="{Binding WorkspaceOptions}" SelectedItem="{Binding SelectedWorkspace}" /></Border>
+                <Border Grid.Column="1" Style="{StaticResource SectionBorderStyle}" Padding="8,2" Margin="0"><Picker Title="Environment" ItemsSource="{Binding EnvironmentOptions}" SelectedItem="{Binding SelectedEnvironment}" /></Border>
+                <Border Grid.Column="2" Style="{StaticResource SectionBorderStyle}" Padding="8,2" Margin="0"><Picker Title="Method" ItemsSource="{Binding MethodOptions}" SelectedItem="{Binding SelectedMethod}" /></Border>
+                <Border Grid.Column="3" Style="{StaticResource SectionBorderStyle}" Padding="8,2" Margin="0"><Entry Placeholder="https://target" Text="{Binding RequestUrl}" /></Border>
+                <Button Grid.Column="4" Text="Send" Style="{StaticResource PrimaryToolbarButtonStyle}" />
+                <Button Grid.Column="5" Text="Save" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                <Button Grid.Column="6" Text="Cancel" Style="{StaticResource SubtleToolbarButtonStyle}" />
+                <Button Grid.Column="7" Text="Format" Style="{StaticResource SubtleToolbarButtonStyle}" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2" x:Name="WorkbenchGrid" ColumnSpacing="0" SizeChanged="OnWorkbenchGridSizeChanged">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="{Binding LeftPaneWidth}" />
+                <ColumnDefinition Width="{Binding LeftSplitterWidth}" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="{Binding RightSplitterWidth}" />
+                <ColumnDefinition Width="{Binding RightPaneWidth}" />
+            </Grid.ColumnDefinitions>
+
+            <controls:ExplorerPane Grid.Column="0" IsVisible="{Binding IsLeftPaneVisible}" />
+            <BoxView Grid.Column="1" IsVisible="{Binding IsLeftPaneVisible}" Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
+                <BoxView.GestureRecognizers><PanGestureRecognizer PanUpdated="OnLeftSplitterPanUpdated" /></BoxView.GestureRecognizers>
+            </BoxView>
+            <controls:WorkbenchCenterPane Grid.Column="2" Margin="8,0" />
+            <BoxView Grid.Column="3" IsVisible="{Binding IsRightPaneVisible}" Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
+                <BoxView.GestureRecognizers><PanGestureRecognizer PanUpdated="OnRightSplitterPanUpdated" /></BoxView.GestureRecognizers>
+            </BoxView>
+            <controls:InspectorPane Grid.Column="4" IsVisible="{Binding IsRightPaneVisible}" />
+        </Grid>
+
+        <Border Grid.Row="3" Style="{StaticResource ChromeBorderStyle}">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <Label Text="{Binding RequestStateStatus}" Style="{StaticResource PaneMetaStyle}" />
+                <Label Grid.Column="1" Margin="12,0,0,0" Text="{Binding OpenTabsStatus}" Style="{StaticResource PaneMetaStyle}" />
+                <Label Grid.Column="2" Margin="12,0,0,0" Text="{Binding TimingStatus}" Style="{StaticResource PaneMetaStyle}" />
+            </Grid>
+        </Border>
+    </Grid>
+</ContentPage>
