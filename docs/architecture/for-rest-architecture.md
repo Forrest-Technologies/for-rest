@@ -14,7 +14,7 @@ flowchart LR
     App --> PluginsHost["ForRest.Plugins.Host\ndiscovery scaffold"]
     Services --> Domain["ForRest.Domain\nrequest compilation and variable logic"]
     Services --> Repos["ForRest.Repositories\ncontracts"]
-    Services --> Scripting["ForRest.Scripting\nRoslyn host"]
+    Services --> Scripting["ForRest.Scripting\nFRS compiler and legacy script host"]
     Services --> Plugins["ForRest.Plugins.Abstractions\nextension contracts"]
     Repos --> Infra["ForRest.Infrastructure.Sqlite\nSQLite and DPAPI"]
     Domain --> Models["ForRest.Models\nrecords and enums"]
@@ -68,9 +68,10 @@ flowchart LR
 
 [`src/ForRest.Scripting`](../../src/ForRest.Scripting)
 
-- Hosts the Roslyn-based C# scripting surface.
-- Exposes a stable script-facing API: `request`, `response`, `variables`, `tests`, `console`, `time`, `json`, `random`, `workspace`.
-- Keeps scripts away from internal repositories and UI types.
+- Parses and compiles the `.frs` request-document language into execution payloads.
+- Produces runtime variable seed operations, extraction definitions, retry metadata, and generated assertion scripts.
+- Still hosts the Roslyn-backed execution adapter used by the current runtime for generated assertions and legacy script hooks.
+- Keeps authoring and execution payload preparation away from UI types and repository concerns.
 
 ### Extensibility
 
@@ -87,14 +88,15 @@ flowchart LR
 The current send flow follows this order:
 
 1. Resolve variables from system, global, workspace, environment, request-local, and runtime scopes.
-2. Compile the request into a normalized `PreparedRequest`.
-3. Execute the pre-request script and merge runtime variable changes.
-4. Send the HTTP request with per-request redirect, timeout, and SSL settings.
-5. Capture the response snapshot and raw response text.
-6. Run configured extraction rules.
-7. Execute the post-response test script and collect test and console output.
-8. Persist execution history when enabled.
-9. Project the latest execution result back to the UI.
+2. Evaluate `.frs` runtime seed variables when the request originated from a script document.
+3. Compile the request into a normalized `PreparedRequest`.
+4. Execute the pre-request script when legacy request hooks are present.
+5. Send the HTTP request with per-request redirect, timeout, SSL, and retry settings.
+6. Capture the response snapshot and raw response text.
+7. Run configured extraction rules.
+8. Execute the generated or legacy post-response assertions and collect test and console output.
+9. Persist execution history when enabled.
+10. Project the latest execution result back to the UI.
 
 ## Storage Strategy
 
@@ -150,6 +152,7 @@ Current automated coverage includes:
 - request execution against a local loopback HTTP listener, including verb, headers, body, and response capture
 - JSON formatting and validation
 - response extraction
+- `.frs` language parse/compile behavior
 - script host behavior
 - repeat runner scheduling behavior
 - SQLite repository persistence and secret protection

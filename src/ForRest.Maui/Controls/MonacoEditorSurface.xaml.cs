@@ -8,6 +8,8 @@ namespace ForRest.Maui.Controls;
 
 public partial class MonacoEditorSurface : ContentView
 {
+	public event EventHandler? SendRequested;
+
 	private const string MonacoHostHtml = """
 <!DOCTYPE html>
 <html>
@@ -125,20 +127,20 @@ public partial class MonacoEditorSurface : ContentView
               { token: "operator", foreground: "6A7786" }
             ],
             colors: {
-              "editor.background": "#FBFCFD",
-              "editor.foreground": "#16202A",
-              "editorGutter.background": "#F4F7FA",
-              "editorLineNumber.foreground": "#97A4B2",
-              "editorLineNumber.activeForeground": "#2C3946",
-              "editorLineHighlightBackground": "#F5F8FB",
-              "editor.selectionBackground": "#D5E8FA",
-              "editor.inactiveSelectionBackground": "#E8F1FB",
-              "editorCursor.foreground": "#0F1D2D",
-              "editorWhitespace.foreground": "#D4DCE5",
-              "editorBracketMatch.background": "#EAF2FA",
-              "editorBracketMatch.border": "#C7D5E3",
-              "editorIndentGuide.background": "#E6EBF1",
-              "editorIndentGuide.activeBackground": "#C9D3DE"
+              "editor.background": "#EDF5FD",
+              "editor.foreground": "#0F2236",
+              "editorGutter.background": "#E2EDF8",
+              "editorLineNumber.foreground": "#5E7B97",
+              "editorLineNumber.activeForeground": "#1E3B57",
+              "editorLineHighlightBackground": "#E1F0FC",
+              "editor.selectionBackground": "#CFE4F8",
+              "editor.inactiveSelectionBackground": "#DCEBFA",
+              "editorCursor.foreground": "#0F2236",
+              "editorWhitespace.foreground": "#B3C9DE",
+              "editorBracketMatch.background": "#D7EBFB",
+              "editorBracketMatch.border": "#93BCDF",
+              "editorIndentGuide.background": "#C5D8EB",
+              "editorIndentGuide.activeBackground": "#9FBAD5"
             }
           },
           "forrest-dark": {
@@ -272,9 +274,9 @@ public partial class MonacoEditorSurface : ContentView
             editableBorder: "rgba(78, 109, 139, 0.22)"
           },
           "forrest-azure": {
-            background: "#FAFCFF",
-            editableBackground: "rgba(30, 111, 185, 0.10)",
-            editableBorder: "rgba(30, 111, 185, 0.22)"
+            background: "#EDF5FD",
+            editableBackground: "rgba(0, 120, 212, 0.14)",
+            editableBorder: "rgba(0, 120, 212, 0.30)"
           },
           "forrest-dark": {
             background: "#141B24",
@@ -361,6 +363,13 @@ public partial class MonacoEditorSurface : ContentView
         defineThemes(monaco);
       }
 
+      function requestHostCommand(commandName) {
+        try {
+          window.location.href = `forrest://command/${commandName}`;
+        } catch {
+        }
+      }
+
       const supportedSettingsKeys = ["light", "azure", "dark", "black", "amber"];
 
       window.forRestHost = {
@@ -420,6 +429,13 @@ public partial class MonacoEditorSurface : ContentView
               alwaysConsumeMouseWheel: false
             },
             padding: { top: 8, bottom: 24 }
+          });
+
+          this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function () {
+            requestHostCommand("send");
+          });
+          this.editor.addCommand(monaco.KeyCode.F5, function () {
+            requestHostCommand("send");
           });
 
           this.lastKnownValue = this.editor.getValue();
@@ -862,6 +878,23 @@ public partial class MonacoEditorSurface : ContentView
 	private async void OnEditorWebViewNavigated(object? sender, WebNavigatedEventArgs e)
 	{
 		await EnsureEditorReadyAsync();
+	}
+
+	private void OnEditorWebViewNavigating(object? sender, WebNavigatingEventArgs e)
+	{
+		if (e.Url is null ||
+		    !Uri.TryCreate(e.Url, UriKind.Absolute, out Uri? uri) ||
+		    !string.Equals(uri.Scheme, "forrest", StringComparison.OrdinalIgnoreCase))
+		{
+			return;
+		}
+
+		e.Cancel = true;
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "send", StringComparison.OrdinalIgnoreCase))
+		{
+			SendRequested?.Invoke(this, EventArgs.Empty);
+		}
 	}
 
 	private async Task EnsureEditorReadyAsync()

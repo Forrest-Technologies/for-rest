@@ -33,4 +33,11 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<ProjectReference Include="..\ForRest.Models\ForRest.Models.csproj" />
+		<ProjectReference Include="..\ForRest.Repositories\ForRest.Repositories.csproj" />
+		<ProjectReference Include="..\ForRest.Scripting\ForRest.Scripting.csproj" />
+		<ProjectReference Include="..\ForRest.Services\ForRest.Services.csproj" />
+	</ItemGroup>
+
 </Project>

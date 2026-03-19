@@ -17,7 +17,25 @@ public sealed class RequestExecutionService(
         EnvironmentDefinition? environment,
         CancellationToken cancellationToken = default)
     {
-        var runtimeVariables = new List<VariableDefinition>();
+        return await Execute(profile, workspace, request, environment, [], cancellationToken);
+    }
+
+    public async Task<RequestExecutionResult> Execute(
+        AppProfile profile,
+        WorkspaceSnapshot workspace,
+        RequestDefinition request,
+        EnvironmentDefinition? environment,
+        IReadOnlyList<VariableDefinition> initialRuntimeVariables,
+        CancellationToken cancellationToken = default)
+    {
+        var runtimeVariables = initialRuntimeVariables
+            .Where(static item => item.Scope == VariableScope.Runtime)
+            .Select(
+                static item => item with
+                {
+                    Scope = VariableScope.Runtime,
+                })
+            .ToList();
         var consoleEntries = new List<ConsoleEntry>();
         var testResults = new List<TestResult>();
 
@@ -94,26 +112,14 @@ public sealed class RequestExecutionService(
             {
                 Timeout = TimeSpan.FromMilliseconds(Math.Max(1, preparedRequest.TimeoutMilliseconds)),
             };
-            using var httpRequest = BuildHttpRequest(preparedRequest);
-
             HttpResponseMessage? httpResponse = null;
-            var stopwatch = Stopwatch.StartNew();
             string errorMessage = string.Empty;
+            long durationMilliseconds = 0;
 
-            try
-            {
-                httpResponse = await client.SendAsync(httpRequest, iterationCancellationToken);
-            }
-            catch (Exception exception)
-            {
-                errorMessage = exception.Message;
-                logger.LogWarning(exception, "Request execution failed for {RequestName}", request.Name);
-            }
-
-            stopwatch.Stop();
+            (httpResponse, durationMilliseconds, errorMessage) = await SendWithRetry(client, preparedRequest, request, iterationCancellationToken);
             var responseSnapshot = httpResponse is null
                 ? null
-                : await BuildResponseSnapshot(httpResponse, stopwatch.ElapsedMilliseconds, iterationCancellationToken);
+                : await BuildResponseSnapshot(httpResponse, durationMilliseconds, iterationCancellationToken);
 
             var extractedVariables = responseExtractionService.Extract(responseSnapshot, request.Extractions);
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, extractedVariables);
@@ -347,6 +353,62 @@ public sealed class RequestExecutionService(
         }
 
         return merged.Values.OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private async Task<(HttpResponseMessage? Response, long DurationMilliseconds, string ErrorMessage)> SendWithRetry(
+        HttpClient client,
+        PreparedRequest preparedRequest,
+        RequestDefinition request,
+        CancellationToken cancellationToken)
+    {
+        var attempts = Math.Max(1, request.Retry.Count + 1);
+        HttpResponseMessage? response = null;
+        string errorMessage = string.Empty;
+        long durationMilliseconds = 0;
+
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            using var attemptRequest = BuildHttpRequest(preparedRequest);
+
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                response = await client.SendAsync(attemptRequest, cancellationToken);
+                stopwatch.Stop();
+                durationMilliseconds = stopwatch.ElapsedMilliseconds;
+
+                if (!ShouldRetry(response, attempt, attempts))
+                {
+                    return (response, durationMilliseconds, string.Empty);
+                }
+
+                response.Dispose();
+            }
+            catch (Exception exception)
+            {
+                stopwatch.Stop();
+                durationMilliseconds = stopwatch.ElapsedMilliseconds;
+                errorMessage = exception.Message;
+                logger.LogWarning(exception, "Request execution failed for {RequestName} on attempt {Attempt}", request.Name, attempt);
+
+                if (attempt >= attempts)
+                {
+                    return (null, durationMilliseconds, errorMessage);
+                }
+            }
+
+            if (attempt < attempts && request.Retry.IntervalMilliseconds > 0)
+            {
+                await Task.Delay(request.Retry.IntervalMilliseconds, cancellationToken);
+            }
+        }
+
+        return (response, durationMilliseconds, errorMessage);
+    }
+
+    private static bool ShouldRetry(HttpResponseMessage response, int attempt, int maxAttempts)
+    {
+        return attempt < maxAttempts && (int)response.StatusCode >= 500;
     }
 
     #endregion

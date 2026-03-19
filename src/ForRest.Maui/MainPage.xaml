@@ -78,6 +78,24 @@
                                     HorizontalOptions="End"
                                     VerticalOptions="Fill"
                                     ZIndex="6" />
+
+            <Button Text="Explorer"
+                    Clicked="OnToggleLeftPaneClicked"
+                    IsVisible="{Binding ShowLeftPaneRestoreButton}"
+                    HorizontalOptions="Start"
+                    VerticalOptions="Center"
+                    Margin="14,0,0,0"
+                    Style="{StaticResource CompactToolbarButtonStyle}"
+                    ZIndex="7" />
+
+            <Button Text="Inspect"
+                    Clicked="OnToggleRightPaneClicked"
+                    IsVisible="{Binding ShowRightPaneRestoreButton}"
+                    HorizontalOptions="End"
+                    VerticalOptions="Center"
+                    Margin="0,0,14,0"
+                    Style="{StaticResource CompactToolbarButtonStyle}"
+                    ZIndex="7" />
         </Grid>
 
         <Border Grid.Row="1"
@@ -97,5 +115,15 @@
                        Style="{StaticResource StatusBarTextStyle}" />
             </Grid>
         </Border>
+
+        <Button Grid.RowSpan="2"
+                Text="Send"
+                Clicked="OnSendClicked"
+                IsEnabled="{Binding CanSend}"
+                HorizontalOptions="End"
+                VerticalOptions="End"
+                Margin="0,0,22,22"
+                Style="{StaticResource FloatingActionButtonStyle}"
+                ZIndex="20" />
     </Grid>
 </ContentPage>

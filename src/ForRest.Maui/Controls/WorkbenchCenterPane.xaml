@@ -7,7 +7,7 @@
     <Border Style="{StaticResource PaneBorderStyle}"
             BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
             Stroke="{DynamicResource ThemeDividerColor}">
-        <Grid RowDefinitions="Auto,*">
+        <Grid RowDefinitions="Auto,Auto,*">
             <Grid Padding="8,4,8,2"
                   ColumnDefinitions="Auto,*"
                   ColumnSpacing="6">
@@ -22,9 +22,36 @@
             </Grid>
 
             <Grid Grid.Row="1"
+                  Padding="6,0,6,6">
+                <ScrollView Orientation="Horizontal"
+                            HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout Spacing="4"
+                                           BindableLayout.ItemsSource="{Binding CenterTabs}">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate>
+                                <Button Text="{Binding Title}"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnTabClicked"
+                                        CommandParameter="{Binding .}">
+                                    <Button.Triggers>
+                                        <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
+                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
+                                        </DataTrigger>
+                                    </Button.Triggers>
+                                </Button>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </HorizontalStackLayout>
+                </ScrollView>
+            </Grid>
+
+            <Grid Grid.Row="2"
                   Padding="0">
                 <controls:MonacoEditorSurface Language="{Binding ActiveEditorLanguage}"
                                               EditableRangesJson="{Binding ActiveEditorEditableRangesJson}"
+                                              SendRequested="OnEditorSendRequested"
                                               ThemeKey="{Binding EditorThemeKey}"
                                               Text="{Binding ActiveEditorText}" />
             </Grid>

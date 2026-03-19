@@ -1,7 +1,10 @@
 using ForRest.Maui.ViewModels;
 #if WINDOWS
 using System.Reflection;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Input;
+using Windows.System;
 #endif
 
 namespace ForRest.Maui;
@@ -10,9 +13,11 @@ public partial class MainPage : ContentPage
 {
 	private double _leftPaneWidthOnDragStart;
 	private double _rightPaneWidthOnDragStart;
+	private bool _isInitialized;
 #if WINDOWS
 	private UIElement? _leftSplitterNativeView;
 	private UIElement? _rightSplitterNativeView;
+	private FrameworkElement? _pageNativeView;
 	private static readonly PropertyInfo? ProtectedCursorProperty = typeof(UIElement).GetProperty("ProtectedCursor", BindingFlags.Instance | BindingFlags.NonPublic);
 	private static readonly Microsoft.UI.Input.InputSystemCursor ResizeCursor =
 		Microsoft.UI.Input.InputSystemCursor.Create(Microsoft.UI.Input.InputSystemCursorShape.SizeWestEast);
@@ -23,6 +28,8 @@ public partial class MainPage : ContentPage
 		InitializeComponent();
 		BindingContext = viewModel;
 		InitializeSplitterInteraction();
+		Loaded += OnPageLoaded;
+		HandlerChanged += (_, _) => AttachKeyboardShortcutHandling();
 	}
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
@@ -40,6 +47,11 @@ public partial class MainPage : ContentPage
 	private void OnToggleRightPaneClicked(object? sender, EventArgs e)
 	{
 		ViewModel.ToggleRightPane();
+	}
+
+	private async void OnSendClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.SendAsync();
 	}
 
 	private void OnLeftSplitterPanUpdated(object? sender, PanUpdatedEventArgs e)
@@ -99,6 +111,17 @@ public partial class MainPage : ContentPage
 		RightSplitterLane.HandlerChanged += (_, _) => AttachSplitterPointerBehavior(RightSplitterLane, RightSplitterLine, isLeftSplitter: false);
 	}
 
+	private async void OnPageLoaded(object? sender, EventArgs e)
+	{
+		if (_isInitialized)
+		{
+			return;
+		}
+
+		_isInitialized = true;
+		await ViewModel.InitializeAsync();
+	}
+
 	private static void SetSplitterActive(BoxView splitterLine, bool isActive)
 	{
 		splitterLine.Opacity = isActive ? 1d : 0.72d;
@@ -137,10 +160,38 @@ public partial class MainPage : ContentPage
 #endif
 	}
 
+	private void AttachKeyboardShortcutHandling()
+	{
+#if WINDOWS
+		if (Handler?.PlatformView is not FrameworkElement platformView)
+		{
+			return;
+		}
+
+		if (ReferenceEquals(_pageNativeView, platformView))
+		{
+			return;
+		}
+
+		_pageNativeView = platformView;
+		_pageNativeView.KeyDown += OnNativeKeyDown;
+#endif
+	}
+
 #if WINDOWS
 	private static void SetResizeCursor(UIElement platformView)
 	{
 		ProtectedCursorProperty?.SetValue(platformView, ResizeCursor);
+	}
+
+	private async void OnNativeKeyDown(object sender, KeyRoutedEventArgs e)
+	{
+		bool isControlPressed = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+		if (e.Key == VirtualKey.F5 || (e.Key == VirtualKey.Enter && isControlPressed))
+		{
+			e.Handled = true;
+			await ViewModel.SendAsync();
+		}
 	}
 #endif
 }

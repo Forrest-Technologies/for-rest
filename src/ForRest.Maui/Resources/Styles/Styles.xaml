@@ -172,6 +172,20 @@
         <Setter Property="TextColor" Value="{DynamicResource ThemeAccentTextColor}" />
     </Style>
 
+    <Style x:Key="FloatingActionButtonStyle" TargetType="Button">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="18,14" />
+        <Setter Property="MinimumHeightRequest" Value="56" />
+        <Setter Property="MinimumWidthRequest" Value="56" />
+        <Setter Property="HeightRequest" Value="56" />
+        <Setter Property="CornerRadius" Value="28" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource ThemeAccentColor}" />
+        <Setter Property="BorderColor" Value="{DynamicResource ThemeAccentStrongColor}" />
+        <Setter Property="BorderWidth" Value="1" />
+        <Setter Property="TextColor" Value="{DynamicResource ThemeAccentTextColor}" />
+    </Style>
+
     <Style x:Key="PaneTitleStyle" TargetType="Label">
         <Setter Property="FontFamily" Value="OpenSansSemibold" />
         <Setter Property="FontSize" Value="12.5" />

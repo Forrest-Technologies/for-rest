@@ -44,9 +44,9 @@ public sealed class ResponseExtractionService
 
     #region Private Methods
 
-    private static VariableDefinition? BuildVariable(JsonNode? rootNode, ExtractionDefinition extraction)
+    private VariableDefinition? BuildVariable(JsonNode? rootNode, ExtractionDefinition extraction)
     {
-        var value = new JsonNodeSelector().Select(rootNode, extraction.Selector);
+        var value = jsonNodeSelector.Select(rootNode, extraction.Selector);
         if (value is null)
         {
             return null;

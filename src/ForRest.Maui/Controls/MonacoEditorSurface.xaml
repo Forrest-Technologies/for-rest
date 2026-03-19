@@ -5,6 +5,7 @@
 
     <Grid BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}">
         <WebView x:Name="EditorWebView"
+                 Navigating="OnEditorWebViewNavigating"
                  Navigated="OnEditorWebViewNavigated" />
     </Grid>
 </ContentView>

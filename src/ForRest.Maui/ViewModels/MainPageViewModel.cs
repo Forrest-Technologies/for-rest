@@ -1,7 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text.Json;
+using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
+using ForRest.Models;
+using ForRest.Repositories;
+using ForRest.Services;
+using ForRest.Scripting;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 
@@ -30,6 +35,12 @@ public sealed class MainPageViewModel : ObservableObject
 	private Color _warningColor = Color.FromArgb("#A5691B");
 	private Color _dangerColor = Color.FromArgb("#B2433D");
 	private readonly SettingsTomlDocumentService _settingsTomlDocumentService;
+	private readonly RequestWorkbenchStateStore _requestWorkbenchStateStore;
+	private readonly IForRestScriptExecutionService _scriptExecutionService;
+	private readonly IExecutionHistoryRepository _executionHistoryRepository;
+	private readonly ForRestScriptDocumentTextService _documentTextService;
+	private readonly Dictionary<string, RequestWorkbenchDocumentState> _documentStates = new(StringComparer.OrdinalIgnoreCase);
+	private static readonly Guid DemoWorkspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
 	private double _leftPanePixels = DefaultLeftPanePixels;
 	private double _rightPanePixels = DefaultRightPanePixels;
@@ -57,6 +68,8 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _responseBodyText;
 	private string _responseRawText;
 	private string _responseState;
+	private string _responseTimeStatus;
+	private string _responseSizeStatus;
 	private string _executionStatus;
 	private string _editorThemeKey;
 	private ShellThemeName _currentThemeName;
@@ -69,11 +82,27 @@ public sealed class MainPageViewModel : ObservableObject
 	private Color _activeDocumentKindColor;
 	private string _activeEditorEditableRangesJson;
 	private CancellationTokenSource? _settingsSaveSource;
+	private CancellationTokenSource? _requestSaveSource;
 	private bool _suppressSettingsAutosave;
+	private bool _suppressRequestAutosave;
+	private bool _suppressDocumentSynchronization;
+	private bool _isInitialized;
+	private bool _isSending;
+	private RequestBodyMode _requestBodyMode = RequestBodyMode.Json;
 
-	public MainPageViewModel(IThemeService themeService, SettingsTomlDocumentService settingsTomlDocumentService)
+	public MainPageViewModel(
+		IThemeService themeService,
+		SettingsTomlDocumentService settingsTomlDocumentService,
+		RequestWorkbenchStateStore requestWorkbenchStateStore,
+		IForRestScriptExecutionService scriptExecutionService,
+		IExecutionHistoryRepository executionHistoryRepository,
+		ForRestScriptDocumentTextService documentTextService)
 	{
 		_settingsTomlDocumentService = settingsTomlDocumentService;
+		_requestWorkbenchStateStore = requestWorkbenchStateStore;
+		_scriptExecutionService = scriptExecutionService;
+		_executionHistoryRepository = executionHistoryRepository;
+		_documentTextService = documentTextService;
 		ApplyThemePalette(themeService.CurrentTheme, updateCollections: false);
 		_selectedWorkspace = "for-rest://echo-lab";
 		_selectedEnvironment = "Local";
@@ -81,16 +110,18 @@ public sealed class MainPageViewModel : ObservableObject
 		_requestName = "Echo POST";
 		_requestSummary = "Echo POST";
 		_requestLocation = "/requests/echo/post";
-		_requestTarget = BuildRequestTarget(_requestLocation);
+		_requestTarget = BuildDefaultRequestUrl(_requestLocation);
 		_requestEditorText = BuildRequestEditorText(_requestName, _selectedMethod, _requestTarget);
 		_headersEditorText = BuildHeadersEditorText();
 		_bodyEditorText = BuildBodyEditorText(_requestName);
 		_scriptEditorText = BuildScriptEditorText(_requestName);
 		_testsEditorText = BuildTestsEditorText();
 		_variablesEditorText = BuildVariablesEditorText();
-		_responseBodyText = BuildResponseBodyText();
-		_responseRawText = BuildResponseRawText();
-		_responseState = "200 OK";
+		_responseBodyText = string.Empty;
+		_responseRawText = string.Empty;
+		_responseState = "Idle";
+		_responseTimeStatus = "--";
+		_responseSizeStatus = "--";
 		_executionStatus = themeService.CurrentStatusMessage;
 		_currentThemeName = themeService.CurrentTheme.Name;
 		_editorThemeKey = themeService.CurrentTheme.MonacoThemeKey;
@@ -161,32 +192,22 @@ public sealed class MainPageViewModel : ObservableObject
 		];
 
 		HistoryItems =
-		[
-			new HistoryEntryViewModel("POST", "Echo POST", "200 OK in 118 ms", "Today", _methodPost),
-			new HistoryEntryViewModel("GET", "Users Feed", "200 OK in 64 ms", "Today", _methodGet),
-			new HistoryEntryViewModel("PUT", "Sync Profile", "Draft only", "Not run", _methodPut)
-		];
+		[];
 
 		ResponseHeaderRows =
-		[
-			new NameValueRowViewModel("content-type", "application/json; charset=utf-8", "response"),
-			new NameValueRowViewModel("cache-control", "no-store", "response"),
-			new NameValueRowViewModel("x-shell-phase", "phase-1", "response")
-		];
+		[];
 
 		OutputMetrics =
 		[
-			new OutputMetricViewModel("Status", "200 OK", _successColor),
-			new OutputMetricViewModel("Time", "118 ms", _methodPost),
-			new OutputMetricViewModel("Size", "504 B", _methodNeutral),
-			new OutputMetricViewModel("Type", "JSON", _methodPost)
+			new OutputMetricViewModel("Status", "Idle", _methodNeutral),
+			new OutputMetricViewModel("Time", "--", _methodNeutral),
+			new OutputMetricViewModel("Size", "--", _methodNeutral),
+			new OutputMetricViewModel("Type", "n/a", _methodNeutral)
 		];
 
 		TraceEntries =
 		[
-			new TraceEntryViewModel("compile", "request parsed", "12:40:18", _methodNeutral),
-			new TraceEntryViewModel("send", "response received", "12:40:18", _methodPost),
-			new TraceEntryViewModel("inspect", "body buffered", "12:40:19", _methodGet)
+			new TraceEntryViewModel("ready", "request workbench initialized", DateTime.Now.ToString("T"), _methodNeutral)
 		];
 
 		EnvironmentOptions =
@@ -207,6 +228,8 @@ public sealed class MainPageViewModel : ObservableObject
 		themeService.ThemeChanged += OnThemeChanged;
 		ApplyThemePalette(themeService.CurrentTheme);
 		ActivateRequestEditor();
+		SyncSupportEditorsFromRequestSource();
+		UpdateRequestMetadataFromSource();
 	}
 
 	public ObservableCollection<PaneTabViewModel> LeftPaneTabs { get; }
@@ -239,6 +262,10 @@ public sealed class MainPageViewModel : ObservableObject
 			if (SetProperty(ref _selectedWorkspace, value))
 			{
 				OnPropertyChanged(nameof(WorkspaceBadge));
+				if (_isInitialized && !_suppressRequestAutosave)
+				{
+					ScheduleRequestAutosave();
+				}
 			}
 		}
 	}
@@ -252,6 +279,10 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				OnPropertyChanged(nameof(EnvironmentBadge));
 				OnPropertyChanged(nameof(ActiveDocumentSummary));
+				if (_isInitialized && !_suppressRequestAutosave)
+				{
+					ScheduleRequestAutosave();
+				}
 			}
 		}
 	}
@@ -266,7 +297,7 @@ public sealed class MainPageViewModel : ObservableObject
 				RefreshRequestDraftSignature();
 				OnPropertyChanged(nameof(SelectedMethodColor));
 				OnPropertyChanged(nameof(RequestStateStatus));
-				if (IsActiveRequestEditor)
+				if (IsActiveRequestEditor && string.Equals(GetSelectedCenterTabKey(), "request", StringComparison.Ordinal))
 				{
 					ActiveDocumentKindLabel = value;
 					ActiveDocumentKindColor = SelectedMethodColor;
@@ -423,7 +454,7 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 			else
 			{
-				_requestEditorText = value;
+				ApplyRequestEditorChange(value);
 			}
 		}
 	}
@@ -523,9 +554,15 @@ public sealed class MainPageViewModel : ObservableObject
 		set => SetProperty(ref _executionStatus, value);
 	}
 
-	public string ResponseTimeStatus => "118 ms";
+	public string ResponseSizeStatus => _responseSizeStatus;
 
-	public string ResponseSizeStatus => "504 B";
+	public string ResponseTimeStatus => _responseTimeStatus;
+
+	public bool ShowLeftPaneRestoreButton => !_isCompactLayout && _leftPaneCollapsed;
+
+	public bool ShowRightPaneRestoreButton => !_isCompactLayout && _rightPaneCollapsed;
+
+	public bool CanSend => !_isSending && IsActiveRequestEditor;
 
 	public Color SelectedMethodColor => SelectedMethod switch
 	{
@@ -583,6 +620,179 @@ public sealed class MainPageViewModel : ObservableObject
 	private bool IsActiveRequestEditor => string.Equals(_activeDocumentKind, RequestDocumentKind, StringComparison.Ordinal);
 
 	private bool IsActiveSettingsEditor => string.Equals(_activeDocumentKind, SettingsDocumentKind, StringComparison.Ordinal);
+
+	public async Task InitializeAsync()
+	{
+		if (_isInitialized)
+		{
+			return;
+		}
+
+		_isInitialized = true;
+		List<RequestWorkbenchDocumentState> defaults =
+		[
+			BuildDefaultDocumentState("Echo POST", "POST", "Primary shell draft", "/requests/echo/post"),
+			BuildDefaultDocumentState("Users Feed", "GET", "Read-heavy collection request", "/requests/users/list"),
+			BuildDefaultDocumentState("Sync Profile", "PUT", "Mutation draft with script hooks", "/requests/users/sync")
+		];
+
+		RequestWorkbenchState state = await _requestWorkbenchStateStore.LoadAsync(defaults);
+		SelectedWorkspace = state.SelectedWorkspace;
+		SelectedEnvironment = state.SelectedEnvironment;
+		foreach (RequestWorkbenchDocumentState document in state.Documents)
+		{
+			_documentStates[document.Location] = document;
+		}
+
+		foreach (RequestDocumentViewModel document in OpenDocuments)
+		{
+			if (_documentStates.TryGetValue(document.Location, out RequestWorkbenchDocumentState? persisted))
+			{
+				document.Title = persisted.Title;
+				document.Method = persisted.Method;
+				document.Summary = persisted.Summary;
+				document.IsDirty = false;
+			}
+		}
+
+		foreach (NavigationItemViewModel item in ExplorerSections.SelectMany(static section => section.Items))
+		{
+			if (_documentStates.TryGetValue(item.Context, out RequestWorkbenchDocumentState? persisted))
+			{
+				item.Title = persisted.Title;
+				item.Detail = persisted.Summary;
+				item.AccentColor = ResolveMethodAccent(persisted.Method);
+			}
+		}
+
+		RequestDocumentViewModel? selectedDocument = OpenDocuments.FirstOrDefault(
+			document => string.Equals(document.Location, state.SelectedDocumentLocation, StringComparison.OrdinalIgnoreCase))
+			?? OpenDocuments.FirstOrDefault();
+
+		if (selectedDocument is not null)
+		{
+			SelectDocument(selectedDocument);
+		}
+		else
+		{
+			SyncSupportEditorsFromRequestSource();
+			UpdateCurrentDocumentMetadata();
+		}
+	}
+
+	public async Task SendAsync()
+	{
+		if (!CanSend)
+		{
+			return;
+		}
+
+		_isSending = true;
+		OnPropertyChanged(nameof(CanSend));
+		try
+		{
+			await PersistCurrentRequestAsync();
+			ForRestScriptExecutionOutcome outcome = await _scriptExecutionService.Execute(
+				BuildProfile(),
+				BuildWorkspaceSnapshot(),
+				RequestEditorText,
+				BuildEnvironmentDefinition(),
+				RequestName,
+				ScriptEditorText);
+
+			if (!outcome.Compilation.Succeeded || outcome.Compilation.Payload is null)
+			{
+				ApplyCompilationFailure(outcome.Compilation.Diagnostics);
+				return;
+			}
+
+			RequestName = outcome.Compilation.Payload.Request.Name;
+			SelectedMethod = outcome.Compilation.Payload.Request.Method.ToString().ToUpperInvariant();
+			RequestTarget = outcome.Compilation.Payload.Request.UrlTemplate;
+			RequestSummary = $"{SelectedMethod} request script";
+			UpdateCurrentDocumentMetadata();
+			ResponseState = outcome.Execution?.LatestResponse is { } response
+				? $"{response.StatusCode} {response.ReasonPhrase}".Trim()
+				: outcome.Execution?.State.ToString() ?? "Compiled";
+			ResponseBodyText = outcome.Execution?.LatestResponse?.Body ?? string.Empty;
+			ResponseRawText = outcome.Execution?.LatestResponse?.RawResponse ?? string.Empty;
+			_responseTimeStatus = outcome.Execution?.LatestResponse is { } latestResponse
+				? $"{latestResponse.DurationMilliseconds} ms"
+				: "--";
+			_responseSizeStatus = outcome.Execution?.LatestResponse is { } latestSizeResponse
+				? FormatResponseSize(latestSizeResponse.SizeBytes)
+				: "--";
+			ExecutionStatus = outcome.Execution?.State == ExecutionState.Completed
+				? "Sent via .frs execution pipeline"
+				: outcome.Execution?.State == ExecutionState.Failed
+					? "Execution failed"
+					: "Compiled request document";
+
+			ResponseHeaderRows.Clear();
+			foreach (KeyValueDefinition header in outcome.Execution?.LatestResponse?.Headers ?? [])
+			{
+				ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
+			}
+
+			HistoryItems.Clear();
+			List<ExecutionRun> historyRuns = await _executionHistoryRepository.Load(DemoWorkspaceId);
+			foreach (ExecutionRun run in historyRuns.Take(8))
+			{
+				HistoryItems.Add(
+					new HistoryEntryViewModel(
+						SelectedMethod,
+						run.RequestName,
+						run.Response is null ? run.State.ToString() : $"{run.Response.StatusCode} in {run.Response.DurationMilliseconds} ms",
+						run.StartedUtc.ToLocalTime().ToString("t"),
+						ResolveMethodAccent(SelectedMethod)));
+			}
+
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("compile", "request document compiled", DateTime.Now.ToString("T"), _methodNeutral));
+			if (outcome.Execution?.LatestResponse is not null)
+			{
+				TraceEntries.Add(new TraceEntryViewModel("send", ResponseState, DateTime.Now.ToString("T"), SelectedMethodColor));
+			}
+
+			if (outcome.Execution?.Tests.Count > 0)
+			{
+				string summary = $"{outcome.Execution.Tests.Count(static item => item.State == TestOutcomeState.Passed)}/{outcome.Execution.Tests.Count} tests passed";
+				TraceEntries.Add(new TraceEntryViewModel("tests", summary, DateTime.Now.ToString("T"), outcome.Execution.Tests.All(static item => item.State == TestOutcomeState.Passed) ? _successColor : _dangerColor));
+			}
+
+			OutputMetrics.Clear();
+			OutputMetrics.Add(new OutputMetricViewModel("Status", ResponseState, ResponseState.StartsWith("2", StringComparison.Ordinal) ? _successColor : _dangerColor));
+			OutputMetrics.Add(new OutputMetricViewModel("Time", _responseTimeStatus, SelectedMethodColor));
+			OutputMetrics.Add(new OutputMetricViewModel("Size", _responseSizeStatus, _methodNeutral));
+			OutputMetrics.Add(new OutputMetricViewModel("Type", outcome.Execution?.LatestResponse?.ContentType ?? "n/a", SelectedMethodColor));
+			OnPropertyChanged(nameof(ResponseTimeStatus));
+			OnPropertyChanged(nameof(ResponseSizeStatus));
+		}
+		catch (Exception exception)
+		{
+			ResponseState = "Failed";
+			ExecutionStatus = exception.Message;
+			_responseTimeStatus = "--";
+			_responseSizeStatus = "--";
+			ResponseBodyText = string.Empty;
+			ResponseRawText = exception.ToString();
+			ResponseHeaderRows.Clear();
+			OutputMetrics.Clear();
+			OutputMetrics.Add(new OutputMetricViewModel("Status", "Failed", _dangerColor));
+			OutputMetrics.Add(new OutputMetricViewModel("Time", "--", _methodNeutral));
+			OutputMetrics.Add(new OutputMetricViewModel("Size", "--", _methodNeutral));
+			OutputMetrics.Add(new OutputMetricViewModel("Type", "n/a", _methodNeutral));
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("error", exception.Message, DateTime.Now.ToString("T"), _dangerColor));
+			OnPropertyChanged(nameof(ResponseTimeStatus));
+			OnPropertyChanged(nameof(ResponseSizeStatus));
+		}
+		finally
+		{
+			_isSending = false;
+			OnPropertyChanged(nameof(CanSend));
+		}
+	}
 
 	public void ToggleLeftPane()
 	{
@@ -749,6 +959,7 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsTestsTabVisible));
 		OnPropertyChanged(nameof(IsVariablesTabVisible));
 		OnPropertyChanged(nameof(CenterSurfaceStatus));
+		ActivateCurrentCenterTabEditor();
 	}
 
 	public void SelectRightPaneTab(PaneTabViewModel? tab)
@@ -773,6 +984,8 @@ public sealed class MainPageViewModel : ObservableObject
 			return;
 		}
 
+		PersistActiveRequestInBackground();
+
 		foreach (RequestDocumentViewModel item in OpenDocuments)
 		{
 			item.IsSelected = ReferenceEquals(item, document);
@@ -789,6 +1002,8 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			return;
 		}
+
+		PersistActiveRequestInBackground();
 
 		foreach (NavigationItemViewModel entry in ExplorerSections.SelectMany(section => section.Items))
 		{
@@ -870,7 +1085,7 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(SelectedMethodColor));
 		if (IsActiveRequestEditor)
 		{
-			ActiveDocumentKindColor = SelectedMethodColor;
+			ActivateCurrentCenterTabEditor();
 		}
 		else if (IsActiveSettingsEditor)
 		{
@@ -903,21 +1118,6 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void RefreshRequestDraftSignature()
 	{
-		if (string.IsNullOrWhiteSpace(RequestEditorText))
-		{
-			return;
-		}
-
-		string[] lines = RequestEditorText.Replace("\r\n", "\n").Split('\n');
-		for (int index = 0; index < lines.Length; index++)
-		{
-			if (MethodOptions.Any(method => lines[index].StartsWith($"{method} ", StringComparison.Ordinal)))
-			{
-				lines[index] = $"{SelectedMethod} {RequestTarget}";
-				RequestEditorText = string.Join(Environment.NewLine, lines);
-				return;
-			}
-		}
 	}
 
 	private void SetSelected(IEnumerable<PaneTabViewModel> tabs, PaneTabViewModel selected)
@@ -930,17 +1130,30 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void ApplyRequestSelection(string title, string method, string summary, string location)
 	{
-		RequestName = title;
-		SelectedMethod = method;
-		RequestSummary = summary;
-		RequestLocation = location;
-		RequestTarget = BuildRequestTarget(location);
-		RequestEditorText = BuildRequestEditorText(title, method, RequestTarget);
-		HeadersEditorText = BuildHeadersEditorText();
-		BodyEditorText = BuildBodyEditorText(title);
-		ScriptEditorText = BuildScriptEditorText(title);
-		TestsEditorText = BuildTestsEditorText();
-		VariablesEditorText = BuildVariablesEditorText();
+		RequestWorkbenchDocumentState state = _documentStates.TryGetValue(location, out RequestWorkbenchDocumentState? existingState)
+			? existingState
+			: BuildDefaultDocumentState(title, method, summary, location);
+
+		_documentStates[location] = state;
+		_suppressRequestAutosave = true;
+		_suppressDocumentSynchronization = true;
+		try
+		{
+			RequestName = state.Title;
+			SelectedMethod = state.Method;
+			RequestSummary = state.Summary;
+			RequestLocation = state.Location;
+			RequestEditorText = NormalizeLineEndings(state.RequestSource);
+			ScriptEditorText = NormalizeLineEndings(state.PreRequestScript);
+			SyncSupportEditorsFromRequestSource();
+		}
+		finally
+		{
+			_suppressDocumentSynchronization = false;
+			_suppressRequestAutosave = false;
+		}
+
+		UpdateCurrentDocumentMetadata();
 		ActivateRequestEditor();
 	}
 
@@ -978,13 +1191,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private void ActivateRequestEditor()
 	{
 		_activeDocumentKind = RequestDocumentKind;
-		ActiveDocumentKindLabel = SelectedMethod;
-		ActiveDocumentKindColor = SelectedMethodColor;
-		ActiveDocumentLabel = RequestDocumentLabel;
-		ActiveEditorLanguage = "forrest";
-		ActiveEditorEditableRangesJson = "[]";
-		SetActiveEditorTextInternal(_requestEditorText);
-		ForceActiveEditorRefresh();
+		ActivateCurrentCenterTabEditor();
 	}
 
 	private void ActivateSettingsEditor(NavigationItemViewModel item)
@@ -998,6 +1205,339 @@ public sealed class MainPageViewModel : ObservableObject
 		ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
 		SetActiveEditorTextInternal(_themeConfigText);
 		ForceActiveEditorRefresh();
+		OnPropertyChanged(nameof(CanSend));
+	}
+
+	private void ActivateCurrentCenterTabEditor()
+	{
+		if (!IsActiveRequestEditor)
+		{
+			return;
+		}
+
+		string selectedTabKey = GetSelectedCenterTabKey();
+		ActiveDocumentLabel = RequestDocumentLabel;
+		ActiveDocumentKindLabel = selectedTabKey switch
+		{
+			"request" => SelectedMethod,
+			"headers" => "HEADERS",
+			"body" => _requestBodyMode == RequestBodyMode.Json ? "BODY JSON" : $"BODY {_requestBodyMode.ToString().ToUpperInvariant()}",
+			"script" => "SCRIPT",
+			"tests" => "TESTS",
+			"variables" => "VARS",
+			_ => SelectedMethod
+		};
+		ActiveDocumentKindColor = selectedTabKey switch
+		{
+			"script" => _warningColor,
+			"tests" => _successColor,
+			_ => SelectedMethodColor
+		};
+		ActiveEditorLanguage = selectedTabKey switch
+		{
+			"body" => _requestBodyMode == RequestBodyMode.Json ? "json" : "plaintext",
+			"script" => "csharp",
+			_ => "forrest"
+		};
+		ActiveEditorEditableRangesJson = "[]";
+		SetActiveEditorTextInternal(selectedTabKey switch
+		{
+			"headers" => HeadersEditorText,
+			"body" => BodyEditorText,
+			"script" => ScriptEditorText,
+			"tests" => TestsEditorText,
+			"variables" => VariablesEditorText,
+			_ => RequestEditorText
+		});
+		ForceActiveEditorRefresh();
+		OnPropertyChanged(nameof(CanSend));
+	}
+
+	private string GetSelectedCenterTabKey()
+	{
+		return CenterTabs.FirstOrDefault(static tab => tab.IsSelected)?.Key ?? "request";
+	}
+
+	private void ApplyRequestEditorChange(string value)
+	{
+		string selectedTabKey = GetSelectedCenterTabKey();
+		switch (selectedTabKey)
+		{
+			case "request":
+				_requestEditorText = NormalizeLineEndings(value);
+				SyncSupportEditorsFromRequestSource();
+				break;
+			case "headers":
+				_headersEditorText = NormalizeLineEndings(value);
+				_requestEditorText = _documentTextService.UpsertHeaders(_requestEditorText, _headersEditorText);
+				break;
+			case "body":
+				_bodyEditorText = NormalizeLineEndings(value);
+				_requestEditorText = _documentTextService.UpsertBody(_requestEditorText, _requestBodyMode, _bodyEditorText);
+				break;
+			case "script":
+				_scriptEditorText = NormalizeLineEndings(value);
+				break;
+			case "tests":
+				_testsEditorText = NormalizeLineEndings(value);
+				_requestEditorText = _documentTextService.UpsertTests(_requestEditorText, _testsEditorText);
+				break;
+			case "variables":
+				_variablesEditorText = NormalizeLineEndings(value);
+				_requestEditorText = _documentTextService.UpsertVariables(_requestEditorText, _variablesEditorText);
+				break;
+			default:
+				_requestEditorText = NormalizeLineEndings(value);
+				break;
+		}
+
+		UpdateRequestMetadataFromSource();
+		MarkCurrentDocumentDirty();
+		if (!_suppressRequestAutosave)
+		{
+			ScheduleRequestAutosave();
+		}
+	}
+
+	private void SyncSupportEditorsFromRequestSource()
+	{
+		if (_suppressDocumentSynchronization)
+		{
+			return;
+		}
+
+		_suppressDocumentSynchronization = true;
+		try
+		{
+			ForRestScriptEditableSections sections = _documentTextService.Extract(_requestEditorText);
+			_headersEditorText = sections.Headers;
+			_bodyEditorText = sections.Body;
+			_testsEditorText = sections.Tests;
+			_variablesEditorText = sections.Variables;
+			_requestBodyMode = sections.BodyMode;
+			if (!string.IsNullOrWhiteSpace(sections.Name))
+			{
+				_requestName = sections.Name;
+				OnPropertyChanged(nameof(RequestName));
+				OnPropertyChanged(nameof(RequestDocumentLabel));
+				OnPropertyChanged(nameof(RequestStateStatus));
+				OnPropertyChanged(nameof(ActiveDocumentSummary));
+				if (IsActiveRequestEditor)
+				{
+					ActiveDocumentLabel = RequestDocumentLabel;
+				}
+			}
+		}
+		finally
+		{
+			_suppressDocumentSynchronization = false;
+		}
+	}
+
+	private void UpdateRequestMetadataFromSource()
+	{
+		ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(_requestEditorText, DemoWorkspaceId, RequestName);
+		if (!compilation.Succeeded || compilation.Payload is null)
+		{
+			ExecutionStatus = compilation.Diagnostics.Count == 0
+				? "Editing request document"
+				: string.Join("  ", compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
+			RequestTarget = BuildDefaultRequestUrl(RequestLocation);
+			return;
+		}
+
+		RequestName = compilation.Payload.Request.Name;
+		SelectedMethod = compilation.Payload.Request.Method.ToString().ToUpperInvariant();
+		RequestTarget = compilation.Payload.Request.UrlTemplate;
+		RequestSummary = $"{SelectedMethod} request script";
+		ExecutionStatus = "Request document ready";
+		UpdateCurrentDocumentMetadata();
+	}
+
+	private void MarkCurrentDocumentDirty()
+	{
+		RequestDocumentViewModel? currentDocument = OpenDocuments.FirstOrDefault(static document => document.IsSelected);
+		if (currentDocument is null)
+		{
+			return;
+		}
+
+		currentDocument.Title = RequestName;
+		currentDocument.Method = SelectedMethod;
+		currentDocument.Summary = RequestSummary;
+		currentDocument.Location = RequestLocation;
+		currentDocument.IsDirty = true;
+
+		NavigationItemViewModel? explorerItem = ExplorerSections
+			.SelectMany(static section => section.Items)
+			.FirstOrDefault(item => string.Equals(item.Context, RequestLocation, StringComparison.OrdinalIgnoreCase));
+		if (explorerItem is not null)
+		{
+			explorerItem.Title = RequestName;
+			explorerItem.Detail = RequestSummary;
+			explorerItem.AccentColor = ResolveMethodAccent(SelectedMethod);
+		}
+	}
+
+	private async Task PersistCurrentRequestAsync(CancellationToken cancellationToken = default)
+	{
+		RequestWorkbenchDocumentState state = BuildCurrentDocumentState();
+		_documentStates[state.Location] = state;
+		await _requestWorkbenchStateStore.SaveAsync(
+			new()
+			{
+				SelectedWorkspace = SelectedWorkspace,
+				SelectedEnvironment = SelectedEnvironment,
+				SelectedDocumentLocation = RequestLocation,
+				Documents = [.. _documentStates.Values.OrderBy(static item => item.Location, StringComparer.OrdinalIgnoreCase)]
+			},
+			cancellationToken);
+
+		RequestDocumentViewModel? currentDocument = OpenDocuments.FirstOrDefault(static document => document.IsSelected);
+		if (currentDocument is not null)
+		{
+			currentDocument.IsDirty = false;
+		}
+	}
+
+	private void ScheduleRequestAutosave()
+	{
+		CancellationTokenSource saveSource = new();
+		CancellationTokenSource? previousSource = Interlocked.Exchange(ref _requestSaveSource, saveSource);
+		previousSource?.Cancel();
+		previousSource?.Dispose();
+
+		_ = Task.Run(
+			async () =>
+			{
+				try
+				{
+					await Task.Delay(600, saveSource.Token);
+					await PersistCurrentRequestAsync(saveSource.Token);
+				}
+				catch (OperationCanceledException)
+				{
+				}
+			});
+	}
+
+	private RequestWorkbenchDocumentState BuildCurrentDocumentState()
+	{
+		return new()
+		{
+			Title = RequestName,
+			Method = SelectedMethod,
+			Summary = RequestSummary,
+			Location = RequestLocation,
+			RequestSource = NormalizeLineEndings(RequestEditorText),
+			PreRequestScript = NormalizeLineEndings(ScriptEditorText)
+		};
+	}
+
+	private void UpdateCurrentDocumentMetadata()
+	{
+		RequestDocumentViewModel? currentDocument = OpenDocuments.FirstOrDefault(static document => document.IsSelected);
+		if (currentDocument is not null)
+		{
+			currentDocument.Title = RequestName;
+			currentDocument.Method = SelectedMethod;
+			currentDocument.Summary = RequestSummary;
+			currentDocument.Location = RequestLocation;
+		}
+
+		NavigationItemViewModel? explorerItem = ExplorerSections
+			.SelectMany(static section => section.Items)
+			.FirstOrDefault(item => string.Equals(item.Context, RequestLocation, StringComparison.OrdinalIgnoreCase));
+		if (explorerItem is not null)
+		{
+			explorerItem.Title = RequestName;
+			explorerItem.Detail = RequestSummary;
+			explorerItem.AccentColor = ResolveMethodAccent(SelectedMethod);
+		}
+	}
+
+	private void ApplyCompilationFailure(IReadOnlyList<ForRestScriptDiagnostic> diagnostics)
+	{
+		ResponseState = "Compile failed";
+		ResponseBodyText = string.Empty;
+		ResponseRawText = string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => $"Line {diagnostic.Line}, Col {diagnostic.Column}: {diagnostic.Message}"));
+		_responseTimeStatus = "--";
+		_responseSizeStatus = "--";
+		ExecutionStatus = diagnostics.Count == 0
+			? "Request document failed to compile"
+			: diagnostics[0].Message;
+		ResponseHeaderRows.Clear();
+		TraceEntries.Clear();
+		TraceEntries.Add(new TraceEntryViewModel("compile", ExecutionStatus, DateTime.Now.ToString("T"), _dangerColor));
+		OutputMetrics.Clear();
+		OutputMetrics.Add(new OutputMetricViewModel("Status", "Compile error", _dangerColor));
+		OnPropertyChanged(nameof(ResponseTimeStatus));
+		OnPropertyChanged(nameof(ResponseSizeStatus));
+	}
+
+	private void PersistActiveRequestInBackground()
+	{
+		if (!_isInitialized || !IsActiveRequestEditor || string.IsNullOrWhiteSpace(RequestLocation))
+		{
+			return;
+		}
+
+		_documentStates[RequestLocation] = BuildCurrentDocumentState();
+		_ = Task.Run(
+			async () =>
+			{
+				try
+				{
+					await PersistCurrentRequestAsync();
+				}
+				catch
+				{
+				}
+			});
+	}
+
+	private AppProfile BuildProfile()
+	{
+		return new()
+		{
+			GlobalVariables =
+			[
+				new VariableDefinition { Key = "workspace_name", Value = SelectedWorkspace, Scope = VariableScope.Global },
+				new VariableDefinition { Key = "environment_name", Value = SelectedEnvironment, Scope = VariableScope.Global }
+			]
+		};
+	}
+
+	private WorkspaceSnapshot BuildWorkspaceSnapshot()
+	{
+		return new()
+		{
+			Workspace = new()
+			{
+				Id = DemoWorkspaceId,
+				Name = SelectedWorkspace,
+				Variables =
+				[
+					new VariableDefinition { Key = "workspace_name", Value = SelectedWorkspace, Scope = VariableScope.Workspace },
+					new VariableDefinition { Key = "base_url", Value = $"https://httpbin.org/anything{RequestLocation}", Scope = VariableScope.Workspace }
+				]
+			},
+			Environments = BuildEnvironmentDefinition() is { } environment ? [environment] : []
+		};
+	}
+
+	private EnvironmentDefinition BuildEnvironmentDefinition()
+	{
+		return new()
+		{
+			WorkspaceId = DemoWorkspaceId,
+			Name = SelectedEnvironment,
+			IsActive = true,
+			Variables =
+			[
+				new VariableDefinition { Key = "environment_name", Value = SelectedEnvironment, Scope = VariableScope.Environment }
+			]
+		};
 	}
 
 	private void SetActiveEditorTextInternal(string value)
@@ -1101,6 +1641,8 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(RightPaneWidth));
 		OnPropertyChanged(nameof(LeftSplitterWidth));
 		OnPropertyChanged(nameof(RightSplitterWidth));
+		OnPropertyChanged(nameof(ShowLeftPaneRestoreButton));
+		OnPropertyChanged(nameof(ShowRightPaneRestoreButton));
 	}
 
 	private void NotifyOverlayChanged()
@@ -1110,9 +1652,23 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsOverlayBackdropVisible));
 	}
 
-	private static string BuildRequestTarget(string location)
+	private static RequestWorkbenchDocumentState BuildDefaultDocumentState(string title, string method, string summary, string location)
 	{
-		return $"{{base_url}}{location}/{{resource_id}}?trace={{trace_id}}";
+		string requestUrl = BuildDefaultRequestUrl(location);
+		return new()
+		{
+			Title = title,
+			Method = method,
+			Summary = summary,
+			Location = location,
+			RequestSource = BuildRequestEditorText(title, method, requestUrl),
+			PreRequestScript = BuildScriptEditorText(title)
+		};
+	}
+
+	private static string BuildDefaultRequestUrl(string location)
+	{
+		return $"https://httpbin.org/anything{location}/{{{{resource_id}}}}?trace={{{{trace_id}}}}";
 	}
 
 	private static string BuildRequestDocumentLabel(string title)
@@ -1140,25 +1696,54 @@ public sealed class MainPageViewModel : ObservableObject
 		return string.Join(
 			Environment.NewLine,
 			[
-				"base_url = \"http://putsomethinghere.what/{workspace_id}/test/12-{request_id}\"",
-				"trace_id = \"{{trace_id}}\"",
-				"resource_id = \"{resource_id}\"",
-				string.Empty,
-				$"@request \"{title}\"",
-				$"{method} {target}",
-				"header Accept = \"application/json\"",
-				"header Authorization = \"Bearer {{access_token}}\"",
-				"header X-Workspace = \"{{workspace_name}}\"",
-				"header X-Correlation-Id = \"12-{{request_id}}\"",
-				string.Empty,
-				"body json {",
-				"  \"firstName\": \"Ada\",",
-				"  \"country\": \"Spain\",",
-				"  \"age\": 30",
+				"meta {",
+				$"  name = \"{title}\"",
 				"}",
 				string.Empty,
-				"retry 3 delay 250ms when response.status >= 500",
-				"capture response.body.payload.id as user_id"
+				"vars {",
+				"  request resource_id = \"42\"",
+				"  runtime trace_id = guid()",
+				"}",
+				string.Empty,
+				"request {",
+				$"  method = {method}",
+				$"  url = \"{target}\"",
+				"  timeout = 15000",
+				"  redirects = true",
+				"  ssl = true",
+				"  history = true",
+				"  content_type = \"application/json\"",
+				"}",
+				string.Empty,
+				"headers {",
+				"  Accept = \"application/json\"",
+				"  X-Workspace = \"{{workspace_name}}\"",
+				"  X-Environment = \"{{environment_name}}\"",
+				"  X-Correlation-Id = \"{{trace_id}}\"",
+				"}",
+				string.Empty,
+				"body json \"\"\"",
+				"{",
+				$"  \"request\": \"{title}\",",
+				"  \"phase\": \"shell-reset\",",
+				"  \"surface\": \"editor-first\",",
+				"  \"payload\": {",
+				"    \"firstName\": \"Ada\",",
+				"    \"country\": \"Spain\",",
+				"    \"age\": 30",
+				"  }",
+				"}",
+				"\"\"\"",
+				string.Empty,
+				"tests {",
+				"  status == 200 \"returns 200\"",
+				"  header \"Content-Type\" contains \"json\" \"json response\"",
+				"}",
+				string.Empty,
+				"retry {",
+				"  count = 1",
+				"  interval = 250",
+				"}"
 			]);
 	}
 
@@ -1167,11 +1752,10 @@ public sealed class MainPageViewModel : ObservableObject
 		return string.Join(
 			Environment.NewLine,
 			[
-				"Accept: application/json",
-				"Content-Type: application/json",
-				"X-Trace: shell-reset",
-				"X-Environment: local",
-				"X-Workbench: editor-first"
+				"Accept = \"application/json\"",
+				"X-Workspace = \"{{workspace_name}}\"",
+				"X-Environment = \"{{environment_name}}\"",
+				"X-Correlation-Id = \"{{trace_id}}\""
 			]);
 	}
 
@@ -1198,12 +1782,10 @@ public sealed class MainPageViewModel : ObservableObject
 		return string.Join(
 			Environment.NewLine,
 			[
-				"beforeSend(ctx) {",
-				$"  ctx.vars.requestName = \"{title}\"",
-				"  ctx.vars.phase = \"shell-reset\"",
-				"  ctx.headers[\"x-shell-surface\"] = \"editor-first\"",
-				"  ctx.headers[\"x-environment\"] = ctx.environment.name",
-				"}"
+				$"variables.Set(\"request_name\", \"{title}\");",
+				"request.SetHeader(\"X-Shell-Surface\", \"editor-first\");",
+				"request.SetHeader(\"X-Request-Source\", \"maui\");",
+				"console.Log(\"Prepared request before send.\");"
 			]);
 	}
 
@@ -1212,10 +1794,8 @@ public sealed class MainPageViewModel : ObservableObject
 		return string.Join(
 			Environment.NewLine,
 			[
-				"expect(response.status).toEqual(200)",
-				"expect(response.timeMs).toBeLessThan(500)",
-				"expect(json(\"$.payload.country\")).toEqual(\"Spain\")",
-				"expect(response.headers[\"content-type\"]).toContain(\"json\")"
+				"status == 200 \"returns 200\"",
+				"header \"Content-Type\" contains \"json\" \"json response\""
 			]);
 	}
 
@@ -1224,46 +1804,23 @@ public sealed class MainPageViewModel : ObservableObject
 		return string.Join(
 			Environment.NewLine,
 			[
-				"host = \"api.echo.local\"",
-				"workspace = \"echo-lab\"",
-				"accent = \"azure\"",
-				"region = \"local\"",
-				"phase = \"shell-reset\""
+				"request resource_id = \"42\"",
+				"runtime trace_id = guid()"
 			]);
 	}
 
-	private static string BuildResponseBodyText()
+	private static string NormalizeLineEndings(string text)
 	{
-		return string.Join(
-			Environment.NewLine,
-			[
-				"{",
-				"  \"ok\": true,",
-				"  \"phase\": \"shell-reset\",",
-				"  \"surface\": \"response-pane\",",
-				"  \"payload\": {",
-				"    \"firstName\": \"Ada\",",
-				"    \"country\": \"Spain\",",
-				"    \"age\": 30",
-				"  }",
-				"}"
-			]);
+		return (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
 	}
 
-	private static string BuildResponseRawText()
+	private static string FormatResponseSize(long sizeBytes)
 	{
-		return string.Join(
-			Environment.NewLine,
-			[
-				"HTTP/1.1 200 OK",
-				"content-type: application/json; charset=utf-8",
-				"cache-control: no-store",
-				"x-shell-phase: phase-1",
-				string.Empty,
-				"{",
-				"  \"ok\": true,",
-				"  \"phase\": \"shell-reset\"",
-				"}"
-			]);
+		return sizeBytes switch
+		{
+			>= 1_048_576 => $"{sizeBytes / 1_048_576d:0.##} MB",
+			>= 1_024 => $"{sizeBytes / 1_024d:0.##} KB",
+			_ => $"{sizeBytes} B"
+		};
 	}
 }

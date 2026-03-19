@@ -26,17 +26,54 @@ public sealed class RequestDocumentViewModel(
 	bool isDirty,
 	bool isSelected = false) : ObservableObject
 {
+	private string _title = title;
+	private string _method = method;
+	private string _summary = summary;
+	private string _location = location;
+	private bool _isDirty = isDirty;
 	private bool _isSelected = isSelected;
 
-	public string Title { get; } = title;
+	public string Title
+	{
+		get => _title;
+		set
+		{
+			if (SetProperty(ref _title, value))
+			{
+				OnPropertyChanged(nameof(DisplayTitle));
+			}
+		}
+	}
 
-	public string Method { get; } = method;
+	public string Method
+	{
+		get => _method;
+		set => SetProperty(ref _method, value);
+	}
 
-	public string Summary { get; } = summary;
+	public string Summary
+	{
+		get => _summary;
+		set => SetProperty(ref _summary, value);
+	}
 
-	public string Location { get; } = location;
+	public string Location
+	{
+		get => _location;
+		set => SetProperty(ref _location, value);
+	}
 
-	public bool IsDirty { get; } = isDirty;
+	public bool IsDirty
+	{
+		get => _isDirty;
+		set
+		{
+			if (SetProperty(ref _isDirty, value))
+			{
+				OnPropertyChanged(nameof(DisplayTitle));
+			}
+		}
+	}
 
 	public string DisplayTitle => IsDirty ? $"{Title} *" : Title;
 
@@ -68,12 +105,22 @@ public sealed class NavigationItemViewModel(
 {
 	private bool _isSelected = isSelected;
 	private Color _accentColor = accentColor;
+	private string _title = title;
+	private string _detail = detail;
 
 	public string Kind { get; } = kind;
 
-	public string Title { get; } = title;
+	public string Title
+	{
+		get => _title;
+		set => SetProperty(ref _title, value);
+	}
 
-	public string Detail { get; } = detail;
+	public string Detail
+	{
+		get => _detail;
+		set => SetProperty(ref _detail, value);
+	}
 
 	public string Context { get; } = context;
 
