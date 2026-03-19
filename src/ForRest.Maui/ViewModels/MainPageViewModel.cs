@@ -7,11 +7,11 @@ namespace ForRest.Maui.ViewModels;
 
 public sealed class MainPageViewModel : ObservableObject
 {
-	private const double DefaultLeftPanePixels = 276d;
-	private const double DefaultRightPanePixels = 344d;
-	private const double MinLeftPanePixels = 228d;
-	private const double MinRightPanePixels = 260d;
-	private const double MinCenterPanePixels = 560d;
+	private const double DefaultLeftPanePixels = 260d;
+	private const double DefaultRightPanePixels = 316d;
+	private const double MinLeftPanePixels = 220d;
+	private const double MinRightPanePixels = 248d;
+	private const double MinCenterPanePixels = 620d;
 	private const double SplitterPixels = 8d;
 	private const double CompactLayoutBreakpoint = 980d;
 	private const double CompactPaneMinWidth = 300d;
@@ -238,6 +238,7 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			if (SetProperty(ref _requestName, value))
 			{
+				OnPropertyChanged(nameof(RequestDocumentLabel));
 				OnPropertyChanged(nameof(RequestStateStatus));
 				OnPropertyChanged(nameof(ActiveDocumentSummary));
 			}
@@ -263,6 +264,7 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			if (SetProperty(ref _requestLocation, value))
 			{
+				OnPropertyChanged(nameof(RequestDocumentLabel));
 				OnPropertyChanged(nameof(ActiveDocumentSummary));
 			}
 		}
@@ -380,6 +382,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public string ActiveDocumentSummary => $"{SelectedEnvironment}  {RequestLocation}  {RequestSummary}";
 
 	public string RequestStateStatus => $"{SelectedMethod}  {RequestName}";
+
+	public string RequestDocumentLabel => BuildRequestDocumentLabel(RequestName);
 
 	public string OpenTabsStatus => $"{OpenDocuments.Count} docs  {ResponseState}";
 
@@ -775,27 +779,50 @@ public sealed class MainPageViewModel : ObservableObject
 		return $"{{base_url}}{location}/{{resource_id}}?trace={{trace_id}}";
 	}
 
+	private static string BuildRequestDocumentLabel(string title)
+	{
+		if (string.IsNullOrWhiteSpace(title))
+		{
+			return "request.frs";
+		}
+
+		char[] slugCharacters = title
+			.ToLowerInvariant()
+			.Select(character => char.IsLetterOrDigit(character) ? character : '-')
+			.ToArray();
+
+		string slug = string.Join(
+			"-",
+			new string(slugCharacters)
+				.Split('-', StringSplitOptions.RemoveEmptyEntries));
+
+		return string.IsNullOrWhiteSpace(slug) ? "request.frs" : $"{slug}.frs";
+	}
+
 	private static string BuildRequestEditorText(string title, string method, string target)
 	{
 		return string.Join(
 			Environment.NewLine,
 			[
-				"base_url=http://putsomethinghere.what/{workspace_id}/test/12-{request_id}",
-				"trace_id={{trace_id}}",
-				"resource_id={resource_id}",
+				"base_url = \"http://putsomethinghere.what/{workspace_id}/test/12-{request_id}\"",
+				"trace_id = \"{{trace_id}}\"",
+				"resource_id = \"{resource_id}\"",
 				string.Empty,
 				$"@request \"{title}\"",
 				$"{method} {target}",
-				"Accept: application/json",
-				"Authorization: Bearer {{access_token}}",
-				"X-Workspace: {{workspace_name}}",
-				"X-Correlation-Id: 12-{{request_id}}",
+				"header Accept = \"application/json\"",
+				"header Authorization = \"Bearer {{access_token}}\"",
+				"header X-Workspace = \"{{workspace_name}}\"",
+				"header X-Correlation-Id = \"12-{{request_id}}\"",
 				string.Empty,
-				"{",
+				"body json {",
 				"  \"firstName\": \"Ada\",",
 				"  \"country\": \"Spain\",",
 				"  \"age\": 30",
-				"}"
+				"}",
+				string.Empty,
+				"retry 3 delay 250ms when response.status >= 500",
+				"capture response.body.payload.id as user_id"
 			]);
 	}
 

@@ -18,11 +18,13 @@ public partial class MonacoEditorSurface : ContentView
       margin: 0;
       padding: 0;
       overflow: hidden;
-      background: #fcfdfe;
+      background: #fbfcfd;
     }
 
     body {
       font-family: "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
   </style>
 </head>
@@ -59,16 +61,20 @@ public partial class MonacoEditorSurface : ContentView
         monaco.languages.setMonarchTokensProvider("forrest", {
           tokenizer: {
             root: [
+              [/#[^\n]*/, "comment"],
               [/^@\w[\w-]*/, "keyword.directive"],
               [/\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/, "keyword.method"],
+              [/\b(header|body|retry|delay|when|capture|as|json|let|use|with|from|if|else|for|in)\b/, "keyword.flow"],
+              [/\b(true|false|null)\b/, "keyword.literal"],
+              [/[A-Za-z_][\w-]*(?=\s*=)/, "variable.definition"],
               [/\{\{[\w.\-]+\}\}/, "variable.placeholder"],
               [/\{[\w.\-]+\}/, "variable.placeholder"],
               [/[A-Za-z_][\w-]*(?=\s*:)/, "attribute.name"],
               [/\bhttps?:\/\/[^\s]+/, "string.url"],
-              [/#[^\n]*/, "comment"],
               [/"([^"\\]|\\.)*"/, "string"],
               [/'([^'\\]|\\.)*'/, "string"],
-              [/\b\d+\b/, "number"]
+              [/\b\d+(ms|s|m)?\b/, "number"],
+              [/[><=!]=?/, "operator"]
             ]
           }
         });
@@ -95,24 +101,34 @@ public partial class MonacoEditorSurface : ContentView
           base: "vs",
           inherit: true,
           rules: [
-            { token: "keyword.directive", foreground: "1E6FB9", fontStyle: "bold" },
+            { token: "keyword.directive", foreground: "0E5FA5", fontStyle: "bold" },
             { token: "keyword.method", foreground: "176AB8", fontStyle: "bold" },
+            { token: "keyword.flow", foreground: "345E86", fontStyle: "bold" },
+            { token: "keyword.literal", foreground: "5B5D98" },
+            { token: "variable.definition", foreground: "7B5B18" },
             { token: "variable.placeholder", foreground: "A5691B" },
-            { token: "attribute.name", foreground: "2F5D87" },
+            { token: "attribute.name", foreground: "46617D" },
+            { token: "string", foreground: "1F6953" },
             { token: "string.url", foreground: "0B63A7" },
-            { token: "comment", foreground: "7B8796" },
-            { token: "number", foreground: "8F4B15" }
+            { token: "comment", foreground: "8190A0", fontStyle: "italic" },
+            { token: "number", foreground: "95511A" },
+            { token: "operator", foreground: "6A7786" }
           ],
           colors: {
-            "editor.background": "#FCFDFE",
-            "editorLineNumber.foreground": "#8A96A5",
-            "editorLineNumber.activeForeground": "#425160",
-            "editorLineHighlightBackground": "#F4F7FA",
-            "editor.selectionBackground": "#DCEBFA",
-            "editor.inactiveSelectionBackground": "#EAF2FB",
-            "editorCursor.foreground": "#16202A",
-            "editorIndentGuide.background": "#E7ECF1",
-            "editorIndentGuide.activeBackground": "#CDD7E1"
+            "editor.background": "#FBFCFD",
+            "editor.foreground": "#16202A",
+            "editorGutter.background": "#F4F7FA",
+            "editorLineNumber.foreground": "#97A4B2",
+            "editorLineNumber.activeForeground": "#2C3946",
+            "editorLineHighlightBackground": "#F5F8FB",
+            "editor.selectionBackground": "#D5E8FA",
+            "editor.inactiveSelectionBackground": "#E8F1FB",
+            "editorCursor.foreground": "#0F1D2D",
+            "editorWhitespace.foreground": "#D4DCE5",
+            "editorBracketMatch.background": "#EAF2FA",
+            "editorBracketMatch.border": "#C7D5E3",
+            "editorIndentGuide.background": "#E6EBF1",
+            "editorIndentGuide.activeBackground": "#C9D3DE"
           }
         });
       }
@@ -121,9 +137,12 @@ public partial class MonacoEditorSurface : ContentView
         editor: null,
         model: null,
         ready: false,
+        pendingValue: "",
+        pendingLanguage: "forrest",
+        pendingReadOnly: false,
         create: function (monaco) {
           registerLanguage(monaco);
-          this.model = monaco.editor.createModel("", "forrest");
+          this.model = monaco.editor.createModel(this.pendingValue || "", this.pendingLanguage || "forrest");
           this.editor = monaco.editor.create(document.getElementById("container"), {
             model: this.model,
             theme: "forrest-light",
@@ -131,29 +150,52 @@ public partial class MonacoEditorSurface : ContentView
             minimap: { enabled: false },
             scrollBeyondLastLine: false,
             lineNumbers: "on",
-            lineNumbersMinChars: 4,
+            lineNumbersMinChars: 3,
+            lineDecorationsWidth: 10,
             glyphMargin: false,
             folding: false,
-            readOnly: false,
+            readOnly: this.pendingReadOnly,
             tabSize: 2,
             insertSpaces: true,
             fontFamily: "Cascadia Mono, Consolas, 'Courier New', monospace",
-            fontSize: 13,
+            fontSize: 13.5,
+            lineHeight: 20,
+            letterSpacing: 0.1,
             wordWrap: "on",
             smoothScrolling: true,
+            renderLineHighlight: "line",
             renderWhitespace: "selection",
-            padding: { top: 16, bottom: 16 }
+            cursorBlinking: "smooth",
+            cursorSmoothCaretAnimation: "on",
+            cursorWidth: 2,
+            guides: {
+              indentation: true,
+              highlightActiveIndentation: true
+            },
+            bracketPairColorization: {
+              enabled: false
+            },
+            matchBrackets: "always",
+            overviewRulerBorder: false,
+            scrollbar: {
+              verticalScrollbarSize: 10,
+              horizontalScrollbarSize: 10,
+              useShadows: false,
+              alwaysConsumeMouseWheel: false
+            },
+            padding: { top: 8, bottom: 24 }
           });
 
           this.ready = true;
           this.editor.focus();
         },
         setValue: function (value) {
+          this.pendingValue = value ?? "";
           if (!this.editor) {
             return;
           }
 
-          const normalized = value ?? "";
+          const normalized = this.pendingValue;
           if (this.editor.getValue() === normalized) {
             return;
           }
@@ -165,18 +207,20 @@ public partial class MonacoEditorSurface : ContentView
           }
         },
         setLanguage: function (language) {
+          this.pendingLanguage = language || "forrest";
           if (!this.model || !window.monaco) {
             return;
           }
 
-          window.monaco.editor.setModelLanguage(this.model, language || "forrest");
+          window.monaco.editor.setModelLanguage(this.model, this.pendingLanguage);
         },
         setReadOnly: function (value) {
+          this.pendingReadOnly = !!value;
           if (!this.editor) {
             return;
           }
 
-          this.editor.updateOptions({ readOnly: !!value });
+          this.editor.updateOptions({ readOnly: this.pendingReadOnly });
         },
         focus: function () {
           if (this.editor) {

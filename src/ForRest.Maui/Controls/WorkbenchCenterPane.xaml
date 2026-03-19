@@ -4,19 +4,21 @@
              xmlns:controls="clr-namespace:ForRest.Maui.Controls"
              x:Class="ForRest.Maui.Controls.WorkbenchCenterPane">
 
-    <Border Style="{StaticResource PaneBorderStyle}">
+    <Border Style="{StaticResource PaneBorderStyle}"
+            BackgroundColor="{AppThemeBinding Light={StaticResource EditorBackgroundLight}, Dark={StaticResource EditorBackgroundDark}}"
+            Stroke="{AppThemeBinding Light={StaticResource DividerLight}, Dark={StaticResource DividerDark}}">
         <Grid RowDefinitions="Auto,*">
-            <Grid Padding="10,6,10,4"
+            <Grid Padding="8,4,8,2"
                   ColumnDefinitions="Auto,*"
-                  ColumnSpacing="8">
+                  ColumnSpacing="6">
                 <Label Text="{Binding SelectedMethod}"
                        VerticalTextAlignment="Start"
                        TextColor="{Binding SelectedMethodColor}"
                        Style="{StaticResource MonoMetaStyle}" />
 
                 <Label Grid.Column="1"
-                       Text="{Binding RequestName}"
-                       Style="{StaticResource PaneTitleStyle}" />
+                       Text="{Binding RequestDocumentLabel}"
+                       Style="{StaticResource EditorDocumentTitleStyle}" />
             </Grid>
 
             <Grid Grid.Row="1"
