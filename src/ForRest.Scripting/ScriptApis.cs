@@ -217,6 +217,12 @@ public sealed class TimeApi
 
 public sealed class JsonApi
 {
+    #region Private Fields
+
+    private readonly JsonNodeSelector selector = new();
+
+    #endregion
+
     #region Public Methods
 
     public JsonNode? Parse(string content)
@@ -230,6 +236,11 @@ public sealed class JsonApi
         {
             WriteIndented = writeIndented,
         }) ?? string.Empty;
+    }
+
+    public string? Select(JsonNode? node, string selectorText)
+    {
+        return selector.Select(node, selectorText);
     }
 
     #endregion

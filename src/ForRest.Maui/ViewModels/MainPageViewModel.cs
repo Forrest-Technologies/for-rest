@@ -21,11 +21,14 @@ public sealed class MainPageViewModel : ObservableObject
 	private const string RequestDocumentKind = "request";
 	private const string SettingsDocumentKind = "settings";
 
-	private readonly Color _methodGet = Color.FromArgb("#167C65");
-	private readonly Color _methodPost = Color.FromArgb("#176AB8");
-	private readonly Color _methodPut = Color.FromArgb("#9A5A1A");
-	private readonly Color _methodDelete = Color.FromArgb("#B2433D");
-	private readonly Color _methodNeutral = Color.FromArgb("#5D6978");
+	private Color _methodGet = Color.FromArgb("#167C65");
+	private Color _methodPost = Color.FromArgb("#176AB8");
+	private Color _methodPut = Color.FromArgb("#9A5A1A");
+	private Color _methodDelete = Color.FromArgb("#B2433D");
+	private Color _methodNeutral = Color.FromArgb("#5D6978");
+	private Color _successColor = Color.FromArgb("#1E7A5F");
+	private Color _warningColor = Color.FromArgb("#A5691B");
+	private Color _dangerColor = Color.FromArgb("#B2433D");
 	private readonly SettingsTomlDocumentService _settingsTomlDocumentService;
 
 	private double _leftPanePixels = DefaultLeftPanePixels;
@@ -71,6 +74,7 @@ public sealed class MainPageViewModel : ObservableObject
 	public MainPageViewModel(IThemeService themeService, SettingsTomlDocumentService settingsTomlDocumentService)
 	{
 		_settingsTomlDocumentService = settingsTomlDocumentService;
+		ApplyThemePalette(themeService.CurrentTheme, updateCollections: false);
 		_selectedWorkspace = "for-rest://echo-lab";
 		_selectedEnvironment = "Local";
 		_selectedMethod = "POST";
@@ -172,10 +176,10 @@ public sealed class MainPageViewModel : ObservableObject
 
 		OutputMetrics =
 		[
-			new OutputMetricViewModel("Status", "200 OK", Color.FromArgb("#1E7A5F")),
-			new OutputMetricViewModel("Time", "118 ms", Color.FromArgb("#176AB8")),
-			new OutputMetricViewModel("Size", "504 B", Color.FromArgb("#5D6978")),
-			new OutputMetricViewModel("Type", "JSON", Color.FromArgb("#176AB8"))
+			new OutputMetricViewModel("Status", "200 OK", _successColor),
+			new OutputMetricViewModel("Time", "118 ms", _methodPost),
+			new OutputMetricViewModel("Size", "504 B", _methodNeutral),
+			new OutputMetricViewModel("Type", "JSON", _methodPost)
 		];
 
 		TraceEntries =
@@ -201,6 +205,7 @@ public sealed class MainPageViewModel : ObservableObject
 		];
 
 		themeService.ThemeChanged += OnThemeChanged;
+		ApplyThemePalette(themeService.CurrentTheme);
 		ActivateRequestEditor();
 	}
 
@@ -811,7 +816,89 @@ public sealed class MainPageViewModel : ObservableObject
 		_currentThemeName = e.Theme.Name;
 		EditorThemeKey = e.Theme.MonacoThemeKey;
 		ExecutionStatus = e.StatusMessage;
+		ApplyThemePalette(e.Theme);
 		UpdateSettingsTextFromDisk(_currentThemeName);
+	}
+
+	private void ApplyThemePalette(ShellThemeDefinition theme, bool updateCollections = true)
+	{
+		_methodGet = ThemeSupport.ToColor(theme.Colors.MethodGetColor);
+		_methodPost = ThemeSupport.ToColor(theme.Colors.MethodPostColor);
+		_methodPut = ThemeSupport.ToColor(theme.Colors.MethodPutColor);
+		_methodDelete = ThemeSupport.ToColor(theme.Colors.MethodDeleteColor);
+		_methodNeutral = ThemeSupport.ToColor(theme.Colors.MethodNeutralColor);
+		_successColor = ThemeSupport.ToColor(theme.Colors.SuccessColor);
+		_warningColor = ThemeSupport.ToColor(theme.Colors.WarningColor);
+		_dangerColor = ThemeSupport.ToColor(theme.Colors.DangerColor);
+
+		if (!updateCollections)
+		{
+			return;
+		}
+
+		foreach (NavigationItemViewModel item in ExplorerSections.SelectMany(section => section.Items))
+		{
+			item.AccentColor = ResolveNavigationAccent(item);
+		}
+
+		foreach (HistoryEntryViewModel item in HistoryItems)
+		{
+			item.AccentColor = ResolveMethodAccent(item.Method);
+		}
+
+		foreach (TraceEntryViewModel item in TraceEntries)
+		{
+			item.AccentColor = item.Title switch
+			{
+				"send" => _methodPost,
+				"inspect" => _methodGet,
+				_ => _methodNeutral
+			};
+		}
+
+		foreach (OutputMetricViewModel item in OutputMetrics)
+		{
+			item.AccentColor = item.Label switch
+			{
+				"Status" => _successColor,
+				"Time" => _methodPost,
+				"Type" => _methodPost,
+				_ => _methodNeutral
+			};
+		}
+
+		OnPropertyChanged(nameof(SelectedMethodColor));
+		if (IsActiveRequestEditor)
+		{
+			ActiveDocumentKindColor = SelectedMethodColor;
+		}
+		else if (IsActiveSettingsEditor)
+		{
+			ActiveDocumentKindColor = _methodNeutral;
+		}
+	}
+
+	private Color ResolveNavigationAccent(NavigationItemViewModel item)
+	{
+		if (string.Equals(item.DocumentKind, SettingsDocumentKind, StringComparison.Ordinal) ||
+		    string.IsNullOrWhiteSpace(item.Method))
+		{
+			return _methodNeutral;
+		}
+
+		return ResolveMethodAccent(item.Method);
+	}
+
+	private Color ResolveMethodAccent(string? method)
+	{
+		return method?.ToUpperInvariant() switch
+		{
+			"GET" => _methodGet,
+			"POST" => _methodPost,
+			"PUT" => _methodPut,
+			"DELETE" => _methodDelete,
+			_ => _methodNeutral
+		};
 	}
 
 	private void RefreshRequestDraftSignature()

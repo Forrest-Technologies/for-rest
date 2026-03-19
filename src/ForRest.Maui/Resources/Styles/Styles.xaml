@@ -157,7 +157,7 @@
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BackgroundColor" Value="{DynamicResource ThemeAccentColor}" />
         <Setter Property="BorderColor" Value="{DynamicResource ThemeAccentColor}" />
-        <Setter Property="TextColor" Value="White" />
+        <Setter Property="TextColor" Value="{DynamicResource ThemeAccentTextColor}" />
     </Style>
 
     <Style x:Key="CompactToolbarButtonStyle" TargetType="Button">
@@ -169,7 +169,7 @@
         <Setter Property="CornerRadius" Value="0" />
         <Setter Property="BackgroundColor" Value="{DynamicResource ThemeAccentColor}" />
         <Setter Property="BorderColor" Value="{DynamicResource ThemeAccentColor}" />
-        <Setter Property="TextColor" Value="White" />
+        <Setter Property="TextColor" Value="{DynamicResource ThemeAccentTextColor}" />
     </Style>
 
     <Style x:Key="PaneTitleStyle" TargetType="Label">

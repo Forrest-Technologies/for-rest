@@ -32,9 +32,9 @@
                                         CommandParameter="{Binding .}">
                                     <Button.Triggers>
                                         <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeAccentSoftColor}" />
-                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeBorderColor}" />
-                                            <Setter Property="TextColor" Value="{DynamicResource ThemeAccentStrongColor}" />
+                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
                                         </DataTrigger>
                                     </Button.Triggers>
                                 </Button>
@@ -102,7 +102,9 @@
                                                     </Grid>
                                                     <Border.Triggers>
                                                         <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeAccentSoftColor}" />
+                                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
+                                                            <Setter Property="Stroke" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                                            <Setter Property="StrokeThickness" Value="1" />
                                                         </DataTrigger>
                                                     </Border.Triggers>
                                                 </Border>

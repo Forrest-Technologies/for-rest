@@ -43,12 +43,30 @@ public sealed record ThemeColorTokens(
 	string AccentColor,
 	string AccentSoftColor,
 	string AccentStrongColor,
+	string AccentTextColor,
+	string SelectionSoftColor,
+	string SelectionStrongColor,
+	string SelectionBorderColor,
+	string SelectionTextColor,
 	string EditorBackgroundColor,
 	string EditorGutterColor,
 	string SplitterColor,
+	string OverlayBackdropColor,
 	string StatusBackgroundColor,
 	string StatusTextColor,
-	string StatusBorderColor);
+	string StatusBorderColor,
+	string SuccessColor,
+	string WarningColor,
+	string DangerColor,
+	string MethodGetColor,
+	string MethodPostColor,
+	string MethodPutColor,
+	string MethodDeleteColor,
+	string MethodNeutralColor,
+	string WindowChromeBackgroundColor,
+	string WindowChromeForegroundColor,
+	string WindowChromeInactiveBackgroundColor,
+	string WindowChromeInactiveForegroundColor);
 
 public sealed record ShellThemeDefinition(
 	ShellThemeName Name,
@@ -82,12 +100,30 @@ public static class ThemeResourceKeys
 	public const string AccentColor = "ThemeAccentColor";
 	public const string AccentSoftColor = "ThemeAccentSoftColor";
 	public const string AccentStrongColor = "ThemeAccentStrongColor";
+	public const string AccentTextColor = "ThemeAccentTextColor";
+	public const string SelectionSoftColor = "ThemeSelectionSoftColor";
+	public const string SelectionStrongColor = "ThemeSelectionStrongColor";
+	public const string SelectionBorderColor = "ThemeSelectionBorderColor";
+	public const string SelectionTextColor = "ThemeSelectionTextColor";
 	public const string EditorBackgroundColor = "ThemeEditorBackgroundColor";
 	public const string EditorGutterColor = "ThemeEditorGutterColor";
 	public const string SplitterColor = "ThemeSplitterColor";
+	public const string OverlayBackdropColor = "ThemeOverlayBackdropColor";
 	public const string StatusBackgroundColor = "ThemeStatusBackgroundColor";
 	public const string StatusTextColor = "ThemeStatusTextColor";
 	public const string StatusBorderColor = "ThemeStatusBorderColor";
+	public const string SuccessColor = "ThemeSuccessColor";
+	public const string WarningColor = "ThemeWarningColor";
+	public const string DangerColor = "ThemeDangerColor";
+	public const string MethodGetColor = "ThemeMethodGetColor";
+	public const string MethodPostColor = "ThemeMethodPostColor";
+	public const string MethodPutColor = "ThemeMethodPutColor";
+	public const string MethodDeleteColor = "ThemeMethodDeleteColor";
+	public const string MethodNeutralColor = "ThemeMethodNeutralColor";
+	public const string WindowChromeBackgroundColor = "ThemeWindowChromeBackgroundColor";
+	public const string WindowChromeForegroundColor = "ThemeWindowChromeForegroundColor";
+	public const string WindowChromeInactiveBackgroundColor = "ThemeWindowChromeInactiveBackgroundColor";
+	public const string WindowChromeInactiveForegroundColor = "ThemeWindowChromeInactiveForegroundColor";
 }
 
 public static class ThemeSupport

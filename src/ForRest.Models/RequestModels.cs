@@ -87,6 +87,13 @@ public sealed record ScheduleDefinition
     public int IntervalMilliseconds { get; init; }
 }
 
+public sealed record RetryDefinition
+{
+    public int Count { get; init; }
+
+    public int IntervalMilliseconds { get; init; }
+}
+
 public sealed record RequestDefinition
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -117,6 +124,8 @@ public sealed record RequestDefinition
     public string TestsScript { get; init; } = string.Empty;
 
     public ScheduleDefinition Schedule { get; init; } = new();
+
+    public RetryDefinition Retry { get; init; } = new();
 
     public int TimeoutMilliseconds { get; init; } = 30_000;
 

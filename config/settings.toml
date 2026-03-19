@@ -3,7 +3,7 @@
 
 [appearance.theme]
 light = false
-azure = true
-dark = false
+azure = false
+dark = true
 black = false
 amber = false

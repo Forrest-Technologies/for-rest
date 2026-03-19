@@ -5,19 +5,9 @@
              x:Class="ForRest.Maui.MainPage">
 
     <Grid Padding="0"
-          RowDefinitions="Auto,*,Auto"
+          RowDefinitions="*,Auto"
           RowSpacing="0">
-        <Border Style="{StaticResource ToolbarBorderStyle}">
-            <Grid ColumnDefinitions="*">
-                <Border Style="{StaticResource ToolbarFieldBorderStyle}">
-                    <Entry Placeholder="https://{base_url}/..."
-                           Text="{Binding RequestTarget}"
-                           Style="{StaticResource CompactToolbarEntryStyle}" />
-                </Border>
-            </Grid>
-        </Border>
-
-        <Grid Grid.Row="1"
+        <Grid
               x:Name="WorkbenchHost"
               SizeChanged="OnWorkbenchHostSizeChanged">
             <Grid x:Name="WorkbenchGrid"
@@ -70,7 +60,7 @@
             </Grid>
 
             <Grid IsVisible="{Binding IsOverlayBackdropVisible}"
-                  BackgroundColor="#220F172A"
+                  BackgroundColor="{DynamicResource ThemeOverlayBackdropColor}"
                   ZIndex="5">
                 <Grid.GestureRecognizers>
                     <TapGestureRecognizer Tapped="OnOverlayBackdropTapped" />
@@ -90,7 +80,7 @@
                                     ZIndex="6" />
         </Grid>
 
-        <Border Grid.Row="2"
+        <Border Grid.Row="1"
                 Style="{StaticResource StatusBarBorderStyle}">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto"
                   ColumnSpacing="10">

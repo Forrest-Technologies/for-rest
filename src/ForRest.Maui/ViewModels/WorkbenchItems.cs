@@ -67,6 +67,7 @@ public sealed class NavigationItemViewModel(
 	string editorLanguage = "forrest") : ObservableObject
 {
 	private bool _isSelected = isSelected;
+	private Color _accentColor = accentColor;
 
 	public string Kind { get; } = kind;
 
@@ -76,7 +77,11 @@ public sealed class NavigationItemViewModel(
 
 	public string Context { get; } = context;
 
-	public Color AccentColor { get; } = accentColor;
+	public Color AccentColor
+	{
+		get => _accentColor;
+		set => SetProperty(ref _accentColor, value);
+	}
 
 	public string? Method { get; } = method;
 
@@ -95,8 +100,10 @@ public sealed class NavigationItemViewModel(
 	}
 }
 
-public sealed class HistoryEntryViewModel(string method, string title, string summary, string when, Color accentColor)
+public sealed class HistoryEntryViewModel(string method, string title, string summary, string when, Color accentColor) : ObservableObject
 {
+	private Color _accentColor = accentColor;
+
 	public string Method { get; } = method;
 
 	public string Title { get; } = title;
@@ -105,7 +112,11 @@ public sealed class HistoryEntryViewModel(string method, string title, string su
 
 	public string When { get; } = when;
 
-	public Color AccentColor { get; } = accentColor;
+	public Color AccentColor
+	{
+		get => _accentColor;
+		set => SetProperty(ref _accentColor, value);
+	}
 }
 
 public sealed class NameValueRowViewModel(string name, string value, string scope, bool isEnabled = true)
@@ -119,22 +130,34 @@ public sealed class NameValueRowViewModel(string name, string value, string scop
 	public bool IsEnabled { get; } = isEnabled;
 }
 
-public sealed class OutputMetricViewModel(string label, string value, Color accentColor)
+public sealed class OutputMetricViewModel(string label, string value, Color accentColor) : ObservableObject
 {
+	private Color _accentColor = accentColor;
+
 	public string Label { get; } = label;
 
 	public string Value { get; } = value;
 
-	public Color AccentColor { get; } = accentColor;
+	public Color AccentColor
+	{
+		get => _accentColor;
+		set => SetProperty(ref _accentColor, value);
+	}
 }
 
-public sealed class TraceEntryViewModel(string title, string detail, string when, Color accentColor)
+public sealed class TraceEntryViewModel(string title, string detail, string when, Color accentColor) : ObservableObject
 {
+	private Color _accentColor = accentColor;
+
 	public string Title { get; } = title;
 
 	public string Detail { get; } = detail;
 
 	public string When { get; } = when;
 
-	public Color AccentColor { get; } = accentColor;
+	public Color AccentColor
+	{
+		get => _accentColor;
+		set => SetProperty(ref _accentColor, value);
+	}
 }

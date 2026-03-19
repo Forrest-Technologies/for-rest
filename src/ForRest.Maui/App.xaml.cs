@@ -13,6 +13,7 @@ public partial class App : Application
 		InitializeComponent();
 		_services = services;
 		_themeService = themeService;
+		_themeService.ThemeChanged += OnThemeChanged;
 		_themeService.Start();
 	}
 
@@ -33,6 +34,17 @@ public partial class App : Application
 			window.MinimumHeight = 720;
 		}
 
+		window.HandlerChanged += (_, _) => WindowChromeStyler.Apply(window, _themeService.CurrentTheme);
+		WindowChromeStyler.Apply(window, _themeService.CurrentTheme);
+
 		return window;
+	}
+
+	private void OnThemeChanged(object? sender, ThemeChangedEventArgs e)
+	{
+		foreach (Window window in Windows)
+		{
+			WindowChromeStyler.Apply(window, e.Theme);
+		}
 	}
 }

@@ -16,12 +16,18 @@ public partial class MonacoEditorSurface : ContentView
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
+    :root {
+      --host-background: #fbfcfd;
+      --editable-span-bg: rgba(30, 111, 185, 0.08);
+      --editable-span-border: rgba(30, 111, 185, 0.18);
+    }
+
     html, body, #container {
       height: 100%;
       margin: 0;
       padding: 0;
       overflow: hidden;
-      background: #fbfcfd;
+      background: var(--host-background);
     }
 
     body {
@@ -31,8 +37,8 @@ public partial class MonacoEditorSurface : ContentView
     }
 
     .editable-span {
-      background: rgba(30, 111, 185, 0.08);
-      border-bottom: 1px solid rgba(30, 111, 185, 0.18);
+      background: var(--editable-span-bg);
+      border-bottom: 1px solid var(--editable-span-border);
       border-radius: 2px;
     }
   </style>
@@ -258,6 +264,41 @@ public partial class MonacoEditorSurface : ContentView
         return new TextDecoder().decode(bytes);
       }
 
+      function applyHostThemeChrome(themeKey) {
+        const chrome = {
+          "forrest-light": {
+            background: "#FCFDFE",
+            editableBackground: "rgba(78, 109, 139, 0.10)",
+            editableBorder: "rgba(78, 109, 139, 0.22)"
+          },
+          "forrest-azure": {
+            background: "#FAFCFF",
+            editableBackground: "rgba(30, 111, 185, 0.10)",
+            editableBorder: "rgba(30, 111, 185, 0.22)"
+          },
+          "forrest-dark": {
+            background: "#141B24",
+            editableBackground: "rgba(115, 183, 246, 0.16)",
+            editableBorder: "rgba(115, 183, 246, 0.30)"
+          },
+          "forrest-black": {
+            background: "#101419",
+            editableBackground: "rgba(143, 180, 229, 0.16)",
+            editableBorder: "rgba(143, 180, 229, 0.30)"
+          },
+          "forrest-amber": {
+            background: "#FFFCF6",
+            editableBackground: "rgba(179, 107, 30, 0.12)",
+            editableBorder: "rgba(179, 107, 30, 0.24)"
+          }
+        };
+
+        const next = chrome[themeKey] || chrome["forrest-azure"];
+        document.documentElement.style.setProperty("--host-background", next.background);
+        document.documentElement.style.setProperty("--editable-span-bg", next.editableBackground);
+        document.documentElement.style.setProperty("--editable-span-border", next.editableBorder);
+      }
+
       function registerLanguage(monaco) {
         monaco.languages.register({ id: "forrest" });
         monaco.languages.setMonarchTokensProvider("forrest", {
@@ -440,6 +481,7 @@ public partial class MonacoEditorSurface : ContentView
             : "forrest-azure";
           this.pendingReadOnly = !!nextState.isReadOnly;
           this.pendingEditableRanges = this.parseEditableRanges(nextState);
+          applyHostThemeChrome(this.pendingTheme);
 
           if (this.model && window.monaco && this.model.getLanguageId() !== this.pendingLanguage) {
             window.monaco.editor.setModelLanguage(this.model, this.pendingLanguage);
