@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text.Json;
+using ForRest.Maui.Theming;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 
@@ -12,16 +14,19 @@ public sealed class MainPageViewModel : ObservableObject
 	private const double MinLeftPanePixels = 220d;
 	private const double MinRightPanePixels = 248d;
 	private const double MinCenterPanePixels = 620d;
-	private const double SplitterPixels = 8d;
+	private const double SplitterPixels = 14d;
 	private const double CompactLayoutBreakpoint = 980d;
 	private const double CompactPaneMinWidth = 300d;
 	private const double CompactPaneMaxWidth = 440d;
+	private const string RequestDocumentKind = "request";
+	private const string SettingsDocumentKind = "settings";
 
 	private readonly Color _methodGet = Color.FromArgb("#167C65");
 	private readonly Color _methodPost = Color.FromArgb("#176AB8");
 	private readonly Color _methodPut = Color.FromArgb("#9A5A1A");
 	private readonly Color _methodDelete = Color.FromArgb("#B2433D");
 	private readonly Color _methodNeutral = Color.FromArgb("#5D6978");
+	private readonly SettingsTomlDocumentService _settingsTomlDocumentService;
 
 	private double _leftPanePixels = DefaultLeftPanePixels;
 	private double _rightPanePixels = DefaultRightPanePixels;
@@ -49,9 +54,23 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _responseBodyText;
 	private string _responseRawText;
 	private string _responseState;
+	private string _executionStatus;
+	private string _editorThemeKey;
+	private ShellThemeName _currentThemeName;
+	private string _themeConfigText;
+	private string _activeEditorText;
+	private string _activeEditorLanguage;
+	private string _activeDocumentKind;
+	private string _activeDocumentKindLabel;
+	private string _activeDocumentLabel;
+	private Color _activeDocumentKindColor;
+	private string _activeEditorEditableRangesJson;
+	private CancellationTokenSource? _settingsSaveSource;
+	private bool _suppressSettingsAutosave;
 
-	public MainPageViewModel()
+	public MainPageViewModel(IThemeService themeService, SettingsTomlDocumentService settingsTomlDocumentService)
 	{
+		_settingsTomlDocumentService = settingsTomlDocumentService;
 		_selectedWorkspace = "for-rest://echo-lab";
 		_selectedEnvironment = "Local";
 		_selectedMethod = "POST";
@@ -68,6 +87,17 @@ public sealed class MainPageViewModel : ObservableObject
 		_responseBodyText = BuildResponseBodyText();
 		_responseRawText = BuildResponseRawText();
 		_responseState = "200 OK";
+		_executionStatus = themeService.CurrentStatusMessage;
+		_currentThemeName = themeService.CurrentTheme.Name;
+		_editorThemeKey = themeService.CurrentTheme.MonacoThemeKey;
+		_themeConfigText = ReadSettingsText(_currentThemeName);
+		_activeEditorText = _requestEditorText;
+		_activeEditorLanguage = "forrest";
+		_activeDocumentKind = RequestDocumentKind;
+		_activeDocumentKindLabel = _selectedMethod;
+		_activeDocumentLabel = BuildRequestDocumentLabel(_requestName);
+		_activeDocumentKindColor = _methodPost;
+		_activeEditorEditableRangesJson = "[]";
 
 		LeftPaneTabs =
 		[
@@ -106,6 +136,7 @@ public sealed class MainPageViewModel : ObservableObject
 				"Workspace",
 				[
 					new NavigationItemViewModel("WK", "workspace.forrest", "Workspace manifest and pane state", "~/echo-lab", _methodNeutral),
+					new NavigationItemViewModel("CFG", "settings.toml", "Generated settings model and live shell palette", "~/config", _methodNeutral, depth: 1, documentKind: SettingsDocumentKind, editorLanguage: "settings-toml"),
 					new NavigationItemViewModel("ENV", "env.local", "Local variables and secrets", "~/environments", _methodNeutral, depth: 1),
 					new NavigationItemViewModel("SCR", "common.frs", "Shared request helpers", "~/scripts", _methodNeutral, depth: 1)
 				]),
@@ -168,6 +199,9 @@ public sealed class MainPageViewModel : ObservableObject
 			"PUT",
 			"DELETE"
 		];
+
+		themeService.ThemeChanged += OnThemeChanged;
+		ActivateRequestEditor();
 	}
 
 	public ObservableCollection<PaneTabViewModel> LeftPaneTabs { get; }
@@ -227,6 +261,11 @@ public sealed class MainPageViewModel : ObservableObject
 				RefreshRequestDraftSignature();
 				OnPropertyChanged(nameof(SelectedMethodColor));
 				OnPropertyChanged(nameof(RequestStateStatus));
+				if (IsActiveRequestEditor)
+				{
+					ActiveDocumentKindLabel = value;
+					ActiveDocumentKindColor = SelectedMethodColor;
+				}
 			}
 		}
 	}
@@ -241,6 +280,10 @@ public sealed class MainPageViewModel : ObservableObject
 				OnPropertyChanged(nameof(RequestDocumentLabel));
 				OnPropertyChanged(nameof(RequestStateStatus));
 				OnPropertyChanged(nameof(ActiveDocumentSummary));
+				if (IsActiveRequestEditor)
+				{
+					ActiveDocumentLabel = RequestDocumentLabel;
+				}
 			}
 		}
 	}
@@ -285,7 +328,18 @@ public sealed class MainPageViewModel : ObservableObject
 	public string RequestEditorText
 	{
 		get => _requestEditorText;
-		set => SetProperty(ref _requestEditorText, value);
+		set
+		{
+			if (!SetProperty(ref _requestEditorText, value))
+			{
+				return;
+			}
+
+			if (IsActiveRequestEditor && _activeEditorText != value)
+			{
+				SetActiveEditorTextInternal(value);
+			}
+		}
 	}
 
 	public string HeadersEditorText
@@ -328,6 +382,75 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		get => _responseRawText;
 		set => SetProperty(ref _responseRawText, value);
+	}
+
+	public string EditorThemeKey
+	{
+		get => _editorThemeKey;
+		set => SetProperty(ref _editorThemeKey, value);
+	}
+
+	public string ActiveEditorText
+	{
+		get => _activeEditorText;
+		set
+		{
+			if (IsActiveSettingsEditor &&
+			    string.IsNullOrWhiteSpace(value) &&
+			    !string.IsNullOrWhiteSpace(_themeConfigText))
+			{
+				OnPropertyChanged(nameof(ActiveEditorText));
+				return;
+			}
+
+			if (!SetProperty(ref _activeEditorText, value))
+			{
+				return;
+			}
+
+			if (IsActiveSettingsEditor)
+			{
+				_themeConfigText = value;
+				if (!_suppressSettingsAutosave)
+				{
+					ScheduleSettingsAutosave();
+				}
+			}
+			else
+			{
+				_requestEditorText = value;
+			}
+		}
+	}
+
+	public string ActiveEditorLanguage
+	{
+		get => _activeEditorLanguage;
+		set => SetProperty(ref _activeEditorLanguage, value);
+	}
+
+	public string ActiveEditorEditableRangesJson
+	{
+		get => _activeEditorEditableRangesJson;
+		set => SetProperty(ref _activeEditorEditableRangesJson, value);
+	}
+
+	public string ActiveDocumentKindLabel
+	{
+		get => _activeDocumentKindLabel;
+		set => SetProperty(ref _activeDocumentKindLabel, value);
+	}
+
+	public string ActiveDocumentLabel
+	{
+		get => _activeDocumentLabel;
+		set => SetProperty(ref _activeDocumentLabel, value);
+	}
+
+	public Color ActiveDocumentKindColor
+	{
+		get => _activeDocumentKindColor;
+		set => SetProperty(ref _activeDocumentKindColor, value);
 	}
 
 	public string ResponseState
@@ -389,7 +512,11 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public string TimingStatus => _isCompactLayout ? "Compact overlay shell" : "Three-pane desktop shell";
 
-	public string ExecutionStatus => "Ready";
+	public string ExecutionStatus
+	{
+		get => _executionStatus;
+		set => SetProperty(ref _executionStatus, value);
+	}
 
 	public string ResponseTimeStatus => "118 ms";
 
@@ -447,6 +574,10 @@ public sealed class MainPageViewModel : ObservableObject
 	public bool IsInspectorTraceVisible => IsTabSelected(RightPaneTabs, "trace");
 
 	public bool IsInspectorRawVisible => IsTabSelected(RightPaneTabs, "raw");
+
+	private bool IsActiveRequestEditor => string.Equals(_activeDocumentKind, RequestDocumentKind, StringComparison.Ordinal);
+
+	private bool IsActiveSettingsEditor => string.Equals(_activeDocumentKind, SettingsDocumentKind, StringComparison.Ordinal);
 
 	public void ToggleLeftPane()
 	{
@@ -644,6 +775,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		ApplyRequestSelection(document.Title, document.Method, document.Summary, document.Location);
 		SelectExplorerItemByTitle(document.Title);
+		ActivateRequestEditor();
 	}
 
 	public void SelectExplorerItem(NavigationItemViewModel? item)
@@ -658,6 +790,12 @@ public sealed class MainPageViewModel : ObservableObject
 			entry.IsSelected = ReferenceEquals(entry, item);
 		}
 
+		if (string.Equals(item.DocumentKind, SettingsDocumentKind, StringComparison.Ordinal))
+		{
+			ActivateSettingsEditor(item);
+			return;
+		}
+
 		string method = item.Method ?? SelectedMethod;
 		ApplyRequestSelection(item.Title, method, item.Detail, item.Context);
 		SelectDocumentByTitle(item.Title);
@@ -666,6 +804,14 @@ public sealed class MainPageViewModel : ObservableObject
 	private static bool IsTabSelected(IEnumerable<PaneTabViewModel> tabs, string key)
 	{
 		return tabs.Any(tab => tab.Key == key && tab.IsSelected);
+	}
+
+	private void OnThemeChanged(object? sender, ThemeChangedEventArgs e)
+	{
+		_currentThemeName = e.Theme.Name;
+		EditorThemeKey = e.Theme.MonacoThemeKey;
+		ExecutionStatus = e.StatusMessage;
+		UpdateSettingsTextFromDisk(_currentThemeName);
 	}
 
 	private void RefreshRequestDraftSignature()
@@ -708,6 +854,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ScriptEditorText = BuildScriptEditorText(title);
 		TestsEditorText = BuildTestsEditorText();
 		VariablesEditorText = BuildVariablesEditorText();
+		ActivateRequestEditor();
 	}
 
 	private void SelectDocumentByTitle(string title)
@@ -739,6 +886,108 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			item.IsSelected = ReferenceEquals(item, matchingItem);
 		}
+	}
+
+	private void ActivateRequestEditor()
+	{
+		_activeDocumentKind = RequestDocumentKind;
+		ActiveDocumentKindLabel = SelectedMethod;
+		ActiveDocumentKindColor = SelectedMethodColor;
+		ActiveDocumentLabel = RequestDocumentLabel;
+		ActiveEditorLanguage = "forrest";
+		ActiveEditorEditableRangesJson = "[]";
+		SetActiveEditorTextInternal(_requestEditorText);
+		ForceActiveEditorRefresh();
+	}
+
+	private void ActivateSettingsEditor(NavigationItemViewModel item)
+	{
+		_activeDocumentKind = SettingsDocumentKind;
+		_themeConfigText = ReadSettingsText(_currentThemeName);
+		ActiveDocumentKindLabel = item.Kind;
+		ActiveDocumentKindColor = item.AccentColor;
+		ActiveDocumentLabel = item.Title;
+		ActiveEditorLanguage = item.EditorLanguage;
+		ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
+		SetActiveEditorTextInternal(_themeConfigText);
+		ForceActiveEditorRefresh();
+	}
+
+	private void SetActiveEditorTextInternal(string value)
+	{
+		_activeEditorText = value;
+		OnPropertyChanged(nameof(ActiveEditorText));
+	}
+
+	private void ForceActiveEditorRefresh()
+	{
+		OnPropertyChanged(nameof(ActiveEditorLanguage));
+		OnPropertyChanged(nameof(ActiveEditorEditableRangesJson));
+		OnPropertyChanged(nameof(ActiveEditorText));
+	}
+
+	private void ScheduleSettingsAutosave()
+	{
+		if (!_settingsTomlDocumentService.CanAutoSave(_themeConfigText))
+		{
+			return;
+		}
+
+		CancellationTokenSource saveSource = new();
+		CancellationTokenSource? previousSource = Interlocked.Exchange(ref _settingsSaveSource, saveSource);
+		previousSource?.Cancel();
+		previousSource?.Dispose();
+
+		string pendingText = _themeConfigText;
+
+		_ = Task.Run(async () =>
+		{
+			try
+			{
+				await Task.Delay(600, saveSource.Token);
+				_settingsTomlDocumentService.SaveRawText(pendingText);
+			}
+			catch (OperationCanceledException)
+			{
+			}
+		});
+	}
+
+	private void UpdateSettingsTextFromDisk(ShellThemeName currentTheme)
+	{
+		string latestText = ReadSettingsText(currentTheme);
+		_themeConfigText = latestText;
+
+		if (!IsActiveSettingsEditor)
+		{
+			return;
+		}
+
+		_suppressSettingsAutosave = true;
+		try
+		{
+			ActiveEditorEditableRangesJson = BuildEditableRangesJson(latestText);
+			SetActiveEditorTextInternal(latestText);
+		}
+		finally
+		{
+			_suppressSettingsAutosave = false;
+		}
+	}
+
+	private string ReadSettingsText(ShellThemeName currentTheme)
+	{
+		return _settingsTomlDocumentService.LoadOrCreate(new ForRestSettings(currentTheme));
+	}
+
+	private string BuildEditableRangesJson(string text)
+	{
+		return JsonSerializer.Serialize(
+			_settingsTomlDocumentService.GetEditableRanges(text),
+			new JsonSerializerOptions
+			{
+				PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+			});
 	}
 
 	private double ClampLeftPane(double requestedWidth, double totalWidth)

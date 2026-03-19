@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="ForRest.Maui.Controls.MonacoEditorSurface">
 
-    <Grid BackgroundColor="{AppThemeBinding Light={StaticResource EditorBackgroundLight}, Dark={StaticResource EditorBackgroundDark}}">
+    <Grid BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}">
         <WebView x:Name="EditorWebView"
                  Navigated="OnEditorWebViewNavigated" />
     </Grid>

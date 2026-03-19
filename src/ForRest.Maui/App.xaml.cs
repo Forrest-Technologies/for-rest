@@ -1,16 +1,19 @@
 using Microsoft.Extensions.DependencyInjection;
+using ForRest.Maui.Theming;
 
 namespace ForRest.Maui;
 
 public partial class App : Application
 {
 	private readonly IServiceProvider _services;
+	private readonly IThemeService _themeService;
 
-	public App(IServiceProvider services)
+	public App(IServiceProvider services, IThemeService themeService)
 	{
 		InitializeComponent();
-		UserAppTheme = AppTheme.Light;
 		_services = services;
+		_themeService = themeService;
+		_themeService.Start();
 	}
 
 	protected override Window CreateWindow(IActivationState? activationState)

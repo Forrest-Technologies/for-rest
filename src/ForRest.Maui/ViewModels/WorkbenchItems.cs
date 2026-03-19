@@ -62,7 +62,9 @@ public sealed class NavigationItemViewModel(
 	Color accentColor,
 	string? method = null,
 	int depth = 0,
-	bool isSelected = false) : ObservableObject
+	bool isSelected = false,
+	string documentKind = "request",
+	string editorLanguage = "forrest") : ObservableObject
 {
 	private bool _isSelected = isSelected;
 
@@ -79,6 +81,10 @@ public sealed class NavigationItemViewModel(
 	public string? Method { get; } = method;
 
 	public int Depth { get; } = depth;
+
+	public string DocumentKind { get; } = documentKind;
+
+	public string EditorLanguage { get; } = editorLanguage;
 
 	public Microsoft.Maui.Thickness Indent => new(12 + (Depth * 14), 0, 12, 0);
 

@@ -1,0 +1,9 @@
+# For-Rest settings are generated from the current settings model.
+# Edit only value fields. Structure is enforced and normalized automatically.
+
+[appearance.theme]
+light = false
+azure = true
+dark = false
+black = false
+amber = false

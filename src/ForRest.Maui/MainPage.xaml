@@ -33,23 +33,37 @@
                 <controls:ExplorerPane Grid.Column="0"
                                        IsVisible="{Binding IsLeftPaneVisible}" />
 
-                <BoxView Grid.Column="1"
-                         IsVisible="{Binding IsLeftPaneVisible}"
-                         Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
-                    <BoxView.GestureRecognizers>
+                <Grid Grid.Column="1"
+                      x:Name="LeftSplitterLane"
+                      IsVisible="{Binding IsLeftPaneVisible}"
+                      BackgroundColor="Transparent">
+                    <Grid.GestureRecognizers>
                         <PanGestureRecognizer PanUpdated="OnLeftSplitterPanUpdated" />
-                    </BoxView.GestureRecognizers>
-                </BoxView>
+                    </Grid.GestureRecognizers>
+                    <BoxView x:Name="LeftSplitterLine"
+                             WidthRequest="2"
+                             HorizontalOptions="Center"
+                             VerticalOptions="Fill"
+                             Opacity="0.72"
+                             Color="{DynamicResource ThemeSplitterColor}" />
+                </Grid>
 
                 <controls:WorkbenchCenterPane Grid.Column="2" />
 
-                <BoxView Grid.Column="3"
-                         IsVisible="{Binding IsRightPaneVisible}"
-                         Color="{AppThemeBinding Light={StaticResource SplitterLight}, Dark={StaticResource SplitterDark}}">
-                    <BoxView.GestureRecognizers>
+                <Grid Grid.Column="3"
+                      x:Name="RightSplitterLane"
+                      IsVisible="{Binding IsRightPaneVisible}"
+                      BackgroundColor="Transparent">
+                    <Grid.GestureRecognizers>
                         <PanGestureRecognizer PanUpdated="OnRightSplitterPanUpdated" />
-                    </BoxView.GestureRecognizers>
-                </BoxView>
+                    </Grid.GestureRecognizers>
+                    <BoxView x:Name="RightSplitterLine"
+                             WidthRequest="2"
+                             HorizontalOptions="Center"
+                             VerticalOptions="Fill"
+                             Opacity="0.72"
+                             Color="{DynamicResource ThemeSplitterColor}" />
+                </Grid>
 
                 <controls:InspectorPane Grid.Column="4"
                                         IsVisible="{Binding IsRightPaneVisible}" />
@@ -77,20 +91,20 @@
         </Grid>
 
         <Border Grid.Row="2"
-                Style="{StaticResource ToolbarBorderStyle}">
+                Style="{StaticResource StatusBarBorderStyle}">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto"
                   ColumnSpacing="10">
                 <Label Text="{Binding ExecutionStatus}"
-                       Style="{StaticResource PaneMetaStyle}" />
+                       Style="{StaticResource StatusBarTextStyle}" />
                 <Label Grid.Column="1"
                        Text="{Binding ResponseState}"
-                       Style="{StaticResource PaneMetaStyle}" />
+                       Style="{StaticResource StatusBarTextStyle}" />
                 <Label Grid.Column="2"
                        Text="{Binding ResponseTimeStatus}"
-                       Style="{StaticResource PaneMetaStyle}" />
+                       Style="{StaticResource StatusBarTextStyle}" />
                 <Label Grid.Column="3"
                        Text="{Binding ResponseSizeStatus}"
-                       Style="{StaticResource PaneMetaStyle}" />
+                       Style="{StaticResource StatusBarTextStyle}" />
             </Grid>
         </Border>
     </Grid>

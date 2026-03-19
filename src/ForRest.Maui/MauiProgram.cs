@@ -1,3 +1,4 @@
+using ForRest.Maui.Theming;
 using ForRest.Maui.ViewModels;
 using Microsoft.Extensions.Logging;
 
@@ -16,6 +17,13 @@ public static class MauiProgram
 				fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
 			});
 
+		builder.Services.AddSingleton<ThemeCatalog>();
+		builder.Services.AddSingleton<SettingsTomlTemplate>();
+		builder.Services.AddSingleton<ThemeConfigParser>();
+		builder.Services.AddSingleton<ThemeConfigNormalizer>();
+		builder.Services.AddSingleton<ThemeConfigStore>();
+		builder.Services.AddSingleton<SettingsTomlDocumentService>();
+		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<MainPageViewModel>();
 		builder.Services.AddSingleton<MainPage>();
 

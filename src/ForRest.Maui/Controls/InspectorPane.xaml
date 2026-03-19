@@ -30,9 +30,9 @@
                                     CommandParameter="{Binding .}">
                                 <Button.Triggers>
                                     <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
-                                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource AccentSoftLight}, Dark={StaticResource AccentSoftDark}}" />
-                                        <Setter Property="BorderColor" Value="{AppThemeBinding Light={StaticResource BorderLight}, Dark={StaticResource BorderDark}}" />
-                                        <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource AccentStrongLight}, Dark={StaticResource AccentStrongDark}}" />
+                                        <Setter Property="BackgroundColor" Value="{DynamicResource ThemeAccentSoftColor}" />
+                                        <Setter Property="BorderColor" Value="{DynamicResource ThemeBorderColor}" />
+                                        <Setter Property="TextColor" Value="{DynamicResource ThemeAccentStrongColor}" />
                                     </DataTrigger>
                                 </Button.Triggers>
                             </Button>

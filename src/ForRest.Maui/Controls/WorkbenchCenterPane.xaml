@@ -5,26 +5,28 @@
              x:Class="ForRest.Maui.Controls.WorkbenchCenterPane">
 
     <Border Style="{StaticResource PaneBorderStyle}"
-            BackgroundColor="{AppThemeBinding Light={StaticResource EditorBackgroundLight}, Dark={StaticResource EditorBackgroundDark}}"
-            Stroke="{AppThemeBinding Light={StaticResource DividerLight}, Dark={StaticResource DividerDark}}">
+            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+            Stroke="{DynamicResource ThemeDividerColor}">
         <Grid RowDefinitions="Auto,*">
             <Grid Padding="8,4,8,2"
                   ColumnDefinitions="Auto,*"
                   ColumnSpacing="6">
-                <Label Text="{Binding SelectedMethod}"
+                <Label Text="{Binding ActiveDocumentKindLabel}"
                        VerticalTextAlignment="Start"
-                       TextColor="{Binding SelectedMethodColor}"
+                       TextColor="{Binding ActiveDocumentKindColor}"
                        Style="{StaticResource MonoMetaStyle}" />
 
                 <Label Grid.Column="1"
-                       Text="{Binding RequestDocumentLabel}"
+                       Text="{Binding ActiveDocumentLabel}"
                        Style="{StaticResource EditorDocumentTitleStyle}" />
             </Grid>
 
             <Grid Grid.Row="1"
                   Padding="0">
-                <controls:MonacoEditorSurface Language="forrest"
-                                              Text="{Binding RequestEditorText}" />
+                <controls:MonacoEditorSurface Language="{Binding ActiveEditorLanguage}"
+                                              EditableRangesJson="{Binding ActiveEditorEditableRangesJson}"
+                                              ThemeKey="{Binding EditorThemeKey}"
+                                              Text="{Binding ActiveEditorText}" />
             </Grid>
         </Grid>
     </Border>

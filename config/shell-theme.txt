@@ -1,0 +1,5 @@
+[x] light
+[] azure
+[] dark
+[] black
+[] amber
