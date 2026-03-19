@@ -53,6 +53,7 @@ public enum WorkspaceNodeKind
 
 public enum ThemeKind
 {
+    System,
     Light,
     Azure,
     Dark,

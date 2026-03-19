@@ -3,6 +3,19 @@ using System.ComponentModel;
 
 namespace ForRest.App.ViewModels;
 
+public enum LeftRailSection
+{
+    Explorer,
+    History,
+}
+
+public enum WorkbenchLayoutMode
+{
+    Narrow,
+    Medium,
+    Wide,
+}
+
 public sealed class WorkspaceOptionViewModel
 {
     public required WorkspaceSnapshot Snapshot { get; init; }
@@ -40,6 +53,8 @@ public sealed class ExplorerListItemViewModel
 
     public string DisplayName { get; init; } = string.Empty;
 
+    public Thickness Indent { get; init; } = new(0);
+
     public WorkspaceNodeKind Kind { get; init; }
 
     public string BadgeText { get; init; } = "REQ";
@@ -47,6 +62,8 @@ public sealed class ExplorerListItemViewModel
     public string SecondaryText { get; init; } = string.Empty;
 
     public Brush BadgeBrush { get; init; } = ShellVisuals.NeutralBrush();
+
+    public bool IsRequest => RequestId is not null;
 }
 
 public sealed class KeyValueItemViewModel : ObservableObject

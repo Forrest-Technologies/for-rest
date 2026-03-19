@@ -46,6 +46,12 @@ public sealed class SqliteRepositoryTests
 
         Assert.AreEqual("super-secret", loaded.Profile.GlobalVariables.Single(static item => item.Key == "apiToken").Value);
         Assert.AreEqual("db-password", loaded.Workspaces.Single().Nodes.Single(static item => item.Request is not null).Request!.Auth.Password);
+        Assert.AreEqual(ThemeKind.System, loaded.Profile.Theme);
+        Assert.AreEqual(ThemeKind.System, loaded.Workspaces.Single().Workspace.Theme);
+        Assert.AreEqual(310, loaded.Workspaces.Single().Workspace.Settings.PaneLayout.LeftPaneWidth, 0.1);
+        Assert.AreEqual(820, loaded.Workspaces.Single().Workspace.Settings.PaneLayout.MiddlePaneWidth, 0.1);
+        Assert.AreEqual(460, loaded.Workspaces.Single().Workspace.Settings.PaneLayout.RightPaneWidth, 0.1);
+        Assert.AreEqual(14, loaded.Workspaces.Single().Workspace.Settings.PaneLayout.EditorFontSize, 0.1);
 
         using var connection = database.OpenConnection();
         using var command = connection.CreateCommand();
@@ -99,6 +105,7 @@ public sealed class SqliteRepositoryTests
         {
             Profile = new()
             {
+                Theme = ThemeKind.System,
                 GlobalVariables =
                 [
                     new()
@@ -118,6 +125,17 @@ public sealed class SqliteRepositoryTests
                     {
                         Id = workspaceId,
                         Name = "Demo",
+                        Theme = ThemeKind.System,
+                        Settings = new()
+                        {
+                            PaneLayout = new()
+                            {
+                                LeftPaneWidth = 310,
+                                MiddlePaneWidth = 820,
+                                RightPaneWidth = 460,
+                                EditorFontSize = 14,
+                            },
+                        },
                     },
                     Nodes =
                     [

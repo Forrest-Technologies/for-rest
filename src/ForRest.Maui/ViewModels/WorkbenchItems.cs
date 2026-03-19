@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Microsoft.Maui.Graphics;
 
 namespace ForRest.Maui.ViewModels;
@@ -17,7 +18,13 @@ public sealed class PaneTabViewModel(string key, string title, bool isSelected =
 	}
 }
 
-public sealed class RequestDocumentViewModel(string title, string method, string summary, bool isDirty, bool isSelected = false) : ObservableObject
+public sealed class RequestDocumentViewModel(
+	string title,
+	string method,
+	string summary,
+	string location,
+	bool isDirty,
+	bool isSelected = false) : ObservableObject
 {
 	private bool _isSelected = isSelected;
 
@@ -26,6 +33,8 @@ public sealed class RequestDocumentViewModel(string title, string method, string
 	public string Method { get; } = method;
 
 	public string Summary { get; } = summary;
+
+	public string Location { get; } = location;
 
 	public bool IsDirty { get; } = isDirty;
 
@@ -38,11 +47,21 @@ public sealed class RequestDocumentViewModel(string title, string method, string
 	}
 }
 
-public sealed class ExplorerItemViewModel(
+public sealed class NavigationSectionViewModel(string title, IEnumerable<NavigationItemViewModel> items)
+{
+	public string Title { get; } = title;
+
+	public ObservableCollection<NavigationItemViewModel> Items { get; } = new(items);
+}
+
+public sealed class NavigationItemViewModel(
 	string kind,
 	string title,
 	string detail,
-	Color badgeBackground,
+	string context,
+	Color accentColor,
+	string? method = null,
+	int depth = 0,
 	bool isSelected = false) : ObservableObject
 {
 	private bool _isSelected = isSelected;
@@ -53,7 +72,15 @@ public sealed class ExplorerItemViewModel(
 
 	public string Detail { get; } = detail;
 
-	public Color BadgeBackground { get; } = badgeBackground;
+	public string Context { get; } = context;
+
+	public Color AccentColor { get; } = accentColor;
+
+	public string? Method { get; } = method;
+
+	public int Depth { get; } = depth;
+
+	public Microsoft.Maui.Thickness Indent => new(12 + (Depth * 14), 0, 12, 0);
 
 	public bool IsSelected
 	{
@@ -62,7 +89,7 @@ public sealed class ExplorerItemViewModel(
 	}
 }
 
-public sealed class HistoryEntryViewModel(string method, string title, string summary, string when, Color badgeBackground)
+public sealed class HistoryEntryViewModel(string method, string title, string summary, string when, Color accentColor)
 {
 	public string Method { get; } = method;
 
@@ -72,7 +99,7 @@ public sealed class HistoryEntryViewModel(string method, string title, string su
 
 	public string When { get; } = when;
 
-	public Color BadgeBackground { get; } = badgeBackground;
+	public Color AccentColor { get; } = accentColor;
 }
 
 public sealed class NameValueRowViewModel(string name, string value, string scope, bool isEnabled = true)
@@ -84,4 +111,24 @@ public sealed class NameValueRowViewModel(string name, string value, string scop
 	public string Scope { get; } = scope;
 
 	public bool IsEnabled { get; } = isEnabled;
+}
+
+public sealed class OutputMetricViewModel(string label, string value, Color accentColor)
+{
+	public string Label { get; } = label;
+
+	public string Value { get; } = value;
+
+	public Color AccentColor { get; } = accentColor;
+}
+
+public sealed class TraceEntryViewModel(string title, string detail, string when, Color accentColor)
+{
+	public string Title { get; } = title;
+
+	public string Detail { get; } = detail;
+
+	public string When { get; } = when;
+
+	public Color AccentColor { get; } = accentColor;
 }

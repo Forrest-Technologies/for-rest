@@ -5,223 +5,42 @@
              x:Class="ForRest.Maui.Controls.WorkbenchCenterPane">
 
     <Border Style="{StaticResource PaneBorderStyle}">
-        <Grid RowDefinitions="Auto,Auto,*">
-            <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
-                <HorizontalStackLayout Padding="8,6,8,0"
-                                       Spacing="4"
-                                       BindableLayout.ItemsSource="{Binding OpenDocuments}">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate>
-                            <Button Text="{Binding DisplayTitle}"
-                                    Style="{StaticResource DocumentTabButtonStyle}"
-                                    Clicked="OnDocumentClicked"
-                                    CommandParameter="{Binding .}">
-                                <Button.Triggers>
-                                    <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
-                                        <Setter Property="BackgroundColor" Value="{StaticResource SurfaceLight}" />
-                                        <Setter Property="BorderColor" Value="{StaticResource AccentLight}" />
-                                        <Setter Property="TextColor" Value="{StaticResource TextPrimaryLight}" />
-                                    </DataTrigger>
-                                </Button.Triggers>
-                            </Button>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </HorizontalStackLayout>
-            </ScrollView>
+        <Grid RowDefinitions="Auto,*,Auto">
+            <Grid Padding="14,12,14,8"
+                  ColumnDefinitions="Auto,*"
+                  ColumnSpacing="10">
+                <Label Text="{Binding SelectedMethod}"
+                       VerticalTextAlignment="Start"
+                       TextColor="{Binding SelectedMethodColor}"
+                       Style="{StaticResource MonoMetaStyle}" />
 
-            <ScrollView Grid.Row="1" Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
-                <HorizontalStackLayout Padding="8,4,8,6"
-                                       Spacing="4"
-                                       BindableLayout.ItemsSource="{Binding CenterTabs}">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate>
-                            <Button Text="{Binding Title}"
-                                    Style="{StaticResource DenseTabButtonStyle}"
-                                    Clicked="OnTabClicked"
-                                    CommandParameter="{Binding .}">
-                                <Button.Triggers>
-                                    <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
-                                        <Setter Property="BackgroundColor" Value="{StaticResource AccentSoftLight}" />
-                                        <Setter Property="BorderColor" Value="{StaticResource BorderLight}" />
-                                        <Setter Property="TextColor" Value="{StaticResource AccentStrongLight}" />
-                                    </DataTrigger>
-                                </Button.Triggers>
-                            </Button>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </HorizontalStackLayout>
-            </ScrollView>
+                <VerticalStackLayout Grid.Column="1"
+                                     Spacing="2">
+                    <Label Text="{Binding RequestName}"
+                           Style="{StaticResource PaneTitleStyle}" />
+                    <Label Text="{Binding RequestSummary}"
+                           Style="{StaticResource PaneMetaStyle}"
+                           LineBreakMode="TailTruncation" />
+                    <Label Text="{Binding RequestTarget}"
+                           Style="{StaticResource MonoMetaStyle}" />
+                </VerticalStackLayout>
+            </Grid>
 
-            <Grid Grid.Row="2">
-                <ScrollView IsVisible="{Binding IsRequestTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10" Spacing="8">
-                        <Grid ColumnDefinitions="90,*"
-                              RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                              ColumnSpacing="10"
-                              RowSpacing="8">
-                            <Label Text="Name" Style="{StaticResource SectionTitleStyle}" />
-                            <Border Grid.Column="1" Style="{StaticResource InputBorderStyle}">
-                                <Entry Text="{Binding RequestName}" />
-                            </Border>
+            <Grid Grid.Row="1"
+                  Padding="8,0,8,8">
+                <controls:MonacoEditorSurface Language="forrest"
+                                              Text="{Binding RequestEditorText}" />
+            </Grid>
 
-                            <Label Grid.Row="1" Text="URL" Style="{StaticResource SectionTitleStyle}" />
-                            <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource InputBorderStyle}">
-                                <Entry Text="{Binding RequestUrl}" />
-                            </Border>
-
-                            <Label Grid.Row="2" Text="Notes" Style="{StaticResource SectionTitleStyle}" />
-                            <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource InputBorderStyle}" Padding="8,6">
-                                <Editor Text="{Binding RequestNotes}"
-                                        AutoSize="TextChanges"
-                                        FontFamily="OpenSansRegular"
-                                        FontSize="12"
-                                        BackgroundColor="Transparent"
-                                        HeightRequest="72" />
-                            </Border>
-
-                            <Label Grid.Row="3" Text="Options" Style="{StaticResource SectionTitleStyle}" />
-                            <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="12">
-                                <HorizontalStackLayout Spacing="6">
-                                    <Switch IsToggled="True" Scale="0.8" />
-                                    <Label Text="Save response" VerticalTextAlignment="Center" />
-                                </HorizontalStackLayout>
-                                <HorizontalStackLayout Grid.Column="1" Spacing="6">
-                                    <Switch IsToggled="True" Scale="0.8" />
-                                    <Label Text="Follow redirects" VerticalTextAlignment="Center" />
-                                </HorizontalStackLayout>
-                                <HorizontalStackLayout Grid.Column="2" Spacing="6">
-                                    <Switch IsToggled="False" Scale="0.8" />
-                                    <Label Text="Validate SSL" VerticalTextAlignment="Center" />
-                                </HorizontalStackLayout>
-                            </Grid>
-
-                            <Label Grid.Row="4" Text="Next" Style="{StaticResource SectionTitleStyle}" />
-                            <Label Grid.Row="4"
-                                   Grid.Column="1"
-                                   Text="Params, headers, auth, variables, and richer editors stay as pane tabs in this phase, but remain shell placeholders until the shell direction is locked."
-                                   Style="{StaticResource PaneMetaStyle}" />
-                        </Grid>
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsParamsTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10" Spacing="0">
-                        <Label Text="Params" Style="{StaticResource PaneTitleStyle}" />
-                        <Label Margin="0,2,0,10" Text="Table-style request parameters will live here." Style="{StaticResource PaneMetaStyle}" />
-                        <Grid ColumnDefinitions="110,*,90" Padding="0,0,0,6">
-                            <Label Text="Key" Style="{StaticResource SectionTitleStyle}" />
-                            <Label Grid.Column="1" Text="Value" Style="{StaticResource SectionTitleStyle}" />
-                            <Label Grid.Column="2" Text="Enabled" Style="{StaticResource SectionTitleStyle}" />
-                        </Grid>
-                        <Border Style="{StaticResource ListRowBorderStyle}">
-                            <Grid RowDefinitions="Auto,1">
-                                <Grid ColumnDefinitions="110,*,90">
-                                    <Label Text="country" FontFamily="OpenSansSemibold" FontSize="12" />
-                                    <Label Grid.Column="1" Text="{}{{country}}" />
-                                    <Label Grid.Column="2" Text="true" Style="{StaticResource PaneMetaStyle}" />
-                                </Grid>
-                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
-                            </Grid>
-                        </Border>
-                        <Border Style="{StaticResource ListRowBorderStyle}">
-                            <Grid RowDefinitions="Auto,1">
-                                <Grid ColumnDefinitions="110,*,90">
-                                    <Label Text="age" FontFamily="OpenSansSemibold" FontSize="12" />
-                                    <Label Grid.Column="1" Text="{}{{age}}" />
-                                    <Label Grid.Column="2" Text="true" Style="{StaticResource PaneMetaStyle}" />
-                                </Grid>
-                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
-                            </Grid>
-                        </Border>
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsHeadersTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10" Spacing="0">
-                        <Label Text="Headers" Style="{StaticResource PaneTitleStyle}" />
-                        <Label Margin="0,2,0,10" Text="Compact request header rows will slot in here." Style="{StaticResource PaneMetaStyle}" />
-                        <Border Style="{StaticResource ListRowBorderStyle}">
-                            <Grid RowDefinitions="Auto,1">
-                                <Grid ColumnDefinitions="130,*">
-                                    <Label Text="Accept" FontFamily="OpenSansSemibold" FontSize="12" />
-                                    <Label Grid.Column="1" Text="application/json" />
-                                </Grid>
-                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
-                            </Grid>
-                        </Border>
-                        <Border Style="{StaticResource ListRowBorderStyle}">
-                            <Grid RowDefinitions="Auto,1">
-                                <Grid ColumnDefinitions="130,*">
-                                    <Label Text="X-Trace" FontFamily="OpenSansSemibold" FontSize="12" />
-                                    <Label Grid.Column="1" Text="phase1-shell" />
-                                </Grid>
-                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
-                            </Grid>
-                        </Border>
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsAuthTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10" Spacing="6">
-                        <Label Text="Auth" Style="{StaticResource PaneTitleStyle}" />
-                        <Label Text="Authorization stays intentionally thin in Phase 1. This tab is here to prove the workbench structure and preserve room for future auth editors." Style="{StaticResource PaneMetaStyle}" />
-                        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="8">
-                            <Label Text="Type" Style="{StaticResource SectionTitleStyle}" />
-                            <Label Grid.Column="1" Text="None" />
-                            <Label Grid.Row="1" Text="Preview" Style="{StaticResource SectionTitleStyle}" />
-                            <Label Grid.Row="1" Grid.Column="1" Text="Authorization helpers will be attached here later." Style="{StaticResource PaneMetaStyle}" />
-                        </Grid>
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsBodyTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10">
-                        <controls:EditorSurface Title="Body"
-                                                Language="json"
-                                                Text="{Binding BodyEditorText}" />
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsVariablesTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10" Spacing="0">
-                        <Label Text="Variables" Style="{StaticResource PaneTitleStyle}" />
-                        <Label Margin="0,2,0,10" Text="Workspace, environment, and request variables can be inspected here later." Style="{StaticResource PaneMetaStyle}" />
-                        <Border Style="{StaticResource ListRowBorderStyle}">
-                            <Grid RowDefinitions="Auto,1">
-                                <Grid ColumnDefinitions="120,*">
-                                    <Label Text="host" FontFamily="OpenSansSemibold" FontSize="12" />
-                                    <Label Grid.Column="1" Text="api.example.local" />
-                                </Grid>
-                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
-                            </Grid>
-                        </Border>
-                        <Border Style="{StaticResource ListRowBorderStyle}">
-                            <Grid RowDefinitions="Auto,1">
-                                <Grid ColumnDefinitions="120,*">
-                                    <Label Text="country" FontFamily="OpenSansSemibold" FontSize="12" />
-                                    <Label Grid.Column="1" Text="Spain" />
-                                </Grid>
-                                <BoxView Grid.Row="1" Margin="-10,7,-10,0" HeightRequest="1" Color="{StaticResource DividerLight}" />
-                            </Grid>
-                        </Border>
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsPreRequestTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10">
-                        <controls:EditorSurface Title="Pre-Request Script"
-                                                Language="script"
-                                                Text="{Binding PreRequestEditorText}" />
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsTestsTabVisible}">
-                    <VerticalStackLayout Padding="10,0,10,10">
-                        <controls:EditorSurface Title="Tests"
-                                                Language="script"
-                                                Text="{Binding TestsEditorText}" />
-                    </VerticalStackLayout>
-                </ScrollView>
+            <Grid Grid.Row="2"
+                  Padding="12,6"
+                  ColumnDefinitions="*,Auto"
+                  ColumnSpacing="10">
+                <Label Text="Variable-aware request drafting surface."
+                       Style="{StaticResource PaneMetaStyle}" />
+                <Label Grid.Column="1"
+                       Text="author"
+                       Style="{StaticResource MonoMetaStyle}" />
             </Grid>
         </Grid>
     </Border>

@@ -33,7 +33,7 @@ public sealed record WorkspaceDefinition
     public Guid? ActiveEnvironmentId { get; init; }
 
     [JsonConverter(typeof(JsonStringEnumConverter<ThemeKind>))]
-    public ThemeKind Theme { get; init; } = ThemeKind.Dark;
+    public ThemeKind Theme { get; init; } = ThemeKind.System;
 
     public List<VariableDefinition> Variables { get; init; } = [];
 
@@ -83,7 +83,7 @@ public sealed record AppProfile
 
     public List<VariableDefinition> GlobalVariables { get; init; } = [];
 
-    public ThemeKind Theme { get; init; } = ThemeKind.Dark;
+    public ThemeKind Theme { get; init; } = ThemeKind.System;
 
     public PaneLayoutPreference PaneLayout { get; init; } = new();
 }

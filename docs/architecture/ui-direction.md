@@ -1,79 +1,74 @@
 # UI Direction
 
-Date: 2026-03-17
+Date: 2026-03-18
 
-## Visual Goal
+This document replaces earlier product-description and UI guidance that framed For-Rest as a more conventional REST client surface.
 
-For-Rest should feel like a serious developer workstation with a modern Windows-native edge:
+## Core Direction
 
-- sleek and fluid, but not soft
-- dense and utilitarian, but not cramped
-- futuristic in restraint, not neon theater
-- clearly optimized for developers, testers, and security researchers who live in panes, tabs, and keyboard flow
+For-Rest should present as a fluid engineering workbench.
 
-The reference direction is closer to an IDE-grade API workbench than a generic desktop CRUD app.
+The interface is centered on three distinct working regions:
 
-## Shell Principles
+- left pane for navigation and organization
+- center pane for primary authoring and scripting surfaces
+- right pane for output, inspection, response, and feedback
 
-### Pane Utility First
+These regions must read as different responsibilities, not as three equal cards on a page.
 
-- three panes remain the default mental model
-- pane widths must be adjustable
-- pane headers should communicate purpose immediately
-- action density should be higher than a consumer app
+## Center Pane Priority
 
-### Developer Tooling Feel
+The center pane is the most important region.
 
-- monospaced editing surfaces should look intentional
-- request, script, and response areas should read as code tooling
-- semantic color should highlight method, status, trust, and runtime state
-- tabs and lists should look compact and operational
+It must not be treated like a stack of forms, toggles, and large buttons.
 
-### Modern Native Tone
+It must instead read like the main editor surface where future scripting, request authoring, and advanced logic will live. Even before Monaco is integrated, the shell should already make this obvious.
 
-- use layered dark surfaces, fine borders, and restrained accent lighting
-- prefer subtle gradients and materials over flat blocks
-- keep typography crisp and readable for long sessions
-- avoid decorative color noise
-- remove the stock-looking title bar from the visual hierarchy and fold window chrome into the workbench shell
+## Interaction Tone
 
-## Current Baseline After This Pass
+- fluid and stable during resize
+- compact and work-oriented
+- textual and editor-led
+- restrained in color and chrome
+- deliberate about pane boundaries and tab hierarchy
 
-- custom WinUI title bar is integrated into the shell so the window chrome no longer fights the product identity
-- the top request strip is now a custom workbench surface instead of the stock command bar look
-- request and response panes expose execution telemetry more explicitly: method, host, status, time, size, type, and response details
-- seeded workspace requests now demonstrate variable-based URLs and header-aware execution more clearly
+The app should feel closer to an IDE, database client, or engineering workbench than to a dashboard or a mobile-first CRUD experience.
 
-## Editor Subsystem Direction
+## Visual Language
 
-The current stock WinUI text surfaces are transitional only.
+- light-first by default
+- neutral surfaces with restrained azure-like accents
+- dense rows instead of oversized list tiles
+- tabs and text instead of decorative containers
+- subtle dividers instead of dramatic chrome
+- structured outputs instead of colorful widgets
 
-The target editor subsystem must support:
+Avoid:
 
-- syntax highlighting for JSON, HTTP-ish content, and C# scripts
-- line numbers and gutters
-- find and replace
-- bracket and indentation behavior
-- diagnostics and error markers
-- completion or IntelliSense-style affordances for the scripting API
-- extensibility for future proxy/mitm manipulation flows and richer viewers
+- large card sections
+- dashboard styling
+- form-heavy request editing
+- oversized command bars
+- flashy effects
+- stylized hacker aesthetics
+- obvious VS Code imitation
 
-The implementation may be a hosted editor component or a native/editor hybrid, but it must behave like a real code surface.
+## Pane Expectations
 
-## Expected Interaction Tone
+### Left Pane
 
-- fast opening and switching between requests
-- keyboard-forward request execution and inspection
-- compact explorer with strong method/status markers
-- request tabs that feel like documents, not wizard pages
-- output panes that can hold console, tests, history, and raw payload work without visual collapse
+The left pane should feel textual and navigational. It should rely on compact rows, subtle grouping, and light selection treatment rather than big action buttons or chunky control trays.
 
-## What This Means For Ongoing Work
+### Center Pane
 
-When touching the shell:
+The center pane should remain dominant and editor-first. Tabs in this region are future-facing hosts for request, body, script, test, and variable work.
 
-- bias toward denser pane chrome and clearer information hierarchy
-- preserve semantic colors and code-friendly typography
-- avoid business-app spacing and generic form layout whenever possible
-- prefer changes that move the shell toward an IDE workbench, even if the full editor host is not in place yet
-- prefer custom shell surfaces over generic command bars or obviously stock desktop chrome when the default look undercuts the product tone
+### Right Pane
+
+The right pane should feel like a real companion region, already prepared for response viewing, raw output, headers, logs, and other inspection surfaces.
+
+## Ongoing Rule
+
+When making UI changes, prioritize shell clarity, pane identity, density, and text-first workflow over feature breadth.
+
+If a design choice starts pulling the app back toward a traditional forms-first REST client, that choice is moving in the wrong direction.

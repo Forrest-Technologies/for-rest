@@ -26,7 +26,7 @@ public partial class ExplorerPane : ContentView
 
 	private void OnItemTapped(object? sender, TappedEventArgs e)
 	{
-		if (e.Parameter is ExplorerItemViewModel item)
+		if (e.Parameter is NavigationItemViewModel item)
 		{
 			ViewModel.SelectExplorerItem(item);
 		}

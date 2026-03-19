@@ -61,6 +61,3 @@ nunit-*.xml
 *.obj
 */*.bin
 *.cache
-/.vs/*.*
-/.vs/ProjectEvaluation/*.*
-/.vs/ProjectEvaluation/forrest.projects.v10.bin

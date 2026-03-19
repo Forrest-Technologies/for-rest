@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 
@@ -6,27 +7,27 @@ namespace ForRest.Maui.ViewModels;
 
 public sealed class MainPageViewModel : ObservableObject
 {
-	private const double DefaultLeftPanePixels = 288d;
-	private const double DefaultRightPanePixels = 320d;
-	private const double MinLeftPanePixels = 220d;
-	private const double MinRightPanePixels = 220d;
-	private const double MinCenterPanePixels = 360d;
-	private const double SplitterPixels = 6d;
+	private const double DefaultLeftPanePixels = 276d;
+	private const double DefaultRightPanePixels = 344d;
+	private const double MinLeftPanePixels = 228d;
+	private const double MinRightPanePixels = 260d;
+	private const double MinCenterPanePixels = 560d;
+	private const double SplitterPixels = 8d;
 	private const double CompactLayoutBreakpoint = 980d;
-	private const double CompactPaneMinWidth = 280d;
-	private const double CompactPaneMaxWidth = 420d;
+	private const double CompactPaneMinWidth = 300d;
+	private const double CompactPaneMaxWidth = 440d;
 
-	private readonly Color _methodGet = Color.FromArgb("#1565C0");
-	private readonly Color _methodPost = Color.FromArgb("#2E7D32");
-	private readonly Color _methodPut = Color.FromArgb("#8C4B0F");
-	private readonly Color _methodDelete = Color.FromArgb("#B03C36");
-	private readonly Color _methodOpt = Color.FromArgb("#616161");
+	private readonly Color _methodGet = Color.FromArgb("#167C65");
+	private readonly Color _methodPost = Color.FromArgb("#176AB8");
+	private readonly Color _methodPut = Color.FromArgb("#9A5A1A");
+	private readonly Color _methodDelete = Color.FromArgb("#B2433D");
+	private readonly Color _methodNeutral = Color.FromArgb("#5D6978");
 
 	private double _leftPanePixels = DefaultLeftPanePixels;
 	private double _rightPanePixels = DefaultRightPanePixels;
 	private double _leftRestorePixels = DefaultLeftPanePixels;
 	private double _rightRestorePixels = DefaultRightPanePixels;
-	private double _workbenchWidth = 1280d;
+	private double _workbenchWidth = 1360d;
 	private bool _leftPaneCollapsed;
 	private bool _rightPaneCollapsed;
 	private bool _isCompactLayout;
@@ -35,51 +36,38 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _selectedWorkspace;
 	private string _selectedEnvironment;
 	private string _selectedMethod;
-	private string _requestUrl;
 	private string _requestName;
-	private string _requestNotes;
+	private string _requestSummary;
+	private string _requestLocation;
+	private string _requestTarget;
+	private string _requestEditorText;
+	private string _headersEditorText;
 	private string _bodyEditorText;
-	private string _preRequestEditorText;
+	private string _scriptEditorText;
 	private string _testsEditorText;
+	private string _variablesEditorText;
 	private string _responseBodyText;
 	private string _responseRawText;
 	private string _responseState;
 
 	public MainPageViewModel()
 	{
-		WorkspaceOptions =
-		[
-			"Echo Workspace",
-			"Local Demo",
-			"API Playground"
-		];
-		EnvironmentOptions =
-		[
-			"Local",
-			"Stage",
-			"Prod"
-		];
-		MethodOptions =
-		[
-			"GET",
-			"POST",
-			"PUT",
-			"DELETE",
-			"OPTIONS"
-		];
-
-		_selectedWorkspace = WorkspaceOptions[0];
-		_selectedEnvironment = EnvironmentOptions[0];
+		_selectedWorkspace = "for-rest://echo-lab";
+		_selectedEnvironment = "Local";
 		_selectedMethod = "POST";
-		_requestUrl = "https://{{host}}/echo/post?age={{age}}&country={{country}}";
 		_requestName = "Echo POST";
-		_requestNotes = "Phase 1 shell only. Keep the layout compact, textual, and pane-driven before adding execution features.";
-		_bodyEditorText = "{\n  \"firstName\": \"Ada\",\n  \"country\": \"Spain\",\n  \"age\": 30\n}";
-		_preRequestEditorText = "vars.country = env.country ?? \"Spain\"\nvars.age = 30";
-		_testsEditorText = "response.status == 200\nresponse.time < 2000";
-		_responseBodyText = "{\n  \"args\": {\n    \"age\": \"30\",\n    \"country\": \"Spain\"\n  },\n  \"json\": {\n    \"firstName\": \"Ada\",\n    \"country\": \"Spain\",\n    \"age\": 30\n  }\n}";
-		_responseRawText = "HTTP/1.1 200 OK\ncontent-type: application/json\ncontent-length: 504\n\n{\n  \"args\": {\n    \"age\": \"30\",\n    \"country\": \"Spain\"\n  }\n}";
-		_responseState = "Idle";
+		_requestSummary = "Primary draft surface for shaping request text, scripts, and tests.";
+		_requestLocation = "/requests/echo/post";
+		_requestTarget = BuildRequestTarget(_requestLocation);
+		_requestEditorText = BuildRequestEditorText(_requestName, _selectedMethod, _requestTarget);
+		_headersEditorText = BuildHeadersEditorText();
+		_bodyEditorText = BuildBodyEditorText(_requestName);
+		_scriptEditorText = BuildScriptEditorText(_requestName);
+		_testsEditorText = BuildTestsEditorText();
+		_variablesEditorText = BuildVariablesEditorText();
+		_responseBodyText = BuildResponseBodyText();
+		_responseRawText = BuildResponseRawText();
+		_responseState = "200 OK";
 
 		LeftPaneTabs =
 		[
@@ -89,63 +77,98 @@ public sealed class MainPageViewModel : ObservableObject
 
 		OpenDocuments =
 		[
-			new RequestDocumentViewModel("Echo POST", "POST", "Current request surface", true, true),
-			new RequestDocumentViewModel("Text XML", "GET", "Secondary request tab", false)
+			new RequestDocumentViewModel("Echo POST", "POST", "Current request draft", "/requests/echo/post", true, true),
+			new RequestDocumentViewModel("Users Feed", "GET", "Read-only collection fetch", "/requests/users/list", false),
+			new RequestDocumentViewModel("Sync Profile", "PUT", "Mutation workflow placeholder", "/requests/users/sync", false)
 		];
 
 		CenterTabs =
 		[
 			new PaneTabViewModel("request", "Request", true),
-			new PaneTabViewModel("params", "Params"),
 			new PaneTabViewModel("headers", "Headers"),
-			new PaneTabViewModel("auth", "Auth"),
 			new PaneTabViewModel("body", "Body"),
-			new PaneTabViewModel("variables", "Variables"),
-			new PaneTabViewModel("pre-request", "Pre-Request Script"),
-			new PaneTabViewModel("tests", "Tests")
+			new PaneTabViewModel("script", "Script"),
+			new PaneTabViewModel("tests", "Tests"),
+			new PaneTabViewModel("variables", "Variables")
 		];
 
 		RightPaneTabs =
 		[
-			new PaneTabViewModel("body", "Body", true),
+			new PaneTabViewModel("response", "Response", true),
 			new PaneTabViewModel("headers", "Headers"),
-			new PaneTabViewModel("cookies", "Cookies"),
-			new PaneTabViewModel("test-results", "Test Results"),
-			new PaneTabViewModel("extracted", "Extracted Variables"),
+			new PaneTabViewModel("trace", "Trace"),
 			new PaneTabViewModel("raw", "Raw")
 		];
 
-		ExplorerItems =
+		ExplorerSections =
 		[
-			new ExplorerItemViewModel("GET", "Get Test Xml", "Simple XML smoke request", _methodGet),
-			new ExplorerItemViewModel("POST", "Echo POST", "Current working draft", _methodPost, true),
-			new ExplorerItemViewModel("GET", "Load Test", "Text-heavy placeholder request", _methodGet),
-			new ExplorerItemViewModel("POST", "Cookies Test", "Cookie flow placeholder", _methodPost),
-			new ExplorerItemViewModel("PUT", "New PUT Request", "Empty request shell", _methodPut),
-			new ExplorerItemViewModel("DEL", "Delete Users", "Dangerous placeholder", _methodDelete),
-			new ExplorerItemViewModel("OPT", "Post Form Data", "Options and form preview", _methodOpt)
+			new NavigationSectionViewModel(
+				"Workspace",
+				[
+					new NavigationItemViewModel("WK", "workspace.forrest", "Workspace manifest and pane state", "~/echo-lab", _methodNeutral),
+					new NavigationItemViewModel("ENV", "env.local", "Local variables and secrets", "~/environments", _methodNeutral, depth: 1),
+					new NavigationItemViewModel("SCR", "common.frs", "Shared request helpers", "~/scripts", _methodNeutral, depth: 1)
+				]),
+			new NavigationSectionViewModel(
+				"Requests",
+				[
+					new NavigationItemViewModel("POST", "Echo POST", "Primary shell draft", "/requests/echo/post", _methodPost, "POST", isSelected: true),
+					new NavigationItemViewModel("GET", "Users Feed", "Read-heavy collection request", "/requests/users/list", _methodGet, "GET"),
+					new NavigationItemViewModel("PUT", "Sync Profile", "Mutation draft with script hooks", "/requests/users/sync", _methodPut, "PUT"),
+					new NavigationItemViewModel("DEL", "Delete Session", "Danger flow placeholder", "/requests/session/delete", _methodDelete, "DELETE")
+				]),
+			new NavigationSectionViewModel(
+				"Scratch",
+				[
+					new NavigationItemViewModel("TXT", "notes/ideas.frs", "Freeform request notes", "/scratch/ideas", _methodNeutral),
+					new NavigationItemViewModel("RAW", "captures/http.raw", "Stored payload captures", "/scratch/captures", _methodNeutral)
+				])
 		];
 
 		HistoryItems =
 		[
-			new HistoryEntryViewModel("POST", "Echo POST", "200 OK in 9.06 ms", "Today", _methodPost),
-			new HistoryEntryViewModel("GET", "Get Test Xml", "200 OK in 18.44 ms", "Today", _methodGet),
-			new HistoryEntryViewModel("PUT", "New PUT Request", "No execution yet", "Draft", _methodPut)
+			new HistoryEntryViewModel("POST", "Echo POST", "200 OK in 118 ms", "Today", _methodPost),
+			new HistoryEntryViewModel("GET", "Users Feed", "200 OK in 64 ms", "Today", _methodGet),
+			new HistoryEntryViewModel("PUT", "Sync Profile", "Draft only", "Not run", _methodPut)
 		];
 
 		ResponseHeaderRows =
 		[
-			new NameValueRowViewModel("content-type", "application/json", "response"),
-			new NameValueRowViewModel("content-length", "504", "response"),
-			new NameValueRowViewModel("server", "nginx/1.18.0", "response")
+			new NameValueRowViewModel("content-type", "application/json; charset=utf-8", "response"),
+			new NameValueRowViewModel("cache-control", "no-store", "response"),
+			new NameValueRowViewModel("x-shell-phase", "phase-1", "response")
+		];
+
+		OutputMetrics =
+		[
+			new OutputMetricViewModel("Status", "200 OK", Color.FromArgb("#1E7A5F")),
+			new OutputMetricViewModel("Time", "118 ms", Color.FromArgb("#176AB8")),
+			new OutputMetricViewModel("Size", "504 B", Color.FromArgb("#5D6978")),
+			new OutputMetricViewModel("Type", "JSON", Color.FromArgb("#176AB8"))
+		];
+
+		TraceEntries =
+		[
+			new TraceEntryViewModel("Compile request", "Resolved environment and draft text into an execution preview.", "12:40:18", _methodNeutral),
+			new TraceEntryViewModel("Send draft", "Execution plumbing is deferred in Phase 1. Output is shell-seeded.", "12:40:18", _methodPost),
+			new TraceEntryViewModel("Inspect response", "Right pane remains ready for response, logs, and structured diagnostics.", "12:40:19", _methodGet)
+		];
+
+		EnvironmentOptions =
+		[
+			"Local",
+			"Stage",
+			"Prod"
+		];
+
+		MethodOptions =
+		[
+			"GET",
+			"POST",
+			"PUT",
+			"DELETE"
 		];
 	}
-
-	public IReadOnlyList<string> WorkspaceOptions { get; }
-
-	public IReadOnlyList<string> EnvironmentOptions { get; }
-
-	public IReadOnlyList<string> MethodOptions { get; }
 
 	public ObservableCollection<PaneTabViewModel> LeftPaneTabs { get; }
 
@@ -155,11 +178,19 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public ObservableCollection<PaneTabViewModel> RightPaneTabs { get; }
 
-	public ObservableCollection<ExplorerItemViewModel> ExplorerItems { get; }
+	public ObservableCollection<NavigationSectionViewModel> ExplorerSections { get; }
 
 	public ObservableCollection<HistoryEntryViewModel> HistoryItems { get; }
 
 	public ObservableCollection<NameValueRowViewModel> ResponseHeaderRows { get; }
+
+	public ObservableCollection<OutputMetricViewModel> OutputMetrics { get; }
+
+	public ObservableCollection<TraceEntryViewModel> TraceEntries { get; }
+
+	public IReadOnlyList<string> EnvironmentOptions { get; }
+
+	public IReadOnlyList<string> MethodOptions { get; }
 
 	public string SelectedWorkspace
 	{
@@ -181,6 +212,7 @@ public sealed class MainPageViewModel : ObservableObject
 			if (SetProperty(ref _selectedEnvironment, value))
 			{
 				OnPropertyChanged(nameof(EnvironmentBadge));
+				OnPropertyChanged(nameof(ActiveDocumentSummary));
 			}
 		}
 	}
@@ -188,25 +220,76 @@ public sealed class MainPageViewModel : ObservableObject
 	public string SelectedMethod
 	{
 		get => _selectedMethod;
-		set => SetProperty(ref _selectedMethod, value);
-	}
-
-	public string RequestUrl
-	{
-		get => _requestUrl;
-		set => SetProperty(ref _requestUrl, value);
+		set
+		{
+			if (SetProperty(ref _selectedMethod, value))
+			{
+				RefreshRequestDraftSignature();
+				OnPropertyChanged(nameof(SelectedMethodColor));
+				OnPropertyChanged(nameof(RequestStateStatus));
+			}
+		}
 	}
 
 	public string RequestName
 	{
 		get => _requestName;
-		set => SetProperty(ref _requestName, value);
+		set
+		{
+			if (SetProperty(ref _requestName, value))
+			{
+				OnPropertyChanged(nameof(RequestStateStatus));
+				OnPropertyChanged(nameof(ActiveDocumentSummary));
+			}
+		}
 	}
 
-	public string RequestNotes
+	public string RequestSummary
 	{
-		get => _requestNotes;
-		set => SetProperty(ref _requestNotes, value);
+		get => _requestSummary;
+		set
+		{
+			if (SetProperty(ref _requestSummary, value))
+			{
+				OnPropertyChanged(nameof(ActiveDocumentSummary));
+			}
+		}
+	}
+
+	public string RequestLocation
+	{
+		get => _requestLocation;
+		set
+		{
+			if (SetProperty(ref _requestLocation, value))
+			{
+				OnPropertyChanged(nameof(ActiveDocumentSummary));
+			}
+		}
+	}
+
+	public string RequestTarget
+	{
+		get => _requestTarget;
+		set
+		{
+			if (SetProperty(ref _requestTarget, value))
+			{
+				RefreshRequestDraftSignature();
+			}
+		}
+	}
+
+	public string RequestEditorText
+	{
+		get => _requestEditorText;
+		set => SetProperty(ref _requestEditorText, value);
+	}
+
+	public string HeadersEditorText
+	{
+		get => _headersEditorText;
+		set => SetProperty(ref _headersEditorText, value);
 	}
 
 	public string BodyEditorText
@@ -215,16 +298,22 @@ public sealed class MainPageViewModel : ObservableObject
 		set => SetProperty(ref _bodyEditorText, value);
 	}
 
-	public string PreRequestEditorText
+	public string ScriptEditorText
 	{
-		get => _preRequestEditorText;
-		set => SetProperty(ref _preRequestEditorText, value);
+		get => _scriptEditorText;
+		set => SetProperty(ref _scriptEditorText, value);
 	}
 
 	public string TestsEditorText
 	{
 		get => _testsEditorText;
 		set => SetProperty(ref _testsEditorText, value);
+	}
+
+	public string VariablesEditorText
+	{
+		get => _variablesEditorText;
+		set => SetProperty(ref _variablesEditorText, value);
 	}
 
 	public string ResponseBodyText
@@ -242,7 +331,13 @@ public sealed class MainPageViewModel : ObservableObject
 	public string ResponseState
 	{
 		get => _responseState;
-		set => SetProperty(ref _responseState, value);
+		set
+		{
+			if (SetProperty(ref _responseState, value))
+			{
+				OnPropertyChanged(nameof(OpenTabsStatus));
+			}
+		}
 	}
 
 	public bool IsCompactLayout => _isCompactLayout;
@@ -263,7 +358,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		get
 		{
-			double available = Math.Max(CompactPaneMinWidth, _workbenchWidth - 20d);
+			double available = Math.Max(CompactPaneMinWidth, _workbenchWidth - 24d);
 			return Math.Min(CompactPaneMaxWidth, available);
 		}
 	}
@@ -280,11 +375,44 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public string EnvironmentBadge => $"Env {SelectedEnvironment}";
 
-	public string RequestStateStatus => "State: Idle";
+	public string ShellDescriptor => "Fluid three-pane engineering workbench";
 
-	public string OpenTabsStatus => $"{OpenDocuments.Count} request tabs";
+	public string ActiveDocumentSummary => $"{SelectedEnvironment}  {RequestLocation}  {RequestSummary}";
 
-	public string TimingStatus => _isCompactLayout ? "Compact pane layout" : "Desktop pane layout";
+	public string RequestStateStatus => $"{SelectedMethod}  {RequestName}";
+
+	public string OpenTabsStatus => $"{OpenDocuments.Count} docs  {ResponseState}";
+
+	public string TimingStatus => _isCompactLayout ? "Compact overlay shell" : "Three-pane desktop shell";
+
+	public Color SelectedMethodColor => SelectedMethod switch
+	{
+		"GET" => _methodGet,
+		"POST" => _methodPost,
+		"PUT" => _methodPut,
+		"DELETE" => _methodDelete,
+		_ => _methodNeutral
+	};
+
+	public string CenterSurfaceStatus => CenterTabs.FirstOrDefault(tab => tab.IsSelected)?.Key switch
+	{
+		"request" => "HTTP-shaped draft surface",
+		"headers" => "Text-defined request header surface",
+		"body" => "Primary payload editor surface",
+		"script" => "Pre-execution logic surface",
+		"tests" => "Assertion and verification surface",
+		"variables" => "Workspace and request variables surface",
+		_ => "Editor-first center surface"
+	};
+
+	public string RightSurfaceStatus => RightPaneTabs.FirstOrDefault(tab => tab.IsSelected)?.Key switch
+	{
+		"response" => "Primary response viewer",
+		"headers" => "Response metadata and transport details",
+		"trace" => "Execution trace and feedback",
+		"raw" => "Raw transport output",
+		_ => "Inspection surface"
+	};
 
 	public bool IsExplorerTabVisible => IsTabSelected(LeftPaneTabs, "explorer");
 
@@ -292,29 +420,21 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool IsRequestTabVisible => IsTabSelected(CenterTabs, "request");
 
-	public bool IsParamsTabVisible => IsTabSelected(CenterTabs, "params");
-
 	public bool IsHeadersTabVisible => IsTabSelected(CenterTabs, "headers");
-
-	public bool IsAuthTabVisible => IsTabSelected(CenterTabs, "auth");
 
 	public bool IsBodyTabVisible => IsTabSelected(CenterTabs, "body");
 
-	public bool IsVariablesTabVisible => IsTabSelected(CenterTabs, "variables");
-
-	public bool IsPreRequestTabVisible => IsTabSelected(CenterTabs, "pre-request");
+	public bool IsScriptTabVisible => IsTabSelected(CenterTabs, "script");
 
 	public bool IsTestsTabVisible => IsTabSelected(CenterTabs, "tests");
 
-	public bool IsInspectorBodyVisible => IsTabSelected(RightPaneTabs, "body");
+	public bool IsVariablesTabVisible => IsTabSelected(CenterTabs, "variables");
+
+	public bool IsInspectorResponseVisible => IsTabSelected(RightPaneTabs, "response");
 
 	public bool IsInspectorHeadersVisible => IsTabSelected(RightPaneTabs, "headers");
 
-	public bool IsInspectorCookiesVisible => IsTabSelected(RightPaneTabs, "cookies");
-
-	public bool IsInspectorTestResultsVisible => IsTabSelected(RightPaneTabs, "test-results");
-
-	public bool IsInspectorExtractedVariablesVisible => IsTabSelected(RightPaneTabs, "extracted");
+	public bool IsInspectorTraceVisible => IsTabSelected(RightPaneTabs, "trace");
 
 	public bool IsInspectorRawVisible => IsTabSelected(RightPaneTabs, "raw");
 
@@ -414,12 +534,7 @@ public sealed class MainPageViewModel : ObservableObject
 		bool layoutChanged = _isCompactLayout != isCompact;
 		_isCompactLayout = isCompact;
 
-		if (!_isCompactLayout)
-		{
-			_isExplorerOverlayOpen = false;
-			_isInspectorOverlayOpen = false;
-		}
-		else if (layoutChanged)
+		if (!_isCompactLayout || layoutChanged)
 		{
 			_isExplorerOverlayOpen = false;
 			_isInspectorOverlayOpen = false;
@@ -482,13 +597,12 @@ public sealed class MainPageViewModel : ObservableObject
 
 		SetSelected(CenterTabs, tab);
 		OnPropertyChanged(nameof(IsRequestTabVisible));
-		OnPropertyChanged(nameof(IsParamsTabVisible));
 		OnPropertyChanged(nameof(IsHeadersTabVisible));
-		OnPropertyChanged(nameof(IsAuthTabVisible));
 		OnPropertyChanged(nameof(IsBodyTabVisible));
-		OnPropertyChanged(nameof(IsVariablesTabVisible));
-		OnPropertyChanged(nameof(IsPreRequestTabVisible));
+		OnPropertyChanged(nameof(IsScriptTabVisible));
 		OnPropertyChanged(nameof(IsTestsTabVisible));
+		OnPropertyChanged(nameof(IsVariablesTabVisible));
+		OnPropertyChanged(nameof(CenterSurfaceStatus));
 	}
 
 	public void SelectRightPaneTab(PaneTabViewModel? tab)
@@ -499,12 +613,11 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		SetSelected(RightPaneTabs, tab);
-		OnPropertyChanged(nameof(IsInspectorBodyVisible));
+		OnPropertyChanged(nameof(IsInspectorResponseVisible));
 		OnPropertyChanged(nameof(IsInspectorHeadersVisible));
-		OnPropertyChanged(nameof(IsInspectorCookiesVisible));
-		OnPropertyChanged(nameof(IsInspectorTestResultsVisible));
-		OnPropertyChanged(nameof(IsInspectorExtractedVariablesVisible));
+		OnPropertyChanged(nameof(IsInspectorTraceVisible));
 		OnPropertyChanged(nameof(IsInspectorRawVisible));
+		OnPropertyChanged(nameof(RightSurfaceStatus));
 	}
 
 	public void SelectDocument(RequestDocumentViewModel? document)
@@ -519,31 +632,25 @@ public sealed class MainPageViewModel : ObservableObject
 			item.IsSelected = ReferenceEquals(item, document);
 		}
 
-		RequestName = document.Title;
-		SelectedMethod = document.Method;
-		RequestNotes = document.Summary;
+		ApplyRequestSelection(document.Title, document.Method, document.Summary, document.Location);
+		SelectExplorerItemByTitle(document.Title);
 	}
 
-	public void SelectExplorerItem(ExplorerItemViewModel? item)
+	public void SelectExplorerItem(NavigationItemViewModel? item)
 	{
 		if (item is null)
 		{
 			return;
 		}
 
-		foreach (ExplorerItemViewModel entry in ExplorerItems)
+		foreach (NavigationItemViewModel entry in ExplorerSections.SelectMany(section => section.Items))
 		{
 			entry.IsSelected = ReferenceEquals(entry, item);
 		}
 
-		RequestName = item.Title;
-		SelectedMethod = item.Kind switch
-		{
-			"DEL" => "DELETE",
-			"OPT" => "OPTIONS",
-			_ => item.Kind
-		};
-		RequestNotes = item.Detail;
+		string method = item.Method ?? SelectedMethod;
+		ApplyRequestSelection(item.Title, method, item.Detail, item.Context);
+		SelectDocumentByTitle(item.Title);
 	}
 
 	private static bool IsTabSelected(IEnumerable<PaneTabViewModel> tabs, string key)
@@ -551,11 +658,76 @@ public sealed class MainPageViewModel : ObservableObject
 		return tabs.Any(tab => tab.Key == key && tab.IsSelected);
 	}
 
+	private void RefreshRequestDraftSignature()
+	{
+		if (string.IsNullOrWhiteSpace(RequestEditorText))
+		{
+			return;
+		}
+
+		string[] lines = RequestEditorText.Replace("\r\n", "\n").Split('\n');
+		for (int index = 0; index < lines.Length; index++)
+		{
+			if (MethodOptions.Any(method => lines[index].StartsWith($"{method} ", StringComparison.Ordinal)))
+			{
+				lines[index] = $"{SelectedMethod} {RequestTarget}";
+				RequestEditorText = string.Join(Environment.NewLine, lines);
+				return;
+			}
+		}
+	}
+
 	private void SetSelected(IEnumerable<PaneTabViewModel> tabs, PaneTabViewModel selected)
 	{
 		foreach (PaneTabViewModel tab in tabs)
 		{
 			tab.IsSelected = ReferenceEquals(tab, selected);
+		}
+	}
+
+	private void ApplyRequestSelection(string title, string method, string summary, string location)
+	{
+		RequestName = title;
+		SelectedMethod = method;
+		RequestSummary = summary;
+		RequestLocation = location;
+		RequestTarget = BuildRequestTarget(location);
+		RequestEditorText = BuildRequestEditorText(title, method, RequestTarget);
+		HeadersEditorText = BuildHeadersEditorText();
+		BodyEditorText = BuildBodyEditorText(title);
+		ScriptEditorText = BuildScriptEditorText(title);
+		TestsEditorText = BuildTestsEditorText();
+		VariablesEditorText = BuildVariablesEditorText();
+	}
+
+	private void SelectDocumentByTitle(string title)
+	{
+		RequestDocumentViewModel? matchingDocument = OpenDocuments.FirstOrDefault(document => document.Title == title);
+		if (matchingDocument is null)
+		{
+			return;
+		}
+
+		foreach (RequestDocumentViewModel document in OpenDocuments)
+		{
+			document.IsSelected = ReferenceEquals(document, matchingDocument);
+		}
+	}
+
+	private void SelectExplorerItemByTitle(string title)
+	{
+		NavigationItemViewModel? matchingItem = ExplorerSections
+			.SelectMany(section => section.Items)
+			.FirstOrDefault(item => item.Title == title);
+
+		if (matchingItem is null)
+		{
+			return;
+		}
+
+		foreach (NavigationItemViewModel item in ExplorerSections.SelectMany(section => section.Items))
+		{
+			item.IsSelected = ReferenceEquals(item, matchingItem);
 		}
 	}
 
@@ -590,5 +762,144 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsExplorerOverlayVisible));
 		OnPropertyChanged(nameof(IsInspectorOverlayVisible));
 		OnPropertyChanged(nameof(IsOverlayBackdropVisible));
+	}
+
+	private static string BuildRequestTarget(string location)
+	{
+		return $"{{base_url}}{location}/{{resource_id}}?trace={{trace_id}}";
+	}
+
+	private static string BuildRequestEditorText(string title, string method, string target)
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"base_url=http://putsomethinghere.what/{workspace_id}/test/12-{request_id}",
+				"trace_id={{trace_id}}",
+				"resource_id={resource_id}",
+				string.Empty,
+				$"@request \"{title}\"",
+				$"{method} {target}",
+				"Accept: application/json",
+				"Authorization: Bearer {{access_token}}",
+				"X-Workspace: {{workspace_name}}",
+				"X-Correlation-Id: 12-{{request_id}}",
+				string.Empty,
+				"# Phase 1 shell notes",
+				"# - center pane stays editor-first",
+				"# - request composition remains variable-aware and text-based",
+				"# - execution behavior is intentionally deferred",
+				string.Empty,
+				"{",
+				"  \"firstName\": \"Ada\",",
+				"  \"country\": \"Spain\",",
+				"  \"age\": 30",
+				"}"
+			]);
+	}
+
+	private static string BuildHeadersEditorText()
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"Accept: application/json",
+				"Content-Type: application/json",
+				"X-Trace: shell-reset",
+				"X-Environment: local",
+				"X-Workbench: editor-first"
+			]);
+	}
+
+	private static string BuildBodyEditorText(string title)
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"{",
+				$"  \"request\": \"{title}\",",
+				"  \"phase\": \"shell-reset\",",
+				"  \"surface\": \"editor-first\",",
+				"  \"payload\": {",
+				"    \"firstName\": \"Ada\",",
+				"    \"country\": \"Spain\",",
+				"    \"age\": 30",
+				"  }",
+				"}"
+			]);
+	}
+
+	private static string BuildScriptEditorText(string title)
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"beforeSend(ctx) {",
+				$"  ctx.vars.requestName = \"{title}\"",
+				"  ctx.vars.phase = \"shell-reset\"",
+				"  ctx.headers[\"x-shell-surface\"] = \"editor-first\"",
+				"  ctx.headers[\"x-environment\"] = ctx.environment.name",
+				"}"
+			]);
+	}
+
+	private static string BuildTestsEditorText()
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"expect(response.status).toEqual(200)",
+				"expect(response.timeMs).toBeLessThan(500)",
+				"expect(json(\"$.payload.country\")).toEqual(\"Spain\")",
+				"expect(response.headers[\"content-type\"]).toContain(\"json\")"
+			]);
+	}
+
+	private static string BuildVariablesEditorText()
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"host = \"api.echo.local\"",
+				"workspace = \"echo-lab\"",
+				"accent = \"azure\"",
+				"region = \"local\"",
+				"phase = \"shell-reset\""
+			]);
+	}
+
+	private static string BuildResponseBodyText()
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"{",
+				"  \"ok\": true,",
+				"  \"phase\": \"shell-reset\",",
+				"  \"surface\": \"response-pane\",",
+				"  \"payload\": {",
+				"    \"firstName\": \"Ada\",",
+				"    \"country\": \"Spain\",",
+				"    \"age\": 30",
+				"  }",
+				"}"
+			]);
+	}
+
+	private static string BuildResponseRawText()
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"HTTP/1.1 200 OK",
+				"content-type: application/json; charset=utf-8",
+				"cache-control: no-store",
+				"x-shell-phase: phase-1",
+				string.Empty,
+				"{",
+				"  \"ok\": true,",
+				"  \"phase\": \"shell-reset\"",
+				"}"
+			]);
 	}
 }

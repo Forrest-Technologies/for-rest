@@ -35,6 +35,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private string pluginSummary = "Plugins: 0 discovered";
     private bool isBusy;
     private Brush statusBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 63, 142, 252));
+    private double leftPaneWidth = 280;
+    private double middlePaneWidth = 760;
+    private double rightPaneWidth = 420;
+    private double editorFontSize = 13;
+    private LeftRailSection activeLeftRailSection = LeftRailSection.Explorer;
+    private WorkbenchLayoutMode layoutMode = WorkbenchLayoutMode.Wide;
+    private bool isLeftRailOpen;
     private CancellationTokenSource? executionCancellationTokenSource;
 
     #endregion
@@ -58,6 +65,11 @@ public sealed class MainWindowViewModel : ObservableObject
         this.pluginCatalog = pluginCatalog;
         this.logger = logger;
 
+        LatestTests.CollectionChanged += OnSectionCollectionChanged;
+        LatestConsoleEntries.CollectionChanged += OnSectionCollectionChanged;
+        LatestRuntimeVariables.CollectionChanged += OnSectionCollectionChanged;
+        HistoryRuns.CollectionChanged += OnSectionCollectionChanged;
+
         LoadCommand = new AsyncRelayCommand(Load);
         SaveCommand = new AsyncRelayCommand(Save);
         SendCommand = new AsyncRelayCommand(Send, () => SelectedRequest is not null && !IsBusy);
@@ -69,6 +81,9 @@ public sealed class MainWindowViewModel : ObservableObject
         AddQueryParameterCommand = new RelayCommand(AddQueryParameter, () => SelectedRequest is not null);
         AddVariableCommand = new RelayCommand(AddVariable, () => SelectedRequest is not null);
         AddFormValueCommand = new RelayCommand(AddFormValue, () => SelectedRequest is not null);
+        ToggleLeftRailCommand = new RelayCommand(ToggleLeftRail);
+        ShowExplorerRailCommand = new RelayCommand(ShowExplorerRail);
+        ShowHistoryRailCommand = new RelayCommand(ShowHistoryRail);
     }
 
     #endregion
@@ -116,6 +131,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public IRelayCommand AddVariableCommand { get; }
 
     public IRelayCommand AddFormValueCommand { get; }
+
+    public IRelayCommand ToggleLeftRailCommand { get; }
+
+    public IRelayCommand ShowExplorerRailCommand { get; }
+
+    public IRelayCommand ShowHistoryRailCommand { get; }
 
     public string[] HttpMethods { get; } = Enum.GetNames<HttpMethodKind>();
 
@@ -260,6 +281,114 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public double LeftPaneWidth
+    {
+        get => leftPaneWidth;
+        private set
+        {
+            if (SetProperty(ref leftPaneWidth, Math.Max(220, value)))
+            {
+                OnPropertyChanged(nameof(LeftPaneGridWidth));
+            }
+        }
+    }
+
+    public double MiddlePaneWidth
+    {
+        get => middlePaneWidth;
+        private set
+        {
+            if (SetProperty(ref middlePaneWidth, Math.Max(360, value)))
+            {
+                OnPropertyChanged(nameof(MiddlePaneGridWidth));
+            }
+        }
+    }
+
+    public double RightPaneWidth
+    {
+        get => rightPaneWidth;
+        private set
+        {
+            if (SetProperty(ref rightPaneWidth, Math.Max(320, value)))
+            {
+                OnPropertyChanged(nameof(RightPaneGridWidth));
+            }
+        }
+    }
+
+    public double EditorFontSize
+    {
+        get => editorFontSize;
+        private set => SetProperty(ref editorFontSize, Math.Max(11, value));
+    }
+
+    public GridLength LeftPaneGridWidth => new(LeftPaneWidth);
+
+    public GridLength MiddlePaneGridWidth => new(MiddlePaneWidth);
+
+    public GridLength RightPaneGridWidth => new(RightPaneWidth);
+
+    public LeftRailSection ActiveLeftRailSection
+    {
+        get => activeLeftRailSection;
+        private set
+        {
+            if (SetProperty(ref activeLeftRailSection, value))
+            {
+                OnPropertyChanged(nameof(IsExplorerRailSelected));
+                OnPropertyChanged(nameof(IsHistoryRailSelected));
+                OnPropertyChanged(nameof(IsExplorerRailVisible));
+                OnPropertyChanged(nameof(IsHistoryRailVisible));
+            }
+        }
+    }
+
+    public WorkbenchLayoutMode LayoutMode
+    {
+        get => layoutMode;
+        private set
+        {
+            if (SetProperty(ref layoutMode, value))
+            {
+                OnPropertyChanged(nameof(IsNarrowLayout));
+                OnPropertyChanged(nameof(IsMediumLayout));
+                OnPropertyChanged(nameof(IsWideLayout));
+                OnPropertyChanged(nameof(ShowLeftRailToggle));
+            }
+        }
+    }
+
+    public bool IsLeftRailOpen
+    {
+        get => isLeftRailOpen;
+        private set => SetProperty(ref isLeftRailOpen, value);
+    }
+
+    public bool IsExplorerRailSelected => ActiveLeftRailSection == LeftRailSection.Explorer;
+
+    public bool IsHistoryRailSelected => ActiveLeftRailSection == LeftRailSection.History;
+
+    public bool IsExplorerRailVisible => IsExplorerRailSelected;
+
+    public bool IsHistoryRailVisible => IsHistoryRailSelected;
+
+    public bool IsNarrowLayout => LayoutMode == WorkbenchLayoutMode.Narrow;
+
+    public bool IsMediumLayout => LayoutMode == WorkbenchLayoutMode.Medium;
+
+    public bool IsWideLayout => LayoutMode == WorkbenchLayoutMode.Wide;
+
+    public bool ShowLeftRailToggle => IsNarrowLayout;
+
+    public string HistorySectionLabel => HistoryRuns.Count == 0 ? "History" : $"History {HistoryRuns.Count}";
+
+    public string TestsSectionLabel => LatestTests.Count == 0 ? "Test Results" : $"Test Results {LatestTests.Count}";
+
+    public string RuntimeVariablesSectionLabel => LatestRuntimeVariables.Count == 0 ? "Extracted Variables" : $"Extracted Variables {LatestRuntimeVariables.Count}";
+
+    public string ConsoleSectionLabel => LatestConsoleEntries.Count == 0 ? "Console" : $"Console {LatestConsoleEntries.Count}";
+
     #endregion
 
     #region Public Methods
@@ -392,6 +521,9 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedEnvironment = Environments.FirstOrDefault(item => item.Environment.Id == workspace.Snapshot.Workspace.ActiveEnvironmentId)
             ?? Environments.FirstOrDefault();
 
+        LoadPaneLayout(workspace.Snapshot.Workspace.Settings.PaneLayout);
+        ActiveLeftRailSection = LeftRailSection.Explorer;
+        IsLeftRailOpen = false;
         RebuildExplorer();
         HistoryRuns.ReplaceWith(await executionHistoryRepository.Load(workspace.Snapshot.Workspace.Id));
 
@@ -506,6 +638,61 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedRequest?.FormValues.Add(new KeyValueItemViewModel());
     }
 
+    public void ToggleLeftRail()
+    {
+        if (!IsNarrowLayout)
+        {
+            return;
+        }
+
+        IsLeftRailOpen = !IsLeftRailOpen;
+    }
+
+    public void ShowExplorerRail()
+    {
+        ActiveLeftRailSection = LeftRailSection.Explorer;
+        if (IsNarrowLayout)
+        {
+            IsLeftRailOpen = true;
+        }
+    }
+
+    public void ShowHistoryRail()
+    {
+        ActiveLeftRailSection = LeftRailSection.History;
+        if (IsNarrowLayout)
+        {
+            IsLeftRailOpen = true;
+        }
+    }
+
+    public void SetLayoutMode(WorkbenchLayoutMode mode)
+    {
+        LayoutMode = mode;
+        if (mode != WorkbenchLayoutMode.Narrow)
+        {
+            IsLeftRailOpen = false;
+        }
+    }
+
+    public void UpdatePaneWidths(double left, double middle, double right)
+    {
+        LeftPaneWidth = left;
+        MiddlePaneWidth = middle;
+        RightPaneWidth = right;
+    }
+
+    public void CloseLeftRail()
+    {
+        IsLeftRailOpen = false;
+    }
+
+    public async Task PersistShellLayout()
+    {
+        PersistOpenRequests();
+        await workspaceService.Save(state);
+    }
+
     #endregion
 
     #region Private Methods
@@ -553,6 +740,17 @@ public sealed class MainWindowViewModel : ObservableObject
             Workspace = snapshot.Workspace with
             {
                 ActiveEnvironmentId = SelectedEnvironment?.Environment.Id,
+                Settings = snapshot.Workspace.Settings with
+                {
+                    PaneLayout = new()
+                    {
+                        LeftPaneWidth = LeftPaneWidth,
+                        MiddlePaneWidth = MiddlePaneWidth,
+                        RightPaneWidth = RightPaneWidth,
+                        EditorFontSize = EditorFontSize,
+                        UseCodeFont = snapshot.Workspace.Settings.PaneLayout.UseCodeFont,
+                    },
+                },
             },
         };
 
@@ -645,7 +843,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 Id = node.Id,
                 RequestId = node.Request?.Id,
                 Name = node.Name,
-                DisplayName = $"{new string(' ', depth * 2)}{node.Name}",
+                DisplayName = node.Name,
+                Indent = new Thickness(depth * 14, 0, 0, 0),
                 Kind = node.Kind,
                 BadgeText = node.Kind switch
                 {
@@ -673,6 +872,22 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             RefreshVariablePreview();
         }
+    }
+
+    private void LoadPaneLayout(PaneLayoutPreference paneLayout)
+    {
+        LeftPaneWidth = paneLayout.LeftPaneWidth;
+        MiddlePaneWidth = paneLayout.MiddlePaneWidth;
+        RightPaneWidth = paneLayout.RightPaneWidth;
+        EditorFontSize = paneLayout.EditorFontSize;
+    }
+
+    private void OnSectionCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs eventArgs)
+    {
+        OnPropertyChanged(nameof(HistorySectionLabel));
+        OnPropertyChanged(nameof(TestsSectionLabel));
+        OnPropertyChanged(nameof(RuntimeVariablesSectionLabel));
+        OnPropertyChanged(nameof(ConsoleSectionLabel));
     }
 
     private void SetResponse(ResponseSnapshot? response, ExecutionState state)

@@ -5,30 +5,65 @@
              x:Name="Root">
 
     <Border Style="{StaticResource SectionBorderStyle}">
-        <Grid RowDefinitions="Auto,*">
-            <Grid Padding="10,7"
-                  ColumnDefinitions="*,Auto">
+        <Grid RowDefinitions="Auto,*,Auto">
+            <Grid IsVisible="{Binding ShowHeader, Source={x:Reference Root}}"
+                  Padding="12,8"
+                  ColumnDefinitions="*,Auto"
+                  ColumnSpacing="10">
                 <Label Text="{Binding Title, Source={x:Reference Root}}"
                        Style="{StaticResource SectionTitleStyle}" />
                 <Label Grid.Column="1"
                        Text="{Binding Language, Source={x:Reference Root}}"
-                       FontSize="11"
-                       TextColor="{AppThemeBinding Light={StaticResource TextMutedLight}, Dark={StaticResource TextMutedDark}}" />
+                       Style="{StaticResource MonoMetaStyle}" />
             </Grid>
 
-            <Editor Grid.Row="1"
-                    Text="{Binding Text, Source={x:Reference Root}, Mode=TwoWay}"
-                    IsReadOnly="{Binding IsReadOnly, Source={x:Reference Root}}"
-                    AutoSize="Disabled"
-                    FontFamily="Courier New"
-                    FontSize="13"
-                    TextColor="{AppThemeBinding Light={StaticResource TextPrimaryLight}, Dark={StaticResource TextPrimaryDark}}"
-                    BackgroundColor="{AppThemeBinding Light={StaticResource EditorBackgroundLight}, Dark={StaticResource EditorBackgroundDark}}"
-                    Margin="1"
-                    HeightRequest="360"
-                    IsSpellCheckEnabled="False"
-                    IsTextPredictionEnabled="False"
-                    Keyboard="Text" />
+            <Grid Grid.Row="1"
+                  ColumnDefinitions="42,*"
+                  MinimumHeightRequest="340">
+                <Border StrokeThickness="0"
+                        BackgroundColor="{AppThemeBinding Light={StaticResource EditorGutterLight}, Dark={StaticResource EditorGutterDark}}">
+                    <ScrollView InputTransparent="True"
+                                VerticalScrollBarVisibility="Never">
+                        <VerticalStackLayout Padding="0,10"
+                                             Spacing="2"
+                                             BindableLayout.ItemsSource="{Binding LineNumbers, Source={x:Reference Root}}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <Label Text="{Binding .}"
+                                           HorizontalTextAlignment="End"
+                                           Margin="0,0,8,0"
+                                           Style="{StaticResource MonoMetaStyle}" />
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </ScrollView>
+                </Border>
+
+                <Editor Grid.Column="1"
+                        Text="{Binding Text, Source={x:Reference Root}, Mode=TwoWay}"
+                        IsReadOnly="{Binding IsReadOnly, Source={x:Reference Root}}"
+                        AutoSize="Disabled"
+                        Margin="0"
+                        FontFamily="Courier New"
+                        FontSize="12.5"
+                        TextColor="{AppThemeBinding Light={StaticResource TextPrimaryLight}, Dark={StaticResource TextPrimaryDark}}"
+                        BackgroundColor="{AppThemeBinding Light={StaticResource EditorBackgroundLight}, Dark={StaticResource EditorBackgroundDark}}"
+                        IsSpellCheckEnabled="False"
+                        IsTextPredictionEnabled="False"
+                        Keyboard="Text" />
+            </Grid>
+
+            <Grid Grid.Row="2"
+                  IsVisible="{Binding ShowFooter, Source={x:Reference Root}}"
+                  Padding="12,6"
+                  ColumnDefinitions="*,Auto"
+                  ColumnSpacing="10">
+                <Label Text="{Binding FooterText, Source={x:Reference Root}}"
+                       Style="{StaticResource PaneMetaStyle}" />
+                <Label Grid.Column="1"
+                       Text="monaco adapter boundary"
+                       Style="{StaticResource MonoMetaStyle}" />
+            </Grid>
         </Grid>
     </Border>
 </ContentView>

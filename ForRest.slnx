@@ -1,8 +1,7 @@
 <Solution>
-    <Project Path="src/ForRest.App/ForRest.App.csproj">
-      <Platform Project="x64" />
+    <Project Path="src/ForRest.Maui/ForRest.Maui.csproj">
+      <Deploy Solution="Debug|*" />
     </Project>
-    <Project Path="src/ForRest.Maui/ForRest.Maui.csproj" />
     <Project Path="src/ForRest.Domain/ForRest.Domain.csproj" />
     <Project Path="src/ForRest.Infrastructure.Sqlite/ForRest.Infrastructure.Sqlite.csproj" />
     <Project Path="src/ForRest.Models/ForRest.Models.csproj" />

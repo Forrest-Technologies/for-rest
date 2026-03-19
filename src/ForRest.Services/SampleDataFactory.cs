@@ -107,7 +107,7 @@ internal static class SampleDataFactory
         {
             Profile = new()
             {
-                Theme = ThemeKind.Dark,
+                Theme = ThemeKind.System,
                 GlobalVariables =
                 [
                     new()
@@ -129,7 +129,7 @@ internal static class SampleDataFactory
                         Name = "Demo Workspace",
                         Description = "Seeded workspace for the initial For-Rest MVP slice.",
                         ActiveEnvironmentId = environmentId,
-                        Theme = ThemeKind.Dark,
+                        Theme = ThemeKind.System,
                         Variables =
                         [
                             new()

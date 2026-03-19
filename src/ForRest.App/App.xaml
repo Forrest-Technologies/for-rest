@@ -1,35 +1,41 @@
 <Application
     x:Class="ForRest.App.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
     <Application.Resources>
+        <controls:XamlControlsResources />
         <FontFamily x:Key="ShellFontFamily">Segoe UI Variable Text</FontFamily>
         <FontFamily x:Key="ShellDisplayFontFamily">Segoe UI Variable Display</FontFamily>
         <FontFamily x:Key="CodeFontFamily">Cascadia Code</FontFamily>
-        <SolidColorBrush x:Key="ShellBackgroundBrush" Color="#0C1016" />
-        <SolidColorBrush x:Key="ShellPanelBrush" Color="#141A23" />
-        <SolidColorBrush x:Key="ShellPanelAltBrush" Color="#10161E" />
-        <SolidColorBrush x:Key="ShellRaisedBrush" Color="#1C2532" />
-        <SolidColorBrush x:Key="ShellBorderBrush" Color="#2A3546" />
-        <SolidColorBrush x:Key="ShellChromeBrush" Color="#090D13" />
-        <SolidColorBrush x:Key="ShellCodeSurfaceBrush" Color="#0A0F15" />
-        <SolidColorBrush x:Key="ShellInputBrush" Color="#0F151D" />
-        <SolidColorBrush x:Key="ShellHairlineBrush" Color="#223043" />
-        <SolidColorBrush x:Key="ShellAccentBrush" Color="#4F90FF" />
-        <SolidColorBrush x:Key="ShellAccentSoftBrush" Color="#163A67" />
-        <SolidColorBrush x:Key="ShellSelectionBrush" Color="#273347" />
-        <SolidColorBrush x:Key="ShellSuccessBrush" Color="#23A55A" />
-        <SolidColorBrush x:Key="ShellWarningBrush" Color="#D29922" />
-        <SolidColorBrush x:Key="ShellErrorBrush" Color="#D73A49" />
-        <SolidColorBrush x:Key="ShellMutedTextBrush" Color="#9AA4B2" />
+
+        <SolidColorBrush x:Key="ShellBackgroundBrush" Color="#0E1117" />
+        <SolidColorBrush x:Key="ShellChromeBrush" Color="#10151C" />
+        <SolidColorBrush x:Key="ShellPanelBrush" Color="#141A22" />
+        <SolidColorBrush x:Key="ShellPanelAltBrush" Color="#10161D" />
+        <SolidColorBrush x:Key="ShellRaisedBrush" Color="#18202A" />
+        <SolidColorBrush x:Key="ShellCodeSurfaceBrush" Color="#0C1118" />
+        <SolidColorBrush x:Key="ShellInputBrush" Color="#111822" />
+        <SolidColorBrush x:Key="ShellSelectionBrush" Color="#202B38" />
+        <SolidColorBrush x:Key="ShellHoverBrush" Color="#1A2530" />
+        <SolidColorBrush x:Key="ShellOverlayBrush" Color="#66070A0F" />
+        <SolidColorBrush x:Key="ShellHairlineBrush" Color="#293545" />
+        <SolidColorBrush x:Key="ShellBorderBrush" Color="#293545" />
+        <SolidColorBrush x:Key="ShellAccentBrush" Color="#2F7BFF" />
+        <SolidColorBrush x:Key="ShellAccentSoftBrush" Color="#D9E6FF" />
+        <SolidColorBrush x:Key="ShellSuccessBrush" Color="#16824B" />
+        <SolidColorBrush x:Key="ShellWarningBrush" Color="#C47A12" />
+        <SolidColorBrush x:Key="ShellErrorBrush" Color="#C23B4C" />
         <SolidColorBrush x:Key="ShellTextBrush" Color="#F3F6FA" />
-        <SolidColorBrush x:Key="MethodGetBrush" Color="#1A7F64" />
-        <SolidColorBrush x:Key="MethodPostBrush" Color="#2563EB" />
-        <SolidColorBrush x:Key="MethodPutBrush" Color="#7C3AED" />
-        <SolidColorBrush x:Key="MethodPatchBrush" Color="#C2410C" />
-        <SolidColorBrush x:Key="MethodDeleteBrush" Color="#B42318" />
-        <SolidColorBrush x:Key="MethodHeadBrush" Color="#475467" />
-        <SolidColorBrush x:Key="MethodOptionsBrush" Color="#155EEF" />
+        <SolidColorBrush x:Key="ShellMutedTextBrush" Color="#98A5B5" />
+        <SolidColorBrush x:Key="ShellSubtleTextBrush" Color="#738195" />
+        <SolidColorBrush x:Key="MethodGetBrush" Color="#18794E" />
+        <SolidColorBrush x:Key="MethodPostBrush" Color="#2062D1" />
+        <SolidColorBrush x:Key="MethodPutBrush" Color="#6C57FF" />
+        <SolidColorBrush x:Key="MethodPatchBrush" Color="#B66B11" />
+        <SolidColorBrush x:Key="MethodDeleteBrush" Color="#C23B4C" />
+        <SolidColorBrush x:Key="MethodHeadBrush" Color="#5F6B81" />
+        <SolidColorBrush x:Key="MethodOptionsBrush" Color="#1F7FBC" />
 
         <Style x:Key="WorkbenchPaneTitleStyle" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{ThemeResource ShellDisplayFontFamily}" />
@@ -38,11 +44,16 @@
             <Setter Property="Foreground" Value="{ThemeResource ShellTextBrush}" />
         </Style>
 
+        <Style x:Key="WorkbenchSubtleTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{ThemeResource ShellMutedTextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
         <Style x:Key="WorkbenchMetaLabelStyle" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{ThemeResource CodeFontFamily}" />
             <Setter Property="FontSize" Value="11" />
-            <Setter Property="Foreground" Value="{ThemeResource ShellMutedTextBrush}" />
-            <Setter Property="CharacterSpacing" Value="80" />
+            <Setter Property="Foreground" Value="{ThemeResource ShellSubtleTextBrush}" />
+            <Setter Property="CharacterSpacing" Value="70" />
         </Style>
 
         <Style x:Key="WorkbenchTextBoxStyle" TargetType="TextBox">
@@ -50,14 +61,17 @@
             <Setter Property="BorderBrush" Value="{ThemeResource ShellHairlineBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Foreground" Value="{ThemeResource ShellTextBrush}" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="10,7" />
             <Setter Property="FontSize" Value="13" />
+            <Setter Property="MinHeight" Value="34" />
         </Style>
 
         <Style x:Key="WorkbenchCodeTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource WorkbenchTextBoxStyle}">
             <Setter Property="Background" Value="{ThemeResource ShellCodeSurfaceBrush}" />
             <Setter Property="FontFamily" Value="{ThemeResource CodeFontFamily}" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="AcceptsReturn" Value="True" />
         </Style>
 
         <Style x:Key="WorkbenchComboBoxStyle" TargetType="ComboBox">
@@ -65,18 +79,20 @@
             <Setter Property="BorderBrush" Value="{ThemeResource ShellHairlineBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Foreground" Value="{ThemeResource ShellTextBrush}" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="10,5" />
             <Setter Property="FontSize" Value="13" />
+            <Setter Property="MinHeight" Value="34" />
         </Style>
 
         <Style x:Key="WorkbenchPrimaryButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="{ThemeResource ShellAccentBrush}" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="14,9" />
-            <Setter Property="MinWidth" Value="90" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="MinWidth" Value="88" />
         </Style>
 
         <Style x:Key="WorkbenchSecondaryButtonStyle" TargetType="Button">
@@ -84,8 +100,25 @@
             <Setter Property="Foreground" Value="{ThemeResource ShellTextBrush}" />
             <Setter Property="BorderBrush" Value="{ThemeResource ShellHairlineBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="MinHeight" Value="34" />
+        </Style>
+
+        <Style x:Key="WorkbenchCommandBarStyle" TargetType="CommandBar">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+
+        <Style x:Key="WorkbenchCommandBarButtonStyle" TargetType="AppBarButton">
+            <Setter Property="Foreground" Value="{ThemeResource ShellTextBrush}" />
+        </Style>
+
+        <Style x:Key="WorkbenchDocumentTabViewStyle" TargetType="TabView">
+            <Setter Property="Background" Value="{ThemeResource ShellPanelAltBrush}" />
+        </Style>
+
+        <Style x:Key="WorkbenchSectionTabViewStyle" TargetType="TabView" BasedOn="{StaticResource WorkbenchDocumentTabViewStyle}">
+            <Setter Property="Background" Value="{ThemeResource ShellPanelBrush}" />
         </Style>
     </Application.Resources>
 </Application>
