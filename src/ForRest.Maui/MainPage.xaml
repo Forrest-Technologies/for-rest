@@ -4,55 +4,16 @@
              xmlns:controls="clr-namespace:ForRest.Maui.Controls"
              x:Class="ForRest.Maui.MainPage">
 
-    <Grid Padding="8"
+    <Grid Padding="0"
           RowDefinitions="Auto,*,Auto"
-          RowSpacing="4">
+          RowSpacing="0">
         <Border Style="{StaticResource ToolbarBorderStyle}">
-            <Grid ColumnDefinitions="Auto,108,92,*,Auto,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="6">
-                <Button Text="Nav"
-                        Style="{StaticResource SubtleToolbarButtonStyle}"
-                        Clicked="OnToggleLeftPaneClicked" />
-
-                <Border Grid.Column="1"
-                        Style="{StaticResource ToolbarFieldBorderStyle}">
-                    <Picker ItemsSource="{Binding EnvironmentOptions}"
-                            SelectedItem="{Binding SelectedEnvironment}" />
-                </Border>
-
-                <Border Grid.Column="2"
-                        Style="{StaticResource ToolbarFieldBorderStyle}">
-                    <Picker ItemsSource="{Binding MethodOptions}"
-                            SelectedItem="{Binding SelectedMethod}" />
-                </Border>
-
-                <Border Grid.Column="3"
-                        Style="{StaticResource ToolbarFieldBorderStyle}">
+            <Grid ColumnDefinitions="*">
+                <Border Style="{StaticResource ToolbarFieldBorderStyle}">
                     <Entry Placeholder="https://{base_url}/..."
-                           Text="{Binding RequestTarget}" />
+                           Text="{Binding RequestTarget}"
+                           Style="{StaticResource CompactToolbarEntryStyle}" />
                 </Border>
-
-                <Button Grid.Column="4"
-                        Text="Send"
-                        Style="{StaticResource PrimaryToolbarButtonStyle}" />
-
-                <Button Grid.Column="5"
-                        Text="Save"
-                        Style="{StaticResource SubtleToolbarButtonStyle}" />
-
-                <Button Grid.Column="6"
-                        Text="Format"
-                        Style="{StaticResource SubtleToolbarButtonStyle}" />
-
-                <Button Grid.Column="7"
-                        Text="Output"
-                        Style="{StaticResource SubtleToolbarButtonStyle}"
-                        Clicked="OnToggleRightPaneClicked" />
-
-                <Label Grid.Column="8"
-                       Text="{Binding WorkspaceBadge}"
-                       VerticalTextAlignment="Center"
-                       Style="{StaticResource MonoMetaStyle}" />
             </Grid>
         </Border>
 
@@ -80,8 +41,7 @@
                     </BoxView.GestureRecognizers>
                 </BoxView>
 
-                <controls:WorkbenchCenterPane Grid.Column="2"
-                                              Margin="6,0" />
+                <controls:WorkbenchCenterPane Grid.Column="2" />
 
                 <BoxView Grid.Column="3"
                          IsVisible="{Binding IsRightPaneVisible}"
@@ -117,16 +77,19 @@
         </Grid>
 
         <Border Grid.Row="2"
-                Style="{StaticResource ChromeBorderStyle}">
-            <Grid ColumnDefinitions="*,Auto,Auto"
-                  ColumnSpacing="12">
-                <Label Text="{Binding RequestStateStatus}"
+                Style="{StaticResource ToolbarBorderStyle}">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+                  ColumnSpacing="10">
+                <Label Text="{Binding ExecutionStatus}"
                        Style="{StaticResource PaneMetaStyle}" />
                 <Label Grid.Column="1"
-                       Text="{Binding OpenTabsStatus}"
+                       Text="{Binding ResponseState}"
                        Style="{StaticResource PaneMetaStyle}" />
                 <Label Grid.Column="2"
-                       Text="{Binding TimingStatus}"
+                       Text="{Binding ResponseTimeStatus}"
+                       Style="{StaticResource PaneMetaStyle}" />
+                <Label Grid.Column="3"
+                       Text="{Binding ResponseSizeStatus}"
                        Style="{StaticResource PaneMetaStyle}" />
             </Grid>
         </Border>

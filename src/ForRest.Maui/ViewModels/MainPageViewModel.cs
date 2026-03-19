@@ -56,7 +56,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_selectedEnvironment = "Local";
 		_selectedMethod = "POST";
 		_requestName = "Echo POST";
-		_requestSummary = "Primary draft surface for shaping request text, scripts, and tests.";
+		_requestSummary = "Echo POST";
 		_requestLocation = "/requests/echo/post";
 		_requestTarget = BuildRequestTarget(_requestLocation);
 		_requestEditorText = BuildRequestEditorText(_requestName, _selectedMethod, _requestTarget);
@@ -149,9 +149,9 @@ public sealed class MainPageViewModel : ObservableObject
 
 		TraceEntries =
 		[
-			new TraceEntryViewModel("Compile request", "Resolved environment and draft text into an execution preview.", "12:40:18", _methodNeutral),
-			new TraceEntryViewModel("Send draft", "Execution plumbing is deferred in Phase 1. Output is shell-seeded.", "12:40:18", _methodPost),
-			new TraceEntryViewModel("Inspect response", "Right pane remains ready for response, logs, and structured diagnostics.", "12:40:19", _methodGet)
+			new TraceEntryViewModel("compile", "request parsed", "12:40:18", _methodNeutral),
+			new TraceEntryViewModel("send", "response received", "12:40:18", _methodPost),
+			new TraceEntryViewModel("inspect", "body buffered", "12:40:19", _methodGet)
 		];
 
 		EnvironmentOptions =
@@ -384,6 +384,12 @@ public sealed class MainPageViewModel : ObservableObject
 	public string OpenTabsStatus => $"{OpenDocuments.Count} docs  {ResponseState}";
 
 	public string TimingStatus => _isCompactLayout ? "Compact overlay shell" : "Three-pane desktop shell";
+
+	public string ExecutionStatus => "Ready";
+
+	public string ResponseTimeStatus => "118 ms";
+
+	public string ResponseSizeStatus => "504 B";
 
 	public Color SelectedMethodColor => SelectedMethod switch
 	{
@@ -784,11 +790,6 @@ public sealed class MainPageViewModel : ObservableObject
 				"Authorization: Bearer {{access_token}}",
 				"X-Workspace: {{workspace_name}}",
 				"X-Correlation-Id: 12-{{request_id}}",
-				string.Empty,
-				"# Phase 1 shell notes",
-				"# - center pane stays editor-first",
-				"# - request composition remains variable-aware and text-based",
-				"# - execution behavior is intentionally deferred",
 				string.Empty,
 				"{",
 				"  \"firstName\": \"Ada\",",

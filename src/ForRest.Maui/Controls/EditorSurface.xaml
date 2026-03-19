@@ -56,13 +56,9 @@
             <Grid Grid.Row="2"
                   IsVisible="{Binding ShowFooter, Source={x:Reference Root}}"
                   Padding="12,6"
-                  ColumnDefinitions="*,Auto"
-                  ColumnSpacing="10">
+                  ColumnDefinitions="*">
                 <Label Text="{Binding FooterText, Source={x:Reference Root}}"
                        Style="{StaticResource PaneMetaStyle}" />
-                <Label Grid.Column="1"
-                       Text="monaco adapter boundary"
-                       Style="{StaticResource MonoMetaStyle}" />
             </Grid>
         </Grid>
     </Border>

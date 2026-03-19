@@ -62,16 +62,29 @@
     </Style>
 
     <Style x:Key="ToolbarBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="6,4" />
+        <Setter Property="Padding" Value="2,2" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource SurfaceRaisedLight}, Dark={StaticResource SurfaceRaisedDark}}" />
         <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource DividerLight}, Dark={StaticResource DividerDark}}" />
     </Style>
 
     <Style x:Key="ToolbarFieldBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="8,1" />
+        <Setter Property="Padding" Value="4,0" />
         <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource SurfaceLight}, Dark={StaticResource SurfaceDark}}" />
         <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource BorderLight}, Dark={StaticResource BorderDark}}" />
         <Setter Property="StrokeThickness" Value="1" />
+    </Style>
+
+    <Style x:Key="CompactToolbarEntryStyle" TargetType="Entry">
+        <Setter Property="FontFamily" Value="OpenSansRegular" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="MinimumHeightRequest" Value="24" />
+        <Setter Property="HeightRequest" Value="24" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="VerticalTextAlignment" Value="Center" />
+        <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource TextPrimaryLight}, Dark={StaticResource TextPrimaryDark}}" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="PlaceholderColor" Value="{AppThemeBinding Light={StaticResource TextMutedLight}, Dark={StaticResource TextMutedDark}}" />
+        <Setter Property="ClearButtonVisibility" Value="WhileEditing" />
     </Style>
 
     <Style x:Key="PaneBorderStyle" TargetType="Border">
@@ -141,6 +154,18 @@
         <Setter Property="TextColor" Value="White" />
     </Style>
 
+    <Style x:Key="CompactToolbarButtonStyle" TargetType="Button">
+        <Setter Property="FontFamily" Value="OpenSansRegular" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Padding" Value="7,2" />
+        <Setter Property="MinimumHeightRequest" Value="24" />
+        <Setter Property="BorderWidth" Value="1" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light={StaticResource AccentLight}, Dark={StaticResource AccentDark}}" />
+        <Setter Property="BorderColor" Value="{AppThemeBinding Light={StaticResource AccentLight}, Dark={StaticResource AccentDark}}" />
+        <Setter Property="TextColor" Value="White" />
+    </Style>
+
     <Style x:Key="PaneTitleStyle" TargetType="Label">
         <Setter Property="FontFamily" Value="OpenSansSemibold" />
         <Setter Property="FontSize" Value="12.5" />
@@ -176,6 +201,12 @@
         <Setter Property="FontFamily" Value="Courier New" />
         <Setter Property="FontSize" Value="10.5" />
         <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource TextMutedLight}, Dark={StaticResource TextMutedDark}}" />
+    </Style>
+
+    <Style x:Key="ToolbarMethodLabelStyle" TargetType="Label">
+        <Setter Property="FontFamily" Value="Courier New" />
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource AccentStrongLight}, Dark={StaticResource AccentStrongDark}}" />
     </Style>
 
     <Style x:Key="MetricValueStyle" TargetType="Label">

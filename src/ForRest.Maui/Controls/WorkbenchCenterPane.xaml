@@ -5,42 +5,24 @@
              x:Class="ForRest.Maui.Controls.WorkbenchCenterPane">
 
     <Border Style="{StaticResource PaneBorderStyle}">
-        <Grid RowDefinitions="Auto,*,Auto">
-            <Grid Padding="14,12,14,8"
+        <Grid RowDefinitions="Auto,*">
+            <Grid Padding="10,6,10,4"
                   ColumnDefinitions="Auto,*"
-                  ColumnSpacing="10">
+                  ColumnSpacing="8">
                 <Label Text="{Binding SelectedMethod}"
                        VerticalTextAlignment="Start"
                        TextColor="{Binding SelectedMethodColor}"
                        Style="{StaticResource MonoMetaStyle}" />
 
-                <VerticalStackLayout Grid.Column="1"
-                                     Spacing="2">
-                    <Label Text="{Binding RequestName}"
-                           Style="{StaticResource PaneTitleStyle}" />
-                    <Label Text="{Binding RequestSummary}"
-                           Style="{StaticResource PaneMetaStyle}"
-                           LineBreakMode="TailTruncation" />
-                    <Label Text="{Binding RequestTarget}"
-                           Style="{StaticResource MonoMetaStyle}" />
-                </VerticalStackLayout>
+                <Label Grid.Column="1"
+                       Text="{Binding RequestName}"
+                       Style="{StaticResource PaneTitleStyle}" />
             </Grid>
 
             <Grid Grid.Row="1"
-                  Padding="8,0,8,8">
+                  Padding="0">
                 <controls:MonacoEditorSurface Language="forrest"
                                               Text="{Binding RequestEditorText}" />
-            </Grid>
-
-            <Grid Grid.Row="2"
-                  Padding="12,6"
-                  ColumnDefinitions="*,Auto"
-                  ColumnSpacing="10">
-                <Label Text="Variable-aware request drafting surface."
-                       Style="{StaticResource PaneMetaStyle}" />
-                <Label Grid.Column="1"
-                       Text="author"
-                       Style="{StaticResource MonoMetaStyle}" />
             </Grid>
         </Grid>
     </Border>

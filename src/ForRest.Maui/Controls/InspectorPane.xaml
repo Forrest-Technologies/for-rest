@@ -5,20 +5,13 @@
              x:Class="ForRest.Maui.Controls.InspectorPane">
 
     <Border Style="{StaticResource PaneBorderStyle}">
-        <Grid RowDefinitions="Auto,Auto,Auto,*">
-            <Grid Padding="12,10,12,8"
-                  ColumnDefinitions="*,Auto,Auto"
-                  ColumnSpacing="10">
-                <VerticalStackLayout Spacing="1">
-                    <Label Text="Output" Style="{StaticResource PaneTitleStyle}" />
-                    <Label Text="Inspection, response, and feedback surfaces" Style="{StaticResource PaneMetaStyle}" />
-                </VerticalStackLayout>
-                <Label Grid.Column="1"
-                       VerticalTextAlignment="Center"
-                       Text="{Binding ResponseState}"
-                       Style="{StaticResource MonoMetaStyle}" />
-                <Button Grid.Column="2"
-                        Text="Collapse"
+        <Grid RowDefinitions="Auto,Auto,*">
+            <Grid Padding="10,8,10,6"
+                  ColumnDefinitions="*,Auto"
+                  ColumnSpacing="8">
+                <Label Text="Inspect" Style="{StaticResource PaneTitleStyle}" />
+                <Button Grid.Column="1"
+                        Text="Hide"
                         Style="{StaticResource SubtleToolbarButtonStyle}"
                         Clicked="OnHideClicked" />
             </Grid>
@@ -26,27 +19,7 @@
             <ScrollView Grid.Row="1"
                         Orientation="Horizontal"
                         HorizontalScrollBarVisibility="Never">
-                <HorizontalStackLayout Padding="12,0,12,8"
-                                       Spacing="18"
-                                       BindableLayout.ItemsSource="{Binding OutputMetrics}">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate>
-                            <VerticalStackLayout Spacing="1">
-                                <Label Text="{Binding Label}"
-                                       Style="{StaticResource MonoMetaStyle}" />
-                                <Label Text="{Binding Value}"
-                                       TextColor="{Binding AccentColor}"
-                                       Style="{StaticResource MetricValueStyle}" />
-                            </VerticalStackLayout>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </HorizontalStackLayout>
-            </ScrollView>
-
-            <ScrollView Grid.Row="2"
-                        Orientation="Horizontal"
-                        HorizontalScrollBarVisibility="Never">
-                <HorizontalStackLayout Padding="10,0,10,8"
+                <HorizontalStackLayout Padding="8,0,8,6"
                                        Spacing="4"
                                        BindableLayout.ItemsSource="{Binding RightPaneTabs}">
                     <BindableLayout.ItemTemplate>
@@ -68,13 +41,13 @@
                 </HorizontalStackLayout>
             </ScrollView>
 
-            <Grid Grid.Row="3"
+            <Grid Grid.Row="2"
                   Padding="10,0,10,10">
                 <controls:EditorSurface IsVisible="{Binding IsInspectorResponseVisible}"
-                                        Title="Response"
                                         Language="json"
                                         IsReadOnly="True"
-                                        FooterText="Read-only response preview surface."
+                                        ShowHeader="False"
+                                        ShowFooter="False"
                                         Text="{Binding ResponseBodyText}" />
 
                 <ScrollView IsVisible="{Binding IsInspectorHeadersVisible}">
@@ -135,10 +108,10 @@
                 </ScrollView>
 
                 <controls:EditorSurface IsVisible="{Binding IsInspectorRawVisible}"
-                                        Title="Raw"
                                         Language="http"
                                         IsReadOnly="True"
-                                        FooterText="Low-level output remains available as text."
+                                        ShowHeader="False"
+                                        ShowFooter="False"
                                         Text="{Binding ResponseRawText}" />
             </Grid>
         </Grid>
