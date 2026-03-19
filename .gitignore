@@ -53,3 +53,14 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+/.dotnet-cli/.dotnet
+*/*.Log
+*.log
+*.vs
+*.bin
+*.obj
+*/*.bin
+*.cache
+/.vs/*.*
+/.vs/ProjectEvaluation/*.*
+/.vs/ProjectEvaluation/forrest.projects.v10.bin
