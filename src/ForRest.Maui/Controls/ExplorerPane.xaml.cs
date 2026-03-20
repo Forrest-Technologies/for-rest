@@ -31,4 +31,17 @@ public partial class ExplorerPane : ContentView
 			ViewModel.SelectExplorerItem(item);
 		}
 	}
+
+	private void OnWorkspaceClicked(object? sender, EventArgs e)
+	{
+		if (sender is Button { CommandParameter: WorkspaceItemViewModel workspace })
+		{
+			ViewModel.SelectWorkspace(workspace);
+		}
+	}
+
+	private void OnAddWorkspaceClicked(object? sender, EventArgs e)
+	{
+		ViewModel.AddWorkspace();
+	}
 }

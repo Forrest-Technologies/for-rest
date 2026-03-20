@@ -11,7 +11,9 @@
     <Project Path="src/ForRest.Scripting/ForRest.Scripting.csproj" />
     <Project Path="src/ForRest.Services/ForRest.Services.csproj" />
     <Project Path="src/ForRest.Shared/ForRest.Shared.csproj" />
+  <Folder Name="/src/" />
   <Folder Name="/tests/">
+    <Project Path="tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj" />
     <Project Path="tests/ForRest.Tests/ForRest.Tests.csproj" />
   </Folder>
 </Solution>

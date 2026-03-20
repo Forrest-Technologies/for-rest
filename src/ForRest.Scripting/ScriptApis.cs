@@ -59,8 +59,7 @@ public sealed class ScriptResponseApi(ResponseSnapshot? response)
 
     public string ContentType => response?.ContentType ?? string.Empty;
 
-    public Dictionary<string, string> Headers => response?.Headers.ToDictionary(static item => item.Key, static item => item.Value, StringComparer.OrdinalIgnoreCase)
-        ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> Headers => BuildHeaders(response);
 
     #endregion
 
@@ -72,13 +71,38 @@ public sealed class ScriptResponseApi(ResponseSnapshot? response)
     }
 
     #endregion
+
+    #region Private Methods
+
+    private static Dictionary<string, string> BuildHeaders(ResponseSnapshot? response)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (response is null)
+        {
+            return headers;
+        }
+
+        foreach (var header in response.Headers)
+        {
+            if (string.IsNullOrWhiteSpace(header.Key))
+            {
+                continue;
+            }
+
+            headers[header.Key] = header.Value;
+        }
+
+        return headers;
+    }
+
+    #endregion
 }
 
 public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
 {
     #region Private Fields
 
-    private readonly Dictionary<string, VariableDefinition> variables = seedVariables.ToDictionary(static item => item.Key, StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, VariableDefinition> variables = BuildVariableMap(seedVariables);
 
     #endregion
 
@@ -103,6 +127,26 @@ public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
     public IReadOnlyCollection<VariableDefinition> All()
     {
         return variables.Values.ToList();
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    private static Dictionary<string, VariableDefinition> BuildVariableMap(IEnumerable<VariableDefinition> seedVariables)
+    {
+        var variables = new Dictionary<string, VariableDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var variable in seedVariables)
+        {
+            if (string.IsNullOrWhiteSpace(variable.Key))
+            {
+                continue;
+            }
+
+            variables[variable.Key] = variable;
+        }
+
+        return variables;
     }
 
     #endregion

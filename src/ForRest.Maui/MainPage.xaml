@@ -115,15 +115,5 @@
                        Style="{StaticResource StatusBarTextStyle}" />
             </Grid>
         </Border>
-
-        <Button Grid.RowSpan="2"
-                Text="Send"
-                Clicked="OnSendClicked"
-                IsEnabled="{Binding CanSend}"
-                HorizontalOptions="End"
-                VerticalOptions="End"
-                Margin="0,0,22,22"
-                Style="{StaticResource FloatingActionButtonStyle}"
-                ZIndex="20" />
     </Grid>
 </ContentPage>

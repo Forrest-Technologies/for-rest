@@ -18,6 +18,33 @@ public sealed class PaneTabViewModel(string key, string title, bool isSelected =
 	}
 }
 
+public sealed class WorkspaceItemViewModel(Guid id, string title, string subtitle, bool isSelected = false) : ObservableObject
+{
+	private string _title = title;
+	private string _subtitle = subtitle;
+	private bool _isSelected = isSelected;
+
+	public Guid Id { get; } = id;
+
+	public string Title
+	{
+		get => _title;
+		set => SetProperty(ref _title, value);
+	}
+
+	public string Subtitle
+	{
+		get => _subtitle;
+		set => SetProperty(ref _subtitle, value);
+	}
+
+	public bool IsSelected
+	{
+		get => _isSelected;
+		set => SetProperty(ref _isSelected, value);
+	}
+}
+
 public sealed class RequestDocumentViewModel(
 	string title,
 	string method,

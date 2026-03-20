@@ -4,7 +4,7 @@
              x:Class="ForRest.Maui.Controls.ExplorerPane">
 
     <Border Style="{StaticResource PaneBorderStyle}">
-        <Grid RowDefinitions="Auto,Auto,*">
+        <Grid RowDefinitions="Auto,Auto,Auto,*">
             <Grid Padding="10,8,10,6"
                   ColumnDefinitions="*,Auto"
                   ColumnSpacing="8">
@@ -17,8 +17,7 @@
                         Clicked="OnHideClicked" />
             </Grid>
 
-            <Grid Grid.Row="1"
-                  RowDefinitions="Auto,Auto">
+            <Grid Grid.Row="1">
                 <ScrollView Orientation="Horizontal"
                             HorizontalScrollBarVisibility="Never">
                     <HorizontalStackLayout Padding="10,0,10,8"
@@ -42,23 +41,45 @@
                         </BindableLayout.ItemTemplate>
                     </HorizontalStackLayout>
                 </ScrollView>
-
-                <Grid Grid.Row="1"
-                      Padding="10,0,10,8"
-                      ColumnDefinitions="Auto,*"
-                      ColumnSpacing="8">
-                    <Label Text="ROOT"
-                           VerticalTextAlignment="Start"
-                           Style="{StaticResource MonoMetaStyle}" />
-                    <VerticalStackLayout Grid.Column="1"
-                                         Spacing="0">
-                        <Label Text="{Binding WorkspaceBadge}"
-                               Style="{StaticResource SectionTitleStyle}" />
-                    </VerticalStackLayout>
-                </Grid>
             </Grid>
 
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="2"
+                  Padding="10,0,10,8"
+                  ColumnDefinitions="Auto,*,Auto"
+                  ColumnSpacing="8">
+                <Label Text="ROOT"
+                       VerticalTextAlignment="Start"
+                       Style="{StaticResource MonoMetaStyle}" />
+                <ScrollView Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalScrollBarVisibility="Never">
+                    <HorizontalStackLayout Spacing="6"
+                                           BindableLayout.ItemsSource="{Binding Workspaces}">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate>
+                                <Button Text="{Binding Title}"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnWorkspaceClicked"
+                                        CommandParameter="{Binding .}">
+                                    <Button.Triggers>
+                                        <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
+                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
+                                        </DataTrigger>
+                                    </Button.Triggers>
+                                </Button>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </HorizontalStackLayout>
+                </ScrollView>
+                <Button Grid.Column="2"
+                        Text="+"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnAddWorkspaceClicked" />
+            </Grid>
+
+            <Grid Grid.Row="3">
                 <ScrollView IsVisible="{Binding IsExplorerTabVisible}">
                     <VerticalStackLayout Padding="0,0,0,12"
                                          Spacing="10"

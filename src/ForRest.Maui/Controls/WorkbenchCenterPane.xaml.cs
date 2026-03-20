@@ -23,4 +23,9 @@ public partial class WorkbenchCenterPane : ContentView
 	{
 		await ViewModel.SendAsync();
 	}
+
+	private async void OnSendClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.SendAsync();
+	}
 }

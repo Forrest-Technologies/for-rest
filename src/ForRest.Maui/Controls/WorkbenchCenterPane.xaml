@@ -54,6 +54,15 @@
                                               SendRequested="OnEditorSendRequested"
                                               ThemeKey="{Binding EditorThemeKey}"
                                               Text="{Binding ActiveEditorText}" />
+
+                <Button Text="Send"
+                        Clicked="OnSendClicked"
+                        IsEnabled="{Binding CanSend}"
+                        HorizontalOptions="End"
+                        VerticalOptions="End"
+                        Margin="0,0,18,18"
+                        Style="{StaticResource FloatingActionButtonStyle}"
+                        ZIndex="10" />
             </Grid>
         </Grid>
     </Border>

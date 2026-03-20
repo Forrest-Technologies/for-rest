@@ -85,5 +85,71 @@ public sealed class RoslynScriptEngineTests
         Assert.AreEqual(ConsoleEntryLevel.Error, result.ConsoleEntries.Single().Level);
     }
 
+    [TestMethod]
+    public async Task Run_uses_last_variable_value_when_duplicate_keys_are_seeded()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                tests.Equal("workspace", variables.Get("shared_key"), "workspace value wins");
+                variables.Set("runtime_only", "ok");
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+                GlobalVariables =
+                [
+                    new() { Key = "shared_key", Value = "global", Scope = VariableScope.Global },
+                ],
+                WorkspaceVariables =
+                [
+                    new() { Key = "shared_key", Value = "workspace", Scope = VariableScope.Workspace },
+                ],
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual(TestOutcomeState.Passed, result.Tests.Single(static item => item.Name == "workspace value wins").State);
+        Assert.AreEqual("ok", result.RuntimeVariables.Single(static item => item.Key == "runtime_only").Value);
+    }
+
+    [TestMethod]
+    public async Task Run_handles_duplicate_response_headers_without_throwing()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                tests.Equal("beta", response.Headers["X-Trace"], "last response header wins");
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    Headers =
+                    [
+                        new() { Key = "X-Trace", Value = "alpha" },
+                        new() { Key = "X-Trace", Value = "beta" },
+                    ],
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual(TestOutcomeState.Passed, result.Tests.Single().State);
+    }
+
     #endregion
 }

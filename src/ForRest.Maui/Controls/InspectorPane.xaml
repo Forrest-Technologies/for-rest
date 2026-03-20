@@ -113,6 +113,13 @@
                                         ShowHeader="False"
                                         ShowFooter="False"
                                         Text="{Binding ResponseRawText}" />
+
+                <controls:EditorSurface IsVisible="{Binding IsInspectorDebugVisible}"
+                                        Language="plaintext"
+                                        IsReadOnly="True"
+                                        ShowHeader="False"
+                                        ShowFooter="False"
+                                        Text="{Binding DebugOutputText}" />
             </Grid>
         </Grid>
     </Border>

@@ -33,34 +33,36 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             };
         }
 
-        var requestApi = new ScriptRequestApi(request.PreparedRequest);
-        var responseApi = new ScriptResponseApi(request.Response);
-        var variablesApi = new VariablesApi(
-        [
-            .. request.GlobalVariables,
-            .. request.WorkspaceVariables,
-            .. request.EnvironmentVariables,
-            .. request.RequestVariables,
-            .. request.RuntimeVariables,
-        ]);
         var testsApi = new TestsApi();
         var consoleApi = new ConsoleApi();
-
-        var globals = new ScriptGlobals
-        {
-            request = requestApi,
-            response = responseApi,
-            variables = variablesApi,
-            tests = testsApi,
-            console = consoleApi,
-            time = new TimeApi(),
-            json = new JsonApi(),
-            random = new RandomApi(),
-            workspace = new WorkspaceApi(request.Workspace),
-        };
+        ScriptRequestApi? requestApi = null;
+        VariablesApi? variablesApi = null;
+        ScriptGlobals? globals = null;
 
         try
         {
+            requestApi = new ScriptRequestApi(request.PreparedRequest);
+            variablesApi = new VariablesApi(
+            [
+                .. request.GlobalVariables,
+                .. request.WorkspaceVariables,
+                .. request.EnvironmentVariables,
+                .. request.RequestVariables,
+                .. request.RuntimeVariables,
+            ]);
+            globals = new ScriptGlobals
+            {
+                request = requestApi,
+                response = new ScriptResponseApi(request.Response),
+                variables = variablesApi,
+                tests = testsApi,
+                console = consoleApi,
+                time = new TimeApi(),
+                json = new JsonApi(),
+                random = new RandomApi(),
+                workspace = new WorkspaceApi(request.Workspace),
+            };
+
             await CSharpScript.RunAsync(request.Script, ScriptOptions, globals, cancellationToken: cancellationToken);
         }
         catch (CompilationErrorException exception)
@@ -68,16 +70,16 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             var message = string.Join(Environment.NewLine, exception.Diagnostics.Select(static item => item.ToString()));
             logger.LogWarning("Script compilation failed: {Message}", message);
             consoleApi.Error(message);
-            return BuildResult(request.PreparedRequest, requestApi, variablesApi, testsApi, consoleApi, message);
+            return BuildResult(request, requestApi, variablesApi, testsApi, consoleApi, message);
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Script execution failed");
             consoleApi.Error(exception.Message);
-            return BuildResult(request.PreparedRequest, requestApi, variablesApi, testsApi, consoleApi, exception.Message);
+            return BuildResult(request, requestApi, variablesApi, testsApi, consoleApi, exception.Message);
         }
 
-        return BuildResult(request.PreparedRequest, requestApi, variablesApi, testsApi, consoleApi, string.Empty);
+        return BuildResult(request, requestApi, variablesApi, testsApi, consoleApi, string.Empty);
     }
 
     #endregion
@@ -85,29 +87,50 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     #region Private Methods
 
     private static ScriptExecutionResult BuildResult(
-        PreparedRequest originalRequest,
-        ScriptRequestApi requestApi,
-        VariablesApi variablesApi,
+        ScriptExecutionRequest originalRequest,
+        ScriptRequestApi? requestApi,
+        VariablesApi? variablesApi,
         TestsApi testsApi,
         ConsoleApi consoleApi,
         string errorMessage)
     {
+        if (requestApi is null || variablesApi is null)
+        {
+            return new()
+            {
+                PreparedRequest = originalRequest.PreparedRequest,
+                RuntimeVariables =
+                [
+                    .. originalRequest.RuntimeVariables.Where(static item => item.Scope == VariableScope.Runtime),
+                ],
+                Tests =
+                [
+                    .. testsApi.All(),
+                ],
+                ConsoleEntries =
+                [
+                    .. consoleApi.All(),
+                ],
+                ErrorMessage = errorMessage,
+            };
+        }
+
         var method = Enum.TryParse<HttpMethodKind>(requestApi.Method, true, out var parsedMethod)
             ? parsedMethod
-            : originalRequest.Method;
+            : originalRequest.PreparedRequest.Method;
 
         var bodyMode = string.IsNullOrWhiteSpace(requestApi.Body)
             ? RequestBodyMode.None
-            : originalRequest.Body.Mode == RequestBodyMode.None
+            : originalRequest.PreparedRequest.Body.Mode == RequestBodyMode.None
                 ? RequestBodyMode.RawText
-                : originalRequest.Body.Mode;
+                : originalRequest.PreparedRequest.Body.Mode;
 
         return new()
         {
-            PreparedRequest = originalRequest with
+            PreparedRequest = originalRequest.PreparedRequest with
             {
                 Method = method,
-                Uri = Uri.TryCreate(requestApi.Url, UriKind.Absolute, out var uri) ? uri : originalRequest.Uri,
+                Uri = Uri.TryCreate(requestApi.Url, UriKind.Absolute, out var uri) ? uri : originalRequest.PreparedRequest.Uri,
                 Headers =
                 [
                     .. requestApi.Headers.Select(
@@ -117,7 +140,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                             Value = item.Value,
                         }),
                 ],
-                Body = originalRequest.Body with
+                Body = originalRequest.PreparedRequest.Body with
                 {
                     Mode = bodyMode,
                     RawContent = requestApi.Body,
