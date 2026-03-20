@@ -44,4 +44,9 @@ public partial class ExplorerPane : ContentView
 	{
 		ViewModel.AddWorkspace();
 	}
+
+	private void OnAddRequestClicked(object? sender, EventArgs e)
+	{
+		ViewModel.AddRequest();
+	}
 }

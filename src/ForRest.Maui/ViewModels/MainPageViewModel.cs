@@ -1016,6 +1016,37 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public void AddRequest()
+	{
+		CaptureActiveRequestIntoWorkspaceState();
+
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return;
+		}
+
+		RequestWorkbenchDocumentState request = RequestWorkbenchDocumentFactory.CreateNewRequest(workspace, location => BuildNewRequestTarget(workspace, location));
+		UpdateSelectedWorkspaceState(
+			currentWorkspace => currentWorkspace with
+			{
+				SelectedEnvironment = SelectedEnvironment,
+				SelectedDocumentLocation = request.Location,
+				Documents =
+				[
+					.. currentWorkspace.Documents,
+					request
+				]
+			});
+
+		ApplyWorkspaceSelection(workspace.Id);
+		SelectCenterTab(CenterTabs.FirstOrDefault(static tab => string.Equals(tab.Key, "request", StringComparison.Ordinal)));
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+		}
+	}
+
 	public void SelectDocument(RequestDocumentViewModel? document)
 	{
 		if (document is null)
@@ -1734,6 +1765,22 @@ public sealed class MainPageViewModel : ObservableObject
 			});
 	}
 
+	private void CaptureActiveRequestIntoWorkspaceState()
+	{
+		if (!IsActiveRequestEditor || string.IsNullOrWhiteSpace(RequestLocation))
+		{
+			return;
+		}
+
+		RequestWorkbenchDocumentState currentRequest = BuildCurrentDocumentState();
+		UpdateSelectedWorkspaceState(
+			workspace => workspace with
+			{
+				SelectedEnvironment = SelectedEnvironment,
+				Documents = UpsertDocument(workspace.Documents, currentRequest)
+			});
+	}
+
 	private AppProfile BuildProfile()
 	{
 		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
@@ -2115,6 +2162,18 @@ public sealed class MainPageViewModel : ObservableObject
 	private static string BuildDefaultRequestUrl(string location)
 	{
 		return $"https://httpbin.org/anything?source={Uri.EscapeDataString(location)}";
+	}
+
+	private static string BuildNewRequestTarget(RequestWorkbenchWorkspaceState workspace, string location)
+	{
+		if (workspace.Id == JsonPlaceholderWorkspaceId
+		    || workspace.Documents.Any(static document => document.Location.Contains("/requests/jsonplaceholder/", StringComparison.OrdinalIgnoreCase))
+		    || workspace.Name.Contains("json placeholder", StringComparison.OrdinalIgnoreCase))
+		{
+			return "https://jsonplaceholder.typicode.com/posts/1";
+		}
+
+		return BuildDefaultRequestUrl(location);
 	}
 
 	private static string BuildRequestDocumentLabel(string title)
