@@ -339,7 +339,7 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                     }
 
                     var headerVariableName = $"__headerValue{testIndex}";
-                    builder.AppendLine($"var {headerVariableName} = response.Headers.TryGetValue({RenderString(assertion.HeaderName!)}, out var __headerRaw{testIndex}) ? __headerRaw{testIndex} : string.Empty;");
+                    builder.AppendLine($"var {headerVariableName} = response.Headers.TryGetValue({RenderString(assertion.HeaderName!)}, out string __headerRaw{testIndex}) ? __headerRaw{testIndex} : string.Empty;");
                     AppendStringAssertion(builder, headerVariableName, assertion.Operator, headerValue!, assertion.Message);
                     break;
                 case ForRestScriptAssertionTarget.Json:

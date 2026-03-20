@@ -207,6 +207,7 @@ public sealed class RequestExecutionService(
                 ErrorMessage = string.Join(
                     Environment.NewLine,
                     new[] { errorMessage, testScriptResult.ErrorMessage }.Where(static item => !string.IsNullOrWhiteSpace(item))),
+                TargetUri = preparedRequest.Uri.ToString(),
                 RawRequest = preparedRequest.RawRequest,
                 Response = responseSnapshot,
                 ConsoleEntries =

@@ -83,5 +83,6 @@ public sealed class ForRestScriptCompilerTests
         Assert.AreEqual(ForRestRuntimeSeedKind.RandomNumber, result.Payload.RuntimeSeeds.Single(static item => item.Key == "attempt").Kind);
         StringAssert.Contains(result.Payload.Request.TestsScript, "response.Status == 201");
         StringAssert.Contains(result.Payload.Request.TestsScript, "json.Select(response.Json(), @\"$.payload.id\")");
+        StringAssert.Contains(result.Payload.Request.TestsScript, "out string __headerRaw3");
     }
 }

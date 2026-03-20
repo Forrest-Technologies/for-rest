@@ -62,6 +62,8 @@ public sealed record ExecutionRun
 
     public DateTimeOffset? CompletedUtc { get; init; }
 
+    public string TargetUri { get; init; } = string.Empty;
+
     public string RawRequest { get; init; } = string.Empty;
 
     public string ErrorMessage { get; init; } = string.Empty;

@@ -695,7 +695,10 @@ public sealed class MainPageViewModel : ObservableObject
 
 			RequestName = outcome.Compilation.Payload.Request.Name;
 			SelectedMethod = outcome.Compilation.Payload.Request.Method.ToString().ToUpperInvariant();
-			RequestTarget = outcome.Compilation.Payload.Request.UrlTemplate;
+			ExecutionRun? latestRun = outcome.Execution?.Runs.LastOrDefault();
+			RequestTarget = string.IsNullOrWhiteSpace(latestRun?.TargetUri)
+				? outcome.Compilation.Payload.Request.UrlTemplate
+				: latestRun.TargetUri;
 			RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
 			UpdateCurrentDocumentMetadata();
 			ResponseState = outcome.Execution?.LatestResponse is { } response

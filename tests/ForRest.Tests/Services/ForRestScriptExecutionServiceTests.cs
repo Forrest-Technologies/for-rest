@@ -57,6 +57,7 @@ public sealed class ForRestScriptExecutionServiceTests
                 tests {
                   status == 201 "returns 201"
                   json "$.payload.trace" == "trace-123" "trace matches"
+                  header "Content-Type" contains "application/json" "content type matches"
                 }
                 """".Replace("__PORT__", port.ToString());
 
@@ -79,6 +80,7 @@ public sealed class ForRestScriptExecutionServiceTests
             Assert.IsNotNull(result.Execution);
             Assert.AreEqual(ExecutionState.Completed, result.Execution.State);
             Assert.AreEqual("/echo/42?trace=trace-123", capturedRequest.PathAndQuery);
+            Assert.AreEqual($"http://127.0.0.1:{port}/echo/42?trace=trace-123", result.Execution.Runs.Single().TargetUri);
             Assert.AreEqual("trace-123", capturedRequest.Headers["X-Trace-Id"]);
             StringAssert.Contains(capturedRequest.Body, "\"trace\": \"trace-123\"");
             Assert.AreEqual("42", result.Execution.RuntimeVariables.Single(static item => item.Key == "echoed_id").Value);
