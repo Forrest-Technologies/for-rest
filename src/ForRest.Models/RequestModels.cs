@@ -135,6 +135,8 @@ public sealed record RequestDefinition
 
     public bool SaveResponseToHistory { get; init; } = true;
 
+    public int MaxSendIterations { get; init; } = 3;
+
     public DateTimeOffset CreatedUtc { get; init; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedUtc { get; init; } = DateTimeOffset.UtcNow;

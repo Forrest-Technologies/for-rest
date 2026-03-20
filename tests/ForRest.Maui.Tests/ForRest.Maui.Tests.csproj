@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\ForRest.Maui\Services\ResponsePresentationFormatter.cs" Link="Services\ResponsePresentationFormatter.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchStateStore.cs" Link="Services\RequestWorkbenchStateStore.cs" />
   </ItemGroup>
 

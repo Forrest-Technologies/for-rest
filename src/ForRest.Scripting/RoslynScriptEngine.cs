@@ -9,6 +9,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             typeof(object).Assembly,
             typeof(Enumerable).Assembly,
             typeof(JsonNode).Assembly,
+            typeof(Microsoft.CSharp.RuntimeBinder.Binder).Assembly,
             typeof(PreparedRequest).Assembly,
             typeof(VariableDefinition).Assembly)
         .AddImports(
@@ -36,12 +37,18 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         var testsApi = new TestsApi();
         var consoleApi = new ConsoleApi();
         ScriptRequestApi? requestApi = null;
+        ScriptResponseApi? responseApi = null;
         VariablesApi? variablesApi = null;
         ScriptGlobals? globals = null;
 
         try
         {
-            requestApi = new ScriptRequestApi(request.PreparedRequest);
+            responseApi = new ScriptResponseApi(request.Response);
+            requestApi = new ScriptRequestApi(
+                request.PreparedRequest,
+                responseApi,
+                request.SendAsync,
+                request.MaxSendIterations);
             variablesApi = new VariablesApi(
             [
                 .. request.GlobalVariables,
@@ -53,7 +60,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             globals = new ScriptGlobals
             {
                 request = requestApi,
-                response = new ScriptResponseApi(request.Response),
+                response = responseApi,
                 variables = variablesApi,
                 tests = testsApi,
                 console = consoleApi,
@@ -70,16 +77,16 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             var message = string.Join(Environment.NewLine, exception.Diagnostics.Select(static item => item.ToString()));
             logger.LogWarning("Script compilation failed: {Message}", message);
             consoleApi.Error(message);
-            return BuildResult(request, requestApi, variablesApi, testsApi, consoleApi, message);
+            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, message);
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Script execution failed");
             consoleApi.Error(exception.Message);
-            return BuildResult(request, requestApi, variablesApi, testsApi, consoleApi, exception.Message);
+            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, exception.Message);
         }
 
-        return BuildResult(request, requestApi, variablesApi, testsApi, consoleApi, string.Empty);
+        return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, string.Empty);
     }
 
     #endregion
@@ -89,6 +96,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     private static ScriptExecutionResult BuildResult(
         ScriptExecutionRequest originalRequest,
         ScriptRequestApi? requestApi,
+        ScriptResponseApi? responseApi,
         VariablesApi? variablesApi,
         TestsApi testsApi,
         ConsoleApi consoleApi,
@@ -99,6 +107,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             return new()
             {
                 PreparedRequest = originalRequest.PreparedRequest,
+                Response = originalRequest.Response,
                 RuntimeVariables =
                 [
                     .. originalRequest.RuntimeVariables.Where(static item => item.Scope == VariableScope.Runtime),
@@ -115,38 +124,10 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             };
         }
 
-        var method = Enum.TryParse<HttpMethodKind>(requestApi.Method, true, out var parsedMethod)
-            ? parsedMethod
-            : originalRequest.PreparedRequest.Method;
-
-        var bodyMode = string.IsNullOrWhiteSpace(requestApi.Body)
-            ? RequestBodyMode.None
-            : originalRequest.PreparedRequest.Body.Mode == RequestBodyMode.None
-                ? RequestBodyMode.RawText
-                : originalRequest.PreparedRequest.Body.Mode;
-
         return new()
         {
-            PreparedRequest = originalRequest.PreparedRequest with
-            {
-                Method = method,
-                Uri = Uri.TryCreate(requestApi.Url, UriKind.Absolute, out var uri) ? uri : originalRequest.PreparedRequest.Uri,
-                Headers =
-                [
-                    .. requestApi.Headers.Select(
-                        item => new KeyValueDefinition
-                        {
-                            Key = item.Key,
-                            Value = item.Value,
-                        }),
-                ],
-                Body = originalRequest.PreparedRequest.Body with
-                {
-                    Mode = bodyMode,
-                    RawContent = requestApi.Body,
-                    ContentType = requestApi.ContentType,
-                },
-            },
+            PreparedRequest = requestApi.ToPreparedRequest(),
+            Response = responseApi?.Snapshot ?? originalRequest.Response,
             RuntimeVariables =
             [
                 .. variablesApi.All().Where(static item => item.Scope == VariableScope.Runtime),

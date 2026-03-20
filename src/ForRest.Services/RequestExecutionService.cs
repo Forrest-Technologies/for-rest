@@ -67,6 +67,42 @@ public sealed class RequestExecutionService(
 
             var preparedRequest = compileResult.Value;
 
+            async Task<ResponseSnapshot?> ExecuteScriptSend(PreparedRequest scriptedRequest)
+            {
+                using var scriptedHandler = new HttpClientHandler
+                {
+                    AllowAutoRedirect = scriptedRequest.FollowRedirects,
+                    ServerCertificateCustomValidationCallback = scriptedRequest.ValidateSsl
+                        ? DefaultCertificateValidation
+                        : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+                };
+                using var scriptedClient = new HttpClient(scriptedHandler)
+                {
+                    Timeout = TimeSpan.FromMilliseconds(Math.Max(1, scriptedRequest.TimeoutMilliseconds)),
+                };
+
+                var (scriptedResponse, scriptedDuration, scriptedError) = await SendWithRetry(
+                    scriptedClient,
+                    scriptedRequest,
+                    request,
+                    iterationCancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(scriptedError))
+                {
+                    throw new InvalidOperationException(scriptedError);
+                }
+
+                if (scriptedResponse is null)
+                {
+                    return null;
+                }
+
+                using (scriptedResponse)
+                {
+                    return await BuildResponseSnapshot(scriptedResponse, scriptedDuration, iterationCancellationToken);
+                }
+            }
+
             var preRequestResult = await scriptEngine.Run(
                 new()
                 {
@@ -78,6 +114,8 @@ public sealed class RequestExecutionService(
                     EnvironmentVariables = environment?.Variables ?? [],
                     RequestVariables = request.Variables,
                     RuntimeVariables = runtimeVariables,
+                    SendAsync = ExecuteScriptSend,
+                    MaxSendIterations = request.MaxSendIterations,
                 },
                 iterationCancellationToken);
 
@@ -117,9 +155,18 @@ public sealed class RequestExecutionService(
             long durationMilliseconds = 0;
 
             (httpResponse, durationMilliseconds, errorMessage) = await SendWithRetry(client, preparedRequest, request, iterationCancellationToken);
-            var responseSnapshot = httpResponse is null
-                ? null
-                : await BuildResponseSnapshot(httpResponse, durationMilliseconds, iterationCancellationToken);
+            ResponseSnapshot? responseSnapshot;
+            if (httpResponse is null)
+            {
+                responseSnapshot = null;
+            }
+            else
+            {
+                using (httpResponse)
+                {
+                    responseSnapshot = await BuildResponseSnapshot(httpResponse, durationMilliseconds, iterationCancellationToken);
+                }
+            }
 
             var extractedVariables = responseExtractionService.Extract(responseSnapshot, request.Extractions);
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, extractedVariables);
@@ -136,9 +183,12 @@ public sealed class RequestExecutionService(
                     EnvironmentVariables = environment?.Variables ?? [],
                     RequestVariables = request.Variables,
                     RuntimeVariables = runtimeVariables,
+                    SendAsync = ExecuteScriptSend,
+                    MaxSendIterations = request.MaxSendIterations,
                 },
                 iterationCancellationToken);
 
+            responseSnapshot = testScriptResult.Response ?? responseSnapshot;
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, testScriptResult.RuntimeVariables);
             consoleEntries.AddRange(testScriptResult.ConsoleEntries);
             testResults.AddRange(testScriptResult.Tests);

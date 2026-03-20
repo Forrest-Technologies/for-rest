@@ -109,6 +109,7 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             FollowRedirects = TryReadOptionalBoolean(document.Request, "redirects") ?? true,
             ValidateSsl = TryReadOptionalBoolean(document.Request, "ssl") ?? true,
             SaveResponseToHistory = TryReadOptionalBoolean(document.Request, "history") ?? true,
+            MaxSendIterations = Math.Max(0, TryReadOptionalNumber(document.Request, "max_send_iterations") ?? 3),
         };
 
         if (diagnostics.Any(static diagnostic => diagnostic.Severity == ForRestScriptDiagnosticSeverity.Error))

@@ -42,15 +42,29 @@
             </ScrollView>
 
             <Grid Grid.Row="2"
-                  Padding="10,0,10,10">
-                <controls:EditorSurface IsVisible="{Binding IsInspectorResponseVisible}"
+                  Padding="10,0,10,10"
+                  RowDefinitions="Auto,*">
+                <Grid ColumnDefinitions="*,Auto"
+                      IsVisible="{Binding IsInspectorResponseVisible}"
+                      Padding="0,0,0,8">
+                    <Label Text="Response body"
+                           Style="{StaticResource SectionTitleStyle}" />
+                    <Button Grid.Column="1"
+                            Text="{Binding ResponsePrettyPrintButtonText}"
+                            Style="{StaticResource DenseTabButtonStyle}"
+                            Clicked="OnTogglePrettyPrintClicked" />
+                </Grid>
+
+                <controls:EditorSurface Grid.Row="1"
+                                        IsVisible="{Binding IsInspectorResponseVisible}"
                                         Language="json"
                                         IsReadOnly="True"
                                         ShowHeader="False"
                                         ShowFooter="False"
                                         Text="{Binding ResponseBodyText}" />
 
-                <ScrollView IsVisible="{Binding IsInspectorHeadersVisible}">
+                <ScrollView Grid.RowSpan="2"
+                            IsVisible="{Binding IsInspectorHeadersVisible}">
                     <VerticalStackLayout Padding="2,0,2,0"
                                          Spacing="0">
                         <Grid ColumnDefinitions="130,*"
@@ -81,7 +95,8 @@
                     </VerticalStackLayout>
                 </ScrollView>
 
-                <ScrollView IsVisible="{Binding IsInspectorTraceVisible}">
+                <ScrollView Grid.RowSpan="2"
+                            IsVisible="{Binding IsInspectorTraceVisible}">
                     <VerticalStackLayout Spacing="0"
                                          BindableLayout.ItemsSource="{Binding TraceEntries}">
                         <BindableLayout.ItemTemplate>
@@ -107,14 +122,16 @@
                     </VerticalStackLayout>
                 </ScrollView>
 
-                <controls:EditorSurface IsVisible="{Binding IsInspectorRawVisible}"
+                <controls:EditorSurface Grid.RowSpan="2"
+                                        IsVisible="{Binding IsInspectorRawVisible}"
                                         Language="http"
                                         IsReadOnly="True"
                                         ShowHeader="False"
                                         ShowFooter="False"
                                         Text="{Binding ResponseRawText}" />
 
-                <controls:EditorSurface IsVisible="{Binding IsInspectorDebugVisible}"
+                <controls:EditorSurface Grid.RowSpan="2"
+                                        IsVisible="{Binding IsInspectorDebugVisible}"
                                         Language="plaintext"
                                         IsReadOnly="True"
                                         ShowHeader="False"

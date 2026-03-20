@@ -23,4 +23,9 @@ public partial class InspectorPane : ContentView
 			ViewModel.SelectRightPaneTab(tab);
 		}
 	}
+
+	private void OnTogglePrettyPrintClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ToggleResponsePrettyPrint();
+	}
 }

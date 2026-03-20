@@ -19,11 +19,17 @@ public sealed record ScriptExecutionRequest
     public List<VariableDefinition> RequestVariables { get; init; } = [];
 
     public List<VariableDefinition> RuntimeVariables { get; init; } = [];
+
+    public Func<PreparedRequest, Task<ResponseSnapshot?>>? SendAsync { get; init; }
+
+    public int MaxSendIterations { get; init; }
 }
 
 public sealed record ScriptExecutionResult
 {
     public PreparedRequest PreparedRequest { get; init; } = new();
+
+    public ResponseSnapshot? Response { get; init; }
 
     public List<VariableDefinition> RuntimeVariables { get; init; } = [];
 

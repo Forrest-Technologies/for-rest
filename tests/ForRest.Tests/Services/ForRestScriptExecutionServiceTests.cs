@@ -200,6 +200,120 @@ public sealed class ForRestScriptExecutionServiceTests
         }
     }
 
+    [TestMethod]
+    public async Task Execute_allows_pre_request_script_to_send_and_inspect_response()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(listener, 2, static _ => 200);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                meta {
+                  name = "Probe Send"
+                }
+
+                request {
+                  method = GET
+                  url = "http://127.0.0.1:__PORT__/probe"
+                  history = false
+                }
+
+                tests {
+                  status == 200 "returns 200"
+                }
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Probe Demo",
+                    },
+                },
+                source,
+                null,
+                preRequestScriptOverride:
+                """
+                await request.send();
+                variables.Set("probe_attempt", response.attempt.ToString());
+                """);
+
+            var capturedRequests = await requestCaptureTask;
+
+            Assert.IsTrue(result.Compilation.Succeeded);
+            Assert.IsNotNull(result.Execution);
+            Assert.AreEqual(ExecutionState.Completed, result.Execution.State);
+            Assert.HasCount(2, capturedRequests);
+            Assert.AreEqual("1", result.Execution.RuntimeVariables.Single(static item => item.Key == "probe_attempt").Value);
+            StringAssert.Contains(result.Execution.LatestResponse?.Body ?? string.Empty, "\"attempt\":2");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public async Task Execute_fails_when_script_send_exceeds_max_send_iterations()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(listener, 1, static _ => 200);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                request {
+                  method = GET
+                  url = "http://127.0.0.1:__PORT__/guarded"
+                  history = false
+                  max_send_iterations = 1
+                }
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Guard Demo",
+                    },
+                },
+                source,
+                null,
+                preRequestScriptOverride:
+                """
+                await request.send();
+                await request.send();
+                """);
+
+            var capturedRequests = await requestCaptureTask;
+
+            Assert.IsTrue(result.Compilation.Succeeded);
+            Assert.IsNotNull(result.Execution);
+            Assert.AreEqual(ExecutionState.Failed, result.Execution.State);
+            Assert.HasCount(1, capturedRequests);
+            StringAssert.Contains(result.Execution.Runs.Single().ErrorMessage, "max_send_iterations");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     private static IForRestScriptExecutionService CreateService()
     {
         return new ForRestScriptExecutionService(

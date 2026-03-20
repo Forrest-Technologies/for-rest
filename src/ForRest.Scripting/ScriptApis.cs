@@ -1,11 +1,21 @@
+using System.Dynamic;
+
 namespace ForRest.Scripting;
 
 public sealed class ScriptRequestApi
 {
     #region Constructors
 
-    public ScriptRequestApi(PreparedRequest request)
+    public ScriptRequestApi(
+        PreparedRequest request,
+        ScriptResponseApi responseApi,
+        Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync = null,
+        int maxSendIterations = 0)
     {
+        originalRequest = request;
+        this.responseApi = responseApi;
+        this.sendAsync = sendAsync;
+        this.maxSendIterations = Math.Max(0, maxSendIterations);
         Method = request.Method.ToString().ToUpperInvariant();
         Url = request.Uri.ToString();
         Body = request.Body.RawContent;
@@ -22,6 +32,16 @@ public sealed class ScriptRequestApi
 
     #region Properties
 
+    private readonly PreparedRequest originalRequest;
+
+    private readonly ScriptResponseApi responseApi;
+
+    private readonly Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync;
+
+    private readonly int maxSendIterations;
+
+    private int sendCount;
+
     public string Method { get; set; }
 
     public string Url { get; set; }
@@ -31,6 +51,10 @@ public sealed class ScriptRequestApi
     public string ContentType { get; set; }
 
     public Dictionary<string, string> Headers { get; }
+
+    public int MaxSendIterations => maxSendIterations;
+
+    public int RemainingSendIterations => Math.Max(0, maxSendIterations - sendCount);
 
     #endregion
 
@@ -46,12 +70,75 @@ public sealed class ScriptRequestApi
         Headers.Remove(key);
     }
 
+    public Task<ScriptResponseApi> send()
+    {
+        return SendAsync();
+    }
+
+    public async Task<ScriptResponseApi> SendAsync()
+    {
+        if (sendAsync is null || maxSendIterations <= 0)
+        {
+            throw new InvalidOperationException("request.send() is disabled for this request. Increase max_send_iterations to enable it.");
+        }
+
+        var nextSendCount = Interlocked.Increment(ref sendCount);
+        if (nextSendCount > maxSendIterations)
+        {
+            throw new InvalidOperationException($"request.send() exceeded max_send_iterations ({maxSendIterations}).");
+        }
+
+        ResponseSnapshot? response = await sendAsync(ToPreparedRequest());
+        responseApi.Update(response);
+        return responseApi;
+    }
+
+    public PreparedRequest ToPreparedRequest()
+    {
+        var method = Enum.TryParse<HttpMethodKind>(Method, true, out var parsedMethod)
+            ? parsedMethod
+            : originalRequest.Method;
+
+        var bodyMode = string.IsNullOrWhiteSpace(Body)
+            ? RequestBodyMode.None
+            : originalRequest.Body.Mode == RequestBodyMode.None
+                ? RequestBodyMode.RawText
+                : originalRequest.Body.Mode;
+
+        return originalRequest with
+        {
+            Method = method,
+            Uri = Uri.TryCreate(Url, UriKind.Absolute, out var uri) ? uri : originalRequest.Uri,
+            Headers =
+            [
+                .. Headers.Select(
+                    item => new KeyValueDefinition
+                    {
+                        Key = item.Key,
+                        Value = item.Value,
+                    }),
+            ],
+            Body = originalRequest.Body with
+            {
+                Mode = bodyMode,
+                RawContent = Body,
+                ContentType = ContentType,
+            },
+        };
+    }
+
     #endregion
 }
 
-public sealed class ScriptResponseApi(ResponseSnapshot? response)
+public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : DynamicObject
 {
     #region Properties
+
+    private ResponseSnapshot? response = initialResponse;
+
+    private JsonNode? parsedJson;
+
+    private bool jsonParsed;
 
     public int Status => response?.StatusCode ?? 0;
 
@@ -61,13 +148,66 @@ public sealed class ScriptResponseApi(ResponseSnapshot? response)
 
     public Dictionary<string, string> Headers => BuildHeaders(response);
 
+    public ResponseSnapshot? Snapshot => response;
+
     #endregion
 
     #region Public Methods
 
+    public void Update(ResponseSnapshot? nextResponse)
+    {
+        response = nextResponse;
+        parsedJson = null;
+        jsonParsed = false;
+    }
+
     public JsonNode? Json()
     {
-        return string.IsNullOrWhiteSpace(response?.Body) ? null : JsonNode.Parse(response.Body);
+        if (jsonParsed)
+        {
+            return parsedJson;
+        }
+
+        jsonParsed = true;
+        parsedJson = string.IsNullOrWhiteSpace(response?.Body) ? null : JsonNode.Parse(response.Body);
+        return parsedJson;
+    }
+
+    public override bool TryGetMember(GetMemberBinder binder, out object? result)
+    {
+        switch (binder.Name)
+        {
+            case nameof(Status):
+                result = Status;
+                return true;
+            case nameof(Body):
+                result = Body;
+                return true;
+            case nameof(ContentType):
+                result = ContentType;
+                return true;
+            case nameof(Headers):
+                result = Headers;
+                return true;
+        }
+
+        if (Json() is JsonObject jsonObject && DynamicJsonObject.TryResolveMember(jsonObject, binder.Name, out result))
+        {
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
+    public override IEnumerable<string> GetDynamicMemberNames()
+    {
+        if (Json() is not JsonObject jsonObject)
+        {
+            return [];
+        }
+
+        return jsonObject.Select(static item => item.Key);
     }
 
     #endregion
@@ -96,6 +236,89 @@ public sealed class ScriptResponseApi(ResponseSnapshot? response)
     }
 
     #endregion
+}
+
+internal sealed class DynamicJsonObject(JsonObject source) : DynamicObject
+{
+    public override bool TryGetMember(GetMemberBinder binder, out object? result)
+    {
+        return TryResolveMember(source, binder.Name, out result);
+    }
+
+    public override bool TryGetIndex(GetIndexBinder binder, object?[] indexes, out object? result)
+    {
+        if (indexes.Length == 1 && indexes[0] is string key)
+        {
+            return TryResolveMember(source, key, out result);
+        }
+
+        result = null;
+        return false;
+    }
+
+    public override IEnumerable<string> GetDynamicMemberNames()
+    {
+        return source.Select(static item => item.Key);
+    }
+
+    public static bool TryResolveMember(JsonObject source, string memberName, out object? result)
+    {
+        if (source.TryGetPropertyValue(memberName, out JsonNode? node))
+        {
+            result = Wrap(node);
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
+    private static object? Wrap(JsonNode? node)
+    {
+        return node switch
+        {
+            null => null,
+            JsonObject jsonObject => new DynamicJsonObject(jsonObject),
+            JsonArray jsonArray => jsonArray.Select(Wrap).ToList(),
+            JsonValue jsonValue => UnwrapScalar(jsonValue),
+            _ => node.ToJsonString(),
+        };
+    }
+
+    private static object? UnwrapScalar(JsonValue value)
+    {
+        if (value.TryGetValue<string>(out var stringValue))
+        {
+            return stringValue;
+        }
+
+        if (value.TryGetValue<bool>(out var boolValue))
+        {
+            return boolValue;
+        }
+
+        if (value.TryGetValue<int>(out var intValue))
+        {
+            return intValue;
+        }
+
+        if (value.TryGetValue<long>(out var longValue))
+        {
+            return longValue;
+        }
+
+        if (value.TryGetValue<decimal>(out var decimalValue))
+        {
+            return decimalValue;
+        }
+
+        if (value.TryGetValue<double>(out var doubleValue))
+        {
+            return doubleValue;
+        }
+
+        return value.ToJsonString().Trim('"');
+    }
 }
 
 public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
@@ -324,7 +547,7 @@ public sealed class ScriptGlobals
 {
     public required ScriptRequestApi request { get; init; }
 
-    public required ScriptResponseApi response { get; init; }
+    public required dynamic response { get; init; }
 
     public required VariablesApi variables { get; init; }
 

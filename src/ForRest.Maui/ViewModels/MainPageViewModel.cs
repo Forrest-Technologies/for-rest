@@ -71,6 +71,8 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _responseState;
 	private string _responseTimeStatus;
 	private string _responseSizeStatus;
+	private ResponseSnapshot? _latestResponseSnapshot;
+	private bool _isResponsePrettyPrintEnabled = true;
 	private string _debugOutputText;
 	private string _executionStatus;
 	private string _editorThemeKey;
@@ -409,6 +411,21 @@ public sealed class MainPageViewModel : ObservableObject
 		set => SetProperty(ref _responseRawText, value);
 	}
 
+	public bool IsResponsePrettyPrintEnabled
+	{
+		get => _isResponsePrettyPrintEnabled;
+		set
+		{
+			if (SetProperty(ref _isResponsePrettyPrintEnabled, value))
+			{
+				OnPropertyChanged(nameof(ResponsePrettyPrintButtonText));
+				RefreshResponsePresentation();
+			}
+		}
+	}
+
+	public string ResponsePrettyPrintButtonText => IsResponsePrettyPrintEnabled ? "Pretty JSON: On" : "Pretty JSON: Off";
+
 	public string DebugOutputText
 	{
 		get => _debugOutputText;
@@ -684,8 +701,8 @@ public sealed class MainPageViewModel : ObservableObject
 			ResponseState = outcome.Execution?.LatestResponse is { } response
 				? $"{response.StatusCode} {response.ReasonPhrase}".Trim()
 				: outcome.Execution?.State.ToString() ?? "Compiled";
-			ResponseBodyText = outcome.Execution?.LatestResponse?.Body ?? string.Empty;
-			ResponseRawText = outcome.Execution?.LatestResponse?.RawResponse ?? string.Empty;
+			_latestResponseSnapshot = outcome.Execution?.LatestResponse;
+			RefreshResponsePresentation();
 			_responseTimeStatus = outcome.Execution?.LatestResponse is { } latestResponse
 				? $"{latestResponse.DurationMilliseconds} ms"
 				: "--";
@@ -750,6 +767,7 @@ public sealed class MainPageViewModel : ObservableObject
 			ExecutionStatus = exception.Message;
 			_responseTimeStatus = "--";
 			_responseSizeStatus = "--";
+			_latestResponseSnapshot = null;
 			ResponseBodyText = string.Empty;
 			ResponseRawText = string.Empty;
 			DebugOutputText = exception.ToString();
@@ -954,6 +972,11 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsInspectorRawVisible));
 		OnPropertyChanged(nameof(IsInspectorDebugVisible));
 		OnPropertyChanged(nameof(RightSurfaceStatus));
+	}
+
+	public void ToggleResponsePrettyPrint()
+	{
+		IsResponsePrettyPrintEnabled = !IsResponsePrettyPrintEnabled;
 	}
 
 	public void SelectWorkspace(WorkspaceItemViewModel? workspace)
@@ -1669,6 +1692,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private void ApplyCompilationFailure(IReadOnlyList<ForRestScriptDiagnostic> diagnostics)
 	{
 		ResponseState = "Compile failed";
+		_latestResponseSnapshot = null;
 		ResponseBodyText = string.Empty;
 		ResponseRawText = string.Empty;
 		DebugOutputText = string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => $"Line {diagnostic.Line}, Col {diagnostic.Column}: {diagnostic.Message}"));
@@ -1864,6 +1888,12 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsExplorerOverlayVisible));
 		OnPropertyChanged(nameof(IsInspectorOverlayVisible));
 		OnPropertyChanged(nameof(IsOverlayBackdropVisible));
+	}
+
+	private void RefreshResponsePresentation()
+	{
+		ResponseBodyText = ResponsePresentationFormatter.FormatBody(_latestResponseSnapshot?.Body, IsResponsePrettyPrintEnabled);
+		ResponseRawText = ResponsePresentationFormatter.NormalizeDisplayText(_latestResponseSnapshot?.RawResponse);
 	}
 
 	private string BuildDebugOutput(ForRestScriptExecutionOutcome outcome)
@@ -2132,6 +2162,7 @@ public sealed class MainPageViewModel : ObservableObject
 		lines.Add($"  method = {method}");
 		lines.Add($"  url = \"{target}\"");
 		lines.Add("  timeout = 15000");
+		lines.Add("  max_send_iterations = 3");
 		lines.Add("  redirects = true");
 		lines.Add("  ssl = true");
 		lines.Add("  history = true");
