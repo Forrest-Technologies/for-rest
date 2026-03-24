@@ -44,24 +44,33 @@
             <Grid Grid.Row="2"
                   Padding="10,0,10,10"
                   RowDefinitions="Auto,*">
-                <Grid ColumnDefinitions="*,Auto"
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto"
                       IsVisible="{Binding IsInspectorResponseVisible}"
                       Padding="0,0,0,8">
                     <Label Text="Response body"
                            Style="{StaticResource SectionTitleStyle}" />
                     <Button Grid.Column="1"
+                            Text="Copy Body"
+                            Style="{StaticResource DenseTabButtonStyle}"
+                            Clicked="OnCopyResponseClicked" />
+                    <Button Grid.Column="2"
+                            Text="Copy Raw"
+                            Style="{StaticResource DenseTabButtonStyle}"
+                            Clicked="OnCopyRawResponseClicked" />
+                    <Button Grid.Column="3"
                             Text="{Binding ResponsePrettyPrintButtonText}"
                             Style="{StaticResource DenseTabButtonStyle}"
                             Clicked="OnTogglePrettyPrintClicked" />
                 </Grid>
 
-                <controls:EditorSurface Grid.Row="1"
-                                        IsVisible="{Binding IsInspectorResponseVisible}"
-                                        Language="json"
-                                        IsReadOnly="True"
-                                        ShowHeader="False"
-                                        ShowFooter="False"
-                                        Text="{Binding ResponseBodyText}" />
+                <controls:MonacoEditorSurface x:Name="ResponseBodyViewer"
+                                              Grid.Row="1"
+                                              IsVisible="{Binding IsInspectorResponseVisible}"
+                                              Language="json"
+                                              ThemeKey="{Binding EditorThemeKey}"
+                                              IsReadOnly="True"
+                                              EnableResponseActions="True"
+                                              Text="{Binding ResponseBodyText}" />
 
                 <ScrollView Grid.RowSpan="2"
                             IsVisible="{Binding IsInspectorHeadersVisible}">
@@ -122,13 +131,26 @@
                     </VerticalStackLayout>
                 </ScrollView>
 
-                <controls:EditorSurface Grid.RowSpan="2"
-                                        IsVisible="{Binding IsInspectorRawVisible}"
-                                        Language="http"
-                                        IsReadOnly="True"
-                                        ShowHeader="False"
-                                        ShowFooter="False"
-                                        Text="{Binding ResponseRawText}" />
+                <Grid Grid.RowSpan="2"
+                      RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsInspectorRawVisible}">
+                    <Grid ColumnDefinitions="*,Auto"
+                          Padding="0,0,0,8">
+                        <Label Text="Raw exchange"
+                               Style="{StaticResource SectionTitleStyle}" />
+                        <Button Grid.Column="1"
+                                Text="Copy Raw"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopyRawResponseClicked" />
+                    </Grid>
+
+                    <controls:EditorSurface Grid.Row="1"
+                                            Language="http"
+                                            IsReadOnly="True"
+                                            ShowHeader="False"
+                                            ShowFooter="False"
+                                            Text="{Binding ResponseRawText}" />
+                </Grid>
 
                 <controls:EditorSurface Grid.RowSpan="2"
                                         IsVisible="{Binding IsInspectorDebugVisible}"

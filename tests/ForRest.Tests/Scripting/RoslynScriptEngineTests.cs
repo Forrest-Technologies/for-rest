@@ -299,6 +299,114 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_executes_compiled_forrest_flow_with_range_literals_and_length_aliases()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var compilation = compiler.Compile(
+            """
+            name "Natural Runtime"
+            method GET
+            url "https://api.example.test/users"
+            max_send_iterations 2
+
+            let attempts = [0..1]
+            let sent = null
+
+            foreach attempt in attempts
+            {
+              sent = request.send()
+              if sent.status == 200 and sent.user.name.length() > 2
+              {
+                runtime last_attempt = attempt
+                break
+              }
+            }
+
+            if sent == null or sent.user.name.length() < 3
+            {
+              error "name length did not match"
+            }
+            """,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(compilation.Succeeded, string.Join(Environment.NewLine, compilation.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(compilation.Payload);
+
+        var callbackCount = 0;
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script = compilation.Payload.Request.PreRequestScript,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test/users"),
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+                MaxSendIterations = 2,
+                SendAsync = _ =>
+                {
+                    callbackCount++;
+                    return Task.FromResult<ResponseSnapshot?>(
+                        new()
+                        {
+                            StatusCode = 200,
+                            Body = """{"user":{"name":"Ada"}}""",
+                            ContentType = "application/json",
+                        });
+                },
+            });
+
+        Assert.AreEqual(1, callbackCount);
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("0", result.RuntimeVariables.Single(static item => item.Key == "last_attempt").Value);
+    }
+
+    [TestMethod]
+    public async Task Run_renders_dollar_brace_templates_when_sending_requests()
+    {
+        string? capturedUrl = null;
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                variables.Set("trace_id", "trace-42");
+                request.Url = "https://api.example.test/${trace_id}";
+                await request.send();
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+                MaxSendIterations = 1,
+                SendAsync = request =>
+                {
+                    capturedUrl = request.Uri.ToString();
+                    return Task.FromResult<ResponseSnapshot?>(
+                        new()
+                        {
+                            StatusCode = 200,
+                            Body = """{"ok":true}""",
+                            ContentType = "application/json",
+                        });
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("https://api.example.test/trace-42", capturedUrl);
+    }
+
+    [TestMethod]
     public async Task Run_request_send_returns_independent_response_objects()
     {
         var callbackCount = 0;

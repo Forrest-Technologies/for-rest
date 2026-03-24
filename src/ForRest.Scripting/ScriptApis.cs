@@ -555,7 +555,7 @@ public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
 {
     #region Private Fields
 
-    private static readonly Regex VariableTokenPattern = new(@"\{\{(?<key>[\w\.\-]+)\}\}", RegexOptions.Compiled);
+    private static readonly Regex VariableTokenPattern = new(@"\{\{(?<key>[\w\.\-]+)\}\}|\$\{(?<key>[\w\.\-]+)\}", RegexOptions.Compiled);
 
     private readonly Dictionary<string, VariableDefinition> variables = BuildVariableMap(seedVariables);
 

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using ForRest.Models;
 using Microsoft.Maui.Graphics;
 
 namespace ForRest.Maui.ViewModels;
@@ -196,9 +197,19 @@ public sealed class NavigationItemViewModel(
 	}
 }
 
-public sealed class HistoryEntryViewModel(string method, string title, string summary, string when, Color accentColor) : ObservableObject
+public sealed class HistoryEntryViewModel(
+	ExecutionRun run,
+	string method,
+	string title,
+	string summary,
+	string when,
+	Color accentColor,
+	bool isSelected = false) : ObservableObject
 {
 	private Color _accentColor = accentColor;
+	private bool _isSelected = isSelected;
+
+	public ExecutionRun Run { get; } = run;
 
 	public string Method { get; } = method;
 
@@ -212,6 +223,12 @@ public sealed class HistoryEntryViewModel(string method, string title, string su
 	{
 		get => _accentColor;
 		set => SetProperty(ref _accentColor, value);
+	}
+
+	public bool IsSelected
+	{
+		get => _isSelected;
+		set => SetProperty(ref _isSelected, value);
 	}
 }
 
@@ -255,5 +272,43 @@ public sealed class TraceEntryViewModel(string title, string detail, string when
 	{
 		get => _accentColor;
 		set => SetProperty(ref _accentColor, value);
+	}
+}
+
+public sealed class LanguageHelpEntryViewModel(
+	string key,
+	string title,
+	string category,
+	string summary,
+	string documentation,
+	string example,
+	IReadOnlyList<string> searchTerms)
+{
+	public string Key { get; } = key;
+
+	public string Title { get; } = title;
+
+	public string Category { get; } = category;
+
+	public string Summary { get; } = summary;
+
+	public string Documentation { get; } = documentation;
+
+	public string Example { get; } = example;
+
+	public IReadOnlyList<string> SearchTerms { get; } = searchTerms;
+
+	public bool MatchesSearch(string query)
+	{
+		if (string.IsNullOrWhiteSpace(query))
+		{
+			return true;
+		}
+
+		return Title.Contains(query, StringComparison.OrdinalIgnoreCase)
+			|| Category.Contains(query, StringComparison.OrdinalIgnoreCase)
+			|| Summary.Contains(query, StringComparison.OrdinalIgnoreCase)
+			|| Documentation.Contains(query, StringComparison.OrdinalIgnoreCase)
+			|| SearchTerms.Any(term => term.Contains(query, StringComparison.OrdinalIgnoreCase));
 	}
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using ForRest.Maui.Theming;
@@ -9,6 +10,7 @@ namespace ForRest.Maui.Controls;
 public partial class MonacoEditorSurface : ContentView
 {
 	public event EventHandler? SendRequested;
+	public event EventHandler<MonacoResponseVarRequestEventArgs>? ResponseVarCopyRequested;
 
 	private const string MonacoHostHtml = """
 <!DOCTYPE html>
@@ -301,6 +303,79 @@ public partial class MonacoEditorSurface : ContentView
         document.documentElement.style.setProperty("--editable-span-border", next.editableBorder);
       }
 
+      function getLanguageHelpEntries() {
+        if (window.forRestHost && Array.isArray(window.forRestHost.pendingLanguageHelp)) {
+          return window.forRestHost.pendingLanguageHelp;
+        }
+
+        return [];
+      }
+
+      function mapCompletionKind(monaco, kind) {
+        const lookup = {
+          keyword: monaco.languages.CompletionItemKind.Keyword,
+          snippet: monaco.languages.CompletionItemKind.Snippet,
+          method: monaco.languages.CompletionItemKind.Method,
+          property: monaco.languages.CompletionItemKind.Property,
+          function: monaco.languages.CompletionItemKind.Function
+        };
+
+        return lookup[String(kind || "keyword").toLowerCase()] || monaco.languages.CompletionItemKind.Keyword;
+      }
+
+      function getHoverLookup() {
+        const lookup = {};
+        getLanguageHelpEntries().forEach((entry) => {
+          const contents = [
+            `**${entry.label}**`,
+            entry.summary || "",
+            entry.documentation || "",
+            entry.example ? `Example:\n\`\`\`frs\n${entry.example}\n\`\`\`` : ""
+          ].filter(Boolean);
+
+          const aliases = []
+            .concat(Array.isArray(entry.hoverTerms) ? entry.hoverTerms : [])
+            .concat([entry.label]);
+
+          aliases
+            .filter(Boolean)
+            .forEach((term) => {
+              lookup[String(term).toLowerCase()] = contents;
+            });
+        });
+
+        return lookup;
+      }
+
+      function resolveHoverToken(model, position) {
+        const lineText = model.getLineContent(position.lineNumber) || "";
+        const index = Math.max(0, position.column - 2);
+        if (!lineText.length || index >= lineText.length) {
+          return null;
+        }
+
+        const isTokenChar = (character) => /[A-Za-z0-9_\.\[\]]/.test(character);
+        if (!isTokenChar(lineText[index])) {
+          return null;
+        }
+
+        let start = index;
+        let end = index;
+        while (start > 0 && isTokenChar(lineText[start - 1])) {
+          start--;
+        }
+
+        while (end + 1 < lineText.length && isTokenChar(lineText[end + 1])) {
+          end++;
+        }
+
+        return {
+          token: lineText.substring(start, end + 1),
+          startColumn: start + 1,
+          endColumn: end + 2
+        };
+      }
+
       function registerLanguage(monaco) {
         monaco.languages.register({ id: "forrest" });
         monaco.languages.setMonarchTokensProvider("forrest", {
@@ -310,7 +385,7 @@ public partial class MonacoEditorSurface : ContentView
               [/\b(name|method|url|timeout|max_send_iterations|redirects|ssl|history|content_type|header|query|body|form|multipart|extract|expect|repeat|retry|auth)\b/, "keyword.directive"],
               [/\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/, "keyword.method"],
               [/\b(request\.send)\b/, "keyword.flow"],
-              [/\b(await|runtime|request|response|workspace|variables|json|console|encoding|crypto|regex|log|warn|error|let|if|else|while|for|foreach|in)\b/, "keyword.flow"],
+              [/\b(await|runtime|request|response|workspace|variables|json|console|encoding|crypto|regex|log|warn|error|let|if|else|while|for|foreach|in|and|or|not)\b/, "keyword.flow"],
               [/\b(true|false|null)\b/, "keyword.literal"],
               [/[A-Za-z_][A-Za-z0-9_]*(?=\s*=)/, "variable.definition"],
               [/\{\{[\w.\-]+\}\}/, "variable.placeholder"],
@@ -360,252 +435,50 @@ public partial class MonacoEditorSurface : ContentView
               startColumn: word.startColumn,
               endColumn: word.endColumn
             };
-
             const insertAsSnippet = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
-            const kind = monaco.languages.CompletionItemKind;
+            const entries = getLanguageHelpEntries();
+
             return {
-              suggestions: [
-                {
-                  label: "name",
-                  kind: kind.Keyword,
-                  insertText: "name \"${1:Request Name}\"",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Give the current .frs program a request name.",
+              suggestions: entries
+                .filter((entry) => typeof entry.insertText === "string" && entry.insertText.length > 0)
+                .map((entry) => ({
+                  label: entry.label,
+                  kind: mapCompletionKind(monaco, entry.kind),
+                  insertText: entry.insertText,
+                  insertTextRules: entry.insertAsSnippet ? insertAsSnippet : undefined,
+                  detail: entry.category,
+                  documentation: `${entry.summary || ""}${entry.documentation ? `\n\n${entry.documentation}` : ""}`.trim(),
                   range
-                },
-                {
-                  label: "method",
-                  kind: kind.Keyword,
-                  insertText: "method ${1|GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD|}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Set the HTTP method.",
-                  range
-                },
-                {
-                  label: "url",
-                  kind: kind.Keyword,
-                  insertText: "url \"${1:https://httpbin.org/anything}\"",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Set the target URL.",
-                  range
-                },
-                {
-                  label: "header",
-                  kind: kind.Keyword,
-                  insertText: "header \"${1:Header-Name}\" = ${2:\"value\"}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Add a request header.",
-                  range
-                },
-                {
-                  label: "expect",
-                  kind: kind.Keyword,
-                  insertText: "expect status == ${1:200} \"${2:returns 200}\"",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Add a response assertion.",
-                  range
-                },
-                {
-                  label: "body json",
-                  kind: kind.Snippet,
-                  insertText: "body json \"\"\"\n${1:{\n  \\\"id\\\": \\\"{{trace_id}}\\\"\n}}\n\"\"\"",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Add a JSON request body.",
-                  range
-                },
-                {
-                  label: "if",
-                  kind: kind.Snippet,
-                  insertText: "if ${1:condition} {\n  $0\n}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Conditional flow block.",
-                  range
-                },
-                {
-                  label: "while",
-                  kind: kind.Snippet,
-                  insertText: "while ${1:condition} {\n  $0\n}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Loop while a condition is true.",
-                  range
-                },
-                {
-                  label: "foreach",
-                  kind: kind.Snippet,
-                  insertText: "foreach ${1:item} in ${2:response.items} {\n  $0\n}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Iterate a collection.",
-                  range
-                },
-                {
-                  label: "request.send()",
-                  kind: kind.Method,
-                  insertText: "request.send()",
-                  documentation: "Send the current request and update the global response.",
-                  range
-                },
-                {
-                  label: "response.json()",
-                  kind: kind.Method,
-                  insertText: "response.json()",
-                  documentation: "Parse the latest response body as JSON when the body is valid JSON.",
-                  range
-                },
-                {
-                  label: "runtime",
-                  kind: kind.Keyword,
-                  insertText: "runtime ${1:name} = ${2:value}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Persist a runtime variable for later interpolation or tests.",
-                  range
-                },
-                {
-                  label: "request.headers",
-                  kind: kind.Property,
-                  insertText: "request.headers[\"${1:Header-Name}\"] = ${2:\"value\"}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Set a request header from flow.",
-                  range
-                },
-                {
-                  label: "response.status",
-                  kind: kind.Property,
-                  insertText: "response.status",
-                  documentation: "Latest response status code.",
-                  range
-                },
-                {
-                  label: "log",
-                  kind: kind.Function,
-                  insertText: "log ${1:\"message\"}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Write an info entry to the debug console.",
-                  range
-                },
-                {
-                  label: "warn",
-                  kind: kind.Function,
-                  insertText: "warn ${1:\"message\"}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Write a warning entry to the debug console.",
-                  range
-                },
-                {
-                  label: "error",
-                  kind: kind.Function,
-                  insertText: "error ${1:\"message\"}",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Write an error entry to the debug console.",
-                  range
-                },
-                {
-                  label: "range",
-                  kind: kind.Function,
-                  insertText: "range(${1:0}, ${2:3})",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Produce a sequence that works well with foreach loops.",
-                  range
-                },
-                {
-                  label: "encoding.base64",
-                  kind: kind.Function,
-                  insertText: "encoding.Base64Encode(${1:value})",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Encode a value to Base64.",
-                  range
-                },
-                {
-                  label: "crypto.sha256",
-                  kind: kind.Function,
-                  insertText: "crypto.Sha256(${1:value})",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Hash a value with SHA-256.",
-                  range
-                },
-                {
-                  label: "regex.match",
-                  kind: kind.Function,
-                  insertText: "regex.Match(${1:input}, ${2:pattern})",
-                  insertTextRules: insertAsSnippet,
-                  documentation: "Extract a regex match or capture group.",
-                  range
-                }
-              ]
+                }))
             };
           }
         });
 
         monaco.languages.registerHoverProvider("forrest", {
           provideHover: function (model, position) {
-            const lineText = model.getLineContent(position.lineNumber) || "";
-            const wordInfo = model.getWordAtPosition(position);
-            const word = wordInfo ? wordInfo.word : "";
-            const docs = {
-              "request": [
-                "**request**",
-                "Mutable request API for the current `.frs` program.",
-                "Core members: `request.method`, `request.url`, `request.body`, `request.headers`, `request.send()`."
-              ],
-              "request.send": [
-                "**request.send()**",
-                "Sends the current request, updates the global `response`, and returns the latest response snapshot.",
-                "Guarded by `max_send_iterations` to keep scripted send loops safe."
-              ],
-              "response": [
-                "**response**",
-                "Latest response snapshot. Properties are available directly from JSON payload fields as dynamic members.",
-                "Examples: `response.status`, `response.headers`, `response.traceId`, `response.items[0]`, `response.json()`."
-              ],
-              "response.json": [
-                "**response.json()**",
-                "Parses the latest response body as JSON and returns a dynamic JSON node when possible."
-              ],
-              "runtime": [
-                "**runtime name = value**",
-                "Creates or updates a runtime variable that can be reused later in the script and in `{{templates}}`."
-              ],
-              "expect": [
-                "**expect ...**",
-                "Adds a response assertion. Examples: `expect status == 200 \\\"ok\\\"`, `expect header \\\"Content-Type\\\" contains \\\"json\\\" \\\"json body\\\"`."
-              ],
-              "foreach": [
-                "**foreach item in source { }**",
-                "Preferred loop form in ForRest. Iterate arrays, `range(...)`, header collections, or JSON arrays from `response`."
-              ],
-              "while": [
-                "**while condition { }**",
-                "Repeat while the condition stays truthy. Use `request.remaining_send_iterations` to keep loops safe."
-              ],
-              "if": [
-                "**if / else if / else**",
-                "Standard conditional control flow for `.frs` scripts."
-              ],
-              "log": [
-                "**log**",
-                "Writes an info entry to the debug console."
-              ],
-              "warn": [
-                "**warn**",
-                "Writes a warning entry to the debug console."
-              ],
-              "error": [
-                "**error**",
-                "Writes an error entry to the debug console."
-              ]
-            };
+            const target = resolveHoverToken(model, position);
+            if (!target) {
+              return null;
+            }
 
-            const lookupWord = docs[word]
-              ? word
-              : (word.includes(".") ? word.split(".")[0] : word);
-            const content = docs[lookupWord];
+            const lookup = getHoverLookup();
+            const lowerToken = String(target.token || "").toLowerCase();
+            const tokenSegments = lowerToken.split(".");
+            const candidates = [
+              lowerToken,
+              tokenSegments.slice(-2).join("."),
+              tokenSegments[tokenSegments.length - 1],
+              tokenSegments[0]
+            ].filter(Boolean);
+            const content = candidates
+              .map((candidate) => lookup[candidate])
+              .find((candidate) => Array.isArray(candidate) && candidate.length > 0);
             if (!content) {
               return null;
             }
 
-            const startColumn = wordInfo ? wordInfo.startColumn : 1;
-            const endColumn = wordInfo ? wordInfo.endColumn : Math.max(1, lineText.length + 1);
             return {
-              range: new monaco.Range(position.lineNumber, startColumn, position.lineNumber, endColumn),
+              range: new monaco.Range(position.lineNumber, target.startColumn, position.lineNumber, target.endColumn),
               contents: content.map((value) => ({ value }))
             };
           }
@@ -632,9 +505,16 @@ public partial class MonacoEditorSurface : ContentView
         defineThemes(monaco);
       }
 
-      function requestHostCommand(commandName) {
+      function requestHostCommand(commandName, payload) {
         try {
-          window.location.href = `forrest://command/${commandName}`;
+          const query = payload && typeof payload === "object"
+            ? Object.entries(payload)
+                .filter((entry) => entry[1] !== undefined && entry[1] !== null)
+                .map((entry) => `${encodeURIComponent(entry[0])}=${encodeURIComponent(String(entry[1]))}`)
+                .join("&")
+            : "";
+          const suffix = query.length > 0 ? `?${query}` : "";
+          window.location.href = `forrest://command/${commandName}${suffix}`;
         } catch {
         }
       }
@@ -651,10 +531,14 @@ public partial class MonacoEditorSurface : ContentView
         pendingReadOnly: false,
         pendingEditableRanges: [],
         pendingDiagnostics: [],
+        pendingLanguageHelp: [],
+        pendingEnableResponseActions: false,
         pendingShouldApplyText: true,
         editableDecorations: [],
         currentEditableRanges: [],
         lastKnownValue: "",
+        responseActionsRegistered: false,
+        lastContextPosition: null,
         isApplyingProtectedEdit: false,
         create: function (monaco) {
           registerLanguage(monaco);
@@ -712,6 +596,11 @@ public partial class MonacoEditorSurface : ContentView
           this.editor.addCommand(monaco.KeyCode.F5, function () {
             requestHostCommand("send");
           });
+          this.editor.onContextMenu((event) => {
+            this.lastContextPosition = event.target && event.target.position
+              ? event.target.position
+              : this.editor.getPosition();
+          });
 
           this.lastKnownValue = this.editor.getValue();
           this.editor.onDidChangeModelContent((event) => {
@@ -725,9 +614,36 @@ public partial class MonacoEditorSurface : ContentView
             isReadOnly: this.pendingReadOnly,
             editableRanges: this.pendingEditableRanges,
             diagnostics: this.pendingDiagnostics,
+            languageHelp: this.pendingLanguageHelp,
+            enableResponseActions: this.pendingEnableResponseActions,
             applyText: this.pendingShouldApplyText
           });
           this.editor.focus();
+        },
+        ensureResponseActions: function (monaco) {
+          if (this.responseActionsRegistered || !this.pendingEnableResponseActions || !this.editor) {
+            return;
+          }
+
+          this.responseActionsRegistered = true;
+          this.editor.addAction({
+            id: "forrest.copyResponseVar",
+            label: "Copy response var",
+            contextMenuGroupId: "navigation",
+            contextMenuOrder: 1.2,
+            run: () => {
+              const position = this.lastContextPosition || this.editor.getPosition();
+              if (!position) {
+                return null;
+              }
+
+              requestHostCommand("copy-response-var", {
+                line: position.lineNumber,
+                column: position.column
+              });
+              return null;
+            }
+          });
         },
         replaceEditorValue: function (value, restoreViewState) {
           const normalized = value ?? "";
@@ -771,6 +687,22 @@ public partial class MonacoEditorSurface : ContentView
           if (typeof state?.diagnosticsJson === "string" && state.diagnosticsJson.length > 0) {
             try {
               const parsed = JSON.parse(state.diagnosticsJson);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          }
+
+          return [];
+        },
+        parseLanguageHelp: function (state) {
+          if (Array.isArray(state?.languageHelp)) {
+            return state.languageHelp;
+          }
+
+          if (typeof state?.languageHelpJson === "string" && state.languageHelpJson.length > 0) {
+            try {
+              const parsed = JSON.parse(state.languageHelpJson);
               return Array.isArray(parsed) ? parsed : [];
             } catch {
               return [];
@@ -823,6 +755,8 @@ public partial class MonacoEditorSurface : ContentView
           this.pendingReadOnly = !!nextState.isReadOnly;
           this.pendingEditableRanges = this.parseEditableRanges(nextState);
           this.pendingDiagnostics = this.parseDiagnostics(nextState);
+          this.pendingLanguageHelp = this.parseLanguageHelp(nextState);
+          this.pendingEnableResponseActions = !!nextState.enableResponseActions;
           applyHostThemeChrome(this.pendingTheme);
 
           if (this.model && window.monaco && this.model.getLanguageId() !== this.pendingLanguage) {
@@ -847,6 +781,7 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           if (this.editor && window.monaco) {
+            this.ensureResponseActions(window.monaco);
             window.monaco.editor.setTheme(this.pendingTheme);
           }
 
@@ -1100,12 +1035,26 @@ public partial class MonacoEditorSurface : ContentView
 		"[]",
 		propertyChanged: OnDiagnosticsJsonChanged);
 
+	public static readonly BindableProperty LanguageHelpJsonProperty = BindableProperty.Create(
+		nameof(LanguageHelpJson),
+		typeof(string),
+		typeof(MonacoEditorSurface),
+		"[]",
+		propertyChanged: OnLanguageHelpJsonChanged);
+
 	public static readonly BindableProperty IsReadOnlyProperty = BindableProperty.Create(
 		nameof(IsReadOnly),
 		typeof(bool),
 		typeof(MonacoEditorSurface),
 		false,
 		propertyChanged: OnIsReadOnlyChanged);
+
+	public static readonly BindableProperty EnableResponseActionsProperty = BindableProperty.Create(
+		nameof(EnableResponseActions),
+		typeof(bool),
+		typeof(MonacoEditorSurface),
+		false,
+		propertyChanged: OnEnableResponseActionsChanged);
 
 	private bool _isEditorReady;
 	private bool _isWaitingForReady;
@@ -1122,7 +1071,9 @@ public partial class MonacoEditorSurface : ContentView
 	private string _pendingThemeKey = "forrest-azure";
 	private string _pendingEditableRangesJson = "[]";
 	private string _pendingDiagnosticsJson = "[]";
+	private string _pendingLanguageHelpJson = "[]";
 	private bool _pendingIsReadOnly;
+	private bool _pendingEnableResponseActions;
 	private bool _contentHydrated;
 	private bool _shouldApplyTextToEditor = true;
 
@@ -1165,10 +1116,22 @@ public partial class MonacoEditorSurface : ContentView
 		set => SetValue(DiagnosticsJsonProperty, value);
 	}
 
+	public string LanguageHelpJson
+	{
+		get => (string)GetValue(LanguageHelpJsonProperty);
+		set => SetValue(LanguageHelpJsonProperty, value);
+	}
+
 	public bool IsReadOnly
 	{
 		get => (bool)GetValue(IsReadOnlyProperty);
 		set => SetValue(IsReadOnlyProperty, value);
+	}
+
+	public bool EnableResponseActions
+	{
+		get => (bool)GetValue(EnableResponseActionsProperty);
+		set => SetValue(EnableResponseActionsProperty, value);
 	}
 
 	private static void OnTextChanged(BindableObject bindable, object? oldValue, object? newValue)
@@ -1224,10 +1187,24 @@ public partial class MonacoEditorSurface : ContentView
 		editor.RequestStateApply();
 	}
 
+	private static void OnLanguageHelpJsonChanged(BindableObject bindable, object? oldValue, object? newValue)
+	{
+		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
+		editor._pendingLanguageHelpJson = newValue as string ?? "[]";
+		editor.RequestStateApply();
+	}
+
 	private static void OnIsReadOnlyChanged(BindableObject bindable, object? oldValue, object? newValue)
 	{
 		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
 		editor._pendingIsReadOnly = (bool)(newValue ?? false);
+		editor.RequestStateApply();
+	}
+
+	private static void OnEnableResponseActionsChanged(BindableObject bindable, object? oldValue, object? newValue)
+	{
+		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
+		editor._pendingEnableResponseActions = (bool)(newValue ?? false);
 		editor.RequestStateApply();
 	}
 
@@ -1250,6 +1227,15 @@ public partial class MonacoEditorSurface : ContentView
 		    string.Equals(uri.AbsolutePath.Trim('/'), "send", StringComparison.OrdinalIgnoreCase))
 		{
 			SendRequested?.Invoke(this, EventArgs.Empty);
+			return;
+		}
+
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "copy-response-var", StringComparison.OrdinalIgnoreCase) &&
+		    TryGetQueryValue(uri, "line", out int lineNumber) &&
+		    TryGetQueryValue(uri, "column", out int column))
+		{
+			ResponseVarCopyRequested?.Invoke(this, new MonacoResponseVarRequestEventArgs(lineNumber, column));
 		}
 	}
 
@@ -1282,7 +1268,9 @@ public partial class MonacoEditorSurface : ContentView
 				_pendingThemeKey = ThemeKey;
 				_pendingEditableRangesJson = EditableRangesJson;
 				_pendingDiagnosticsJson = DiagnosticsJson;
+				_pendingLanguageHelpJson = LanguageHelpJson;
 				_pendingIsReadOnly = IsReadOnly;
+				_pendingEnableResponseActions = EnableResponseActions;
 				_pendingText = Text;
 				_shouldApplyTextToEditor = true;
 				_contentHydrated = string.IsNullOrWhiteSpace(_pendingText);
@@ -1374,6 +1362,8 @@ public partial class MonacoEditorSurface : ContentView
 			IsReadOnly: _pendingIsReadOnly,
 			EditableRangesJson: string.IsNullOrWhiteSpace(_pendingEditableRangesJson) ? "[]" : _pendingEditableRangesJson,
 			DiagnosticsJson: string.IsNullOrWhiteSpace(_pendingDiagnosticsJson) ? "[]" : _pendingDiagnosticsJson,
+			LanguageHelpJson: string.IsNullOrWhiteSpace(_pendingLanguageHelpJson) ? "[]" : _pendingLanguageHelpJson,
+			EnableResponseActions: _pendingEnableResponseActions,
 			ApplyText: _shouldApplyTextToEditor);
 	}
 
@@ -1568,6 +1558,29 @@ public partial class MonacoEditorSurface : ContentView
 		throw new InvalidOperationException("Monaco editor did not hydrate the expected document text.");
 	}
 
+	private static bool TryGetQueryValue(Uri uri, string key, out int value)
+	{
+		value = 0;
+		string query = uri.Query;
+		if (string.IsNullOrWhiteSpace(query))
+		{
+			return false;
+		}
+
+		foreach (string pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+		{
+			string[] parts = pair.Split('=', 2, StringSplitOptions.None);
+			if (parts.Length != 2 || !string.Equals(Uri.UnescapeDataString(parts[0]), key, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			return int.TryParse(Uri.UnescapeDataString(parts[1]), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+		}
+
+		return false;
+	}
+
 	private sealed record EditorStatePayload(
 		string Text,
 		string Language,
@@ -1575,5 +1588,14 @@ public partial class MonacoEditorSurface : ContentView
 		bool IsReadOnly,
 		string EditableRangesJson,
 		string DiagnosticsJson,
+		string LanguageHelpJson,
+		bool EnableResponseActions,
 		bool ApplyText);
+}
+
+public sealed class MonacoResponseVarRequestEventArgs(int lineNumber, int column) : EventArgs
+{
+	public int LineNumber { get; } = lineNumber;
+
+	public int Column { get; } = column;
 }

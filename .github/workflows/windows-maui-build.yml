@@ -1,0 +1,160 @@
+name: Windows MAUI Build
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-maui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: windows-latest
+    outputs:
+      build_configuration: ${{ steps.version.outputs.build_configuration }}
+      version_label: ${{ steps.version.outputs.version_label }}
+      app_display_version: ${{ steps.version.outputs.app_display_version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      file_version: ${{ steps.version.outputs.file_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      release_title: ${{ steps.version.outputs.release_title }}
+    steps:
+      - name: Compute branch version metadata
+        id: version
+        shell: pwsh
+        run: |
+          $timeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById('Eastern Standard Time')
+          $now = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $timeZone)
+          $dateLabel = $now.ToString('yyyy-MM-dd')
+          $appDisplayVersion = $now.ToString('yyyy.M.d')
+          $appVersion = $now.ToString('yyyyMMdd')
+          $fileVersion = $now.ToString('yyyy.M.d') + '.0'
+
+          if ('${{ github.ref_name }}' -eq 'master') {
+            $buildConfiguration = 'Release'
+            $versionLabel = $dateLabel
+          }
+          else {
+            $buildConfiguration = 'Debug'
+            $versionLabel = "$dateLabel-beta"
+          }
+
+          "build_configuration=$buildConfiguration" >> $env:GITHUB_OUTPUT
+          "version_label=$versionLabel" >> $env:GITHUB_OUTPUT
+          "app_display_version=$appDisplayVersion" >> $env:GITHUB_OUTPUT
+          "app_version=$appVersion" >> $env:GITHUB_OUTPUT
+          "file_version=$fileVersion" >> $env:GITHUB_OUTPUT
+          "release_tag=v$versionLabel" >> $env:GITHUB_OUTPUT
+          "release_title=ForRest $versionLabel" >> $env:GITHUB_OUTPUT
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: win-x64
+            runner: windows-latest
+            platform: x64
+          - arch: win-arm64
+            runner: windows-11-arm
+            platform: ARM64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore src/ForRest.Maui/ForRest.Maui.csproj
+
+      - name: Build Windows app
+        shell: pwsh
+        run: |
+          $outputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
+          dotnet build src/ForRest.Maui/ForRest.Maui.csproj `
+            -c "${{ needs.prepare.outputs.build_configuration }}" `
+            -f net10.0-windows10.0.19041.0 `
+            -p:ContinuousIntegrationBuild=true `
+            -p:Platform=${{ matrix.platform }} `
+            -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} `
+            -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} `
+            -p:Version="${{ needs.prepare.outputs.version_label }}" `
+            -p:InformationalVersion="${{ needs.prepare.outputs.version_label }}" `
+            -p:FileVersion=${{ needs.prepare.outputs.file_version }} `
+            -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} `
+            -o $outputDirectory
+
+      - name: Package build output
+        shell: pwsh
+        run: |
+          $artifactBase = "for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}"
+          $buildDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
+          $releaseDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\release\${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
+
+          $exePath = Join-Path $buildDirectory 'ForRest.Maui.exe'
+          if (-not (Test-Path $exePath)) {
+            throw "Expected executable was not found at $exePath."
+          }
+
+          Copy-Item $exePath (Join-Path $releaseDirectory "$artifactBase.exe") -Force
+          $zipPath = Join-Path $releaseDirectory "$artifactBase.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+
+          Compress-Archive -Path (Join-Path $buildDirectory '*') -DestinationPath $zipPath
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}
+          path: artifacts/release/${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.ref_name == 'master'
+    needs:
+      - prepare
+      - build
+    runs-on: windows-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/downloaded
+
+      - name: Create or update GitHub release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ needs.prepare.outputs.release_tag }}'
+          $title = '${{ needs.prepare.outputs.release_title }}'
+          $assets = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'artifacts\downloaded') -File -Recurse | Select-Object -ExpandProperty FullName
+          if (-not $assets) {
+            throw 'No release assets were downloaded.'
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            & gh release upload $tag @assets --clobber
+            & gh release edit $tag --title $title
+          }
+          else {
+            & gh release create $tag @assets --title $title --generate-notes
+          }

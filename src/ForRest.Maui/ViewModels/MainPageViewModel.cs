@@ -7,6 +7,7 @@ using ForRest.Models;
 using ForRest.Repositories;
 using ForRest.Services;
 using ForRest.Scripting;
+using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
 
@@ -100,6 +101,16 @@ public sealed class MainPageViewModel : ObservableObject
 	private bool _isSending;
 	private RequestBodyMode _requestBodyMode = RequestBodyMode.Json;
 	private Guid _selectedWorkspaceId;
+	private readonly IReadOnlyList<LanguageHelpEntryViewModel> _languageHelpSourceEntries;
+	private string _languageHelpCatalogJson;
+	private bool _isLanguageHelpOpen;
+	private string _languageHelpSearchText;
+	private string _selectedLanguageHelpKey;
+	private string _selectedLanguageHelpTitle;
+	private string _selectedLanguageHelpCategory;
+	private string _selectedLanguageHelpSummary;
+	private string _selectedLanguageHelpDocumentation;
+	private string _selectedLanguageHelpExample;
 
 	public MainPageViewModel(
 		IThemeService themeService,
@@ -114,6 +125,18 @@ public sealed class MainPageViewModel : ObservableObject
 		_scriptExecutionService = scriptExecutionService;
 		_executionHistoryRepository = executionHistoryRepository;
 		_documentTextService = documentTextService;
+		_languageHelpSourceEntries =
+		[
+			.. ForRestLanguageCatalog.GetEntries().Select(
+				entry => new LanguageHelpEntryViewModel(
+					entry.Key,
+					entry.Title,
+					entry.Category,
+					entry.Summary,
+					entry.Documentation,
+					entry.Example,
+					entry.SearchTerms))
+		];
 		ApplyThemePalette(themeService.CurrentTheme, updateCollections: false);
 		RequestWorkbenchWorkspaceState starterWorkspace = BuildDefaultWorkspaces().First();
 		RequestWorkbenchDocumentState starterDocument = starterWorkspace.Documents.First();
@@ -154,6 +177,14 @@ public sealed class MainPageViewModel : ObservableObject
 		_editorDebugSummaryText = "POST Starter Request";
 		_editorDebugDetailText = "https://httpbin.org/anything  send<=3  vars 0  tests 0  extracts 0";
 		_editorDebugAccentColor = _successColor;
+		_languageHelpCatalogJson = ForRestLanguageCatalog.BuildMonacoCatalogJson();
+		_languageHelpSearchText = string.Empty;
+		_selectedLanguageHelpKey = string.Empty;
+		_selectedLanguageHelpTitle = string.Empty;
+		_selectedLanguageHelpCategory = string.Empty;
+		_selectedLanguageHelpSummary = string.Empty;
+		_selectedLanguageHelpDocumentation = string.Empty;
+		_selectedLanguageHelpExample = string.Empty;
 
 		LeftPaneTabs =
 		[
@@ -204,6 +235,9 @@ public sealed class MainPageViewModel : ObservableObject
 			new TraceEntryViewModel("ready", "request workbench initialized", DateTime.Now.ToString("T"), _methodNeutral)
 		];
 
+		LanguageHelpEntries =
+		[];
+
 		EnvironmentOptions =
 		[
 			"Local",
@@ -223,6 +257,7 @@ public sealed class MainPageViewModel : ObservableObject
 		RebuildWorkspaceCollections(starterWorkspace);
 		themeService.ThemeChanged += OnThemeChanged;
 		ApplyThemePalette(themeService.CurrentTheme);
+		RefreshLanguageHelpEntries();
 		ActivateRequestEditor();
 		SyncSupportEditorsFromRequestSource();
 		UpdateRequestMetadataFromSource();
@@ -247,6 +282,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public ObservableCollection<OutputMetricViewModel> OutputMetrics { get; }
 
 	public ObservableCollection<TraceEntryViewModel> TraceEntries { get; }
+
+	public ObservableCollection<LanguageHelpEntryViewModel> LanguageHelpEntries { get; }
 
 	public IReadOnlyList<string> EnvironmentOptions { get; }
 
@@ -483,7 +520,15 @@ public sealed class MainPageViewModel : ObservableObject
 	public string ActiveEditorLanguage
 	{
 		get => _activeEditorLanguage;
-		set => SetProperty(ref _activeEditorLanguage, value);
+		set
+		{
+			if (SetProperty(ref _activeEditorLanguage, value))
+			{
+				OnPropertyChanged(nameof(IsLanguageHelpAvailable));
+				OnPropertyChanged(nameof(ShowLanguageHelpToggle));
+				OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
+			}
+		}
 	}
 
 	public string ActiveEditorEditableRangesJson
@@ -497,6 +542,81 @@ public sealed class MainPageViewModel : ObservableObject
 		get => _activeEditorDiagnosticsJson;
 		set => SetProperty(ref _activeEditorDiagnosticsJson, value);
 	}
+
+	public string LanguageHelpCatalogJson => _languageHelpCatalogJson;
+
+	public bool IsLanguageHelpOpen
+	{
+		get => _isLanguageHelpOpen;
+		set
+		{
+			if (SetProperty(ref _isLanguageHelpOpen, value))
+			{
+				OnPropertyChanged(nameof(LanguageHelpToggleText));
+				OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
+			}
+		}
+	}
+
+	public bool IsLanguageHelpAvailable => IsActiveRequestEditor && string.Equals(ActiveEditorLanguage, "forrest", StringComparison.Ordinal);
+
+	public bool ShowLanguageHelpToggle => IsLanguageHelpAvailable;
+
+	public bool ShowLanguageHelpDrawer => IsLanguageHelpAvailable && IsLanguageHelpOpen;
+
+	public string LanguageHelpToggleText => IsLanguageHelpOpen ? "Docs -" : "Docs +";
+
+	public string LanguageHelpSearchText
+	{
+		get => _languageHelpSearchText;
+		set
+		{
+			if (SetProperty(ref _languageHelpSearchText, value))
+			{
+				RefreshLanguageHelpEntries();
+			}
+		}
+	}
+
+	public string SelectedLanguageHelpTitle
+	{
+		get => _selectedLanguageHelpTitle;
+		set => SetProperty(ref _selectedLanguageHelpTitle, value);
+	}
+
+	public string SelectedLanguageHelpCategory
+	{
+		get => _selectedLanguageHelpCategory;
+		set => SetProperty(ref _selectedLanguageHelpCategory, value);
+	}
+
+	public string SelectedLanguageHelpSummary
+	{
+		get => _selectedLanguageHelpSummary;
+		set => SetProperty(ref _selectedLanguageHelpSummary, value);
+	}
+
+	public string SelectedLanguageHelpDocumentation
+	{
+		get => _selectedLanguageHelpDocumentation;
+		set => SetProperty(ref _selectedLanguageHelpDocumentation, value);
+	}
+
+	public string SelectedLanguageHelpExample
+	{
+		get => _selectedLanguageHelpExample;
+		set => SetProperty(ref _selectedLanguageHelpExample, value);
+	}
+
+	public bool HasSelectedLanguageHelpEntry => !string.IsNullOrWhiteSpace(SelectedLanguageHelpTitle);
+
+	public bool ShowLanguageHelpEmptyState => !HasSelectedLanguageHelpEntry;
+
+	public bool CanCopyLanguageHelpExample => !string.IsNullOrWhiteSpace(SelectedLanguageHelpExample);
+
+	public string LanguageHelpEmptyStateText => LanguageHelpEntries.Count == 0
+		? "No ForRest topics matched the current search."
+		: "Select a topic to inspect syntax, examples, and supported helpers.";
 
 	public string ActiveDocumentKindLabel
 	{
@@ -729,6 +849,7 @@ public sealed class MainPageViewModel : ObservableObject
 			: Workspaces.FirstOrDefault()?.Id ?? Guid.Empty;
 
 		ApplyWorkspaceSelection(selectedWorkspaceId);
+		await ReloadHistoryAsync();
 		_isInitialized = true;
 	}
 
@@ -763,6 +884,7 @@ public sealed class MainPageViewModel : ObservableObject
 			RequestTarget = outcome.Compilation.Payload.Request.UrlTemplate;
 			RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
 			UpdateCurrentDocumentMetadata();
+			ExecutionRun? latestRun = outcome.Execution?.Runs.LastOrDefault();
 			ResponseState = outcome.Execution?.LatestResponse is { } response
 				? $"{response.StatusCode} {response.ReasonPhrase}".Trim()
 				: outcome.Execution?.State.ToString() ?? "Compiled";
@@ -787,18 +909,7 @@ public sealed class MainPageViewModel : ObservableObject
 				ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
 			}
 
-			HistoryItems.Clear();
-			List<ExecutionRun> historyRuns = await _executionHistoryRepository.Load(GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId);
-			foreach (ExecutionRun run in historyRuns.Take(8))
-			{
-				HistoryItems.Add(
-					new HistoryEntryViewModel(
-						SelectedMethod,
-						run.RequestName,
-						run.Response is null ? run.State.ToString() : $"{run.Response.StatusCode} in {run.Response.DurationMilliseconds} ms",
-						run.StartedUtc.ToLocalTime().ToString("t"),
-						ResolveMethodAccent(SelectedMethod)));
-			}
+			await ReloadHistoryAsync(latestRun?.Id);
 
 			TraceEntries.Clear();
 			TraceEntries.Add(new TraceEntryViewModel("compile", "request document compiled", DateTime.Now.ToString("T"), _methodNeutral));
@@ -1056,6 +1167,7 @@ public sealed class MainPageViewModel : ObservableObject
 		if (_isInitialized)
 		{
 			_ = PersistWorkbenchStateInBackground();
+			_ = ReloadHistoryAsync();
 		}
 	}
 
@@ -1076,6 +1188,7 @@ public sealed class MainPageViewModel : ObservableObject
 		if (_isInitialized)
 		{
 			_ = PersistWorkbenchStateInBackground();
+			_ = ReloadHistoryAsync();
 		}
 	}
 
@@ -1149,6 +1262,21 @@ public sealed class MainPageViewModel : ObservableObject
 		ActivateRequestEditor();
 	}
 
+	public void SelectHistoryEntry(HistoryEntryViewModel? entry)
+	{
+		if (entry is null)
+		{
+			return;
+		}
+
+		foreach (HistoryEntryViewModel item in HistoryItems)
+		{
+			item.IsSelected = ReferenceEquals(item, entry);
+		}
+
+		ApplyHistoryRunToInspector(entry.Run, entry.Method);
+	}
+
 	public void SelectExplorerItem(NavigationItemViewModel? item)
 	{
 		if (item is null)
@@ -1172,6 +1300,82 @@ public sealed class MainPageViewModel : ObservableObject
 		string method = item.Method ?? SelectedMethod;
 		ApplyRequestSelection(item.Title, method, item.Detail, item.Context);
 		SelectDocumentByLocation(item.Context);
+	}
+
+	public async Task CopyActiveEditorAsync()
+	{
+		string content = ActiveEditorText ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(content))
+		{
+			ExecutionStatus = "Nothing to copy from the active editor.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(content);
+		ExecutionStatus = "Copied current editor text.";
+	}
+
+	public void ToggleLanguageHelp()
+	{
+		if (!IsLanguageHelpAvailable)
+		{
+			return;
+		}
+
+		IsLanguageHelpOpen = !IsLanguageHelpOpen;
+	}
+
+	public void SelectLanguageHelpEntry(LanguageHelpEntryViewModel? entry)
+	{
+		ApplySelectedLanguageHelpEntry(entry);
+	}
+
+	public async Task CopySelectedLanguageHelpExampleAsync()
+	{
+		if (string.IsNullOrWhiteSpace(SelectedLanguageHelpExample))
+		{
+			ExecutionStatus = "No ForRest example is selected.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(SelectedLanguageHelpExample);
+		ExecutionStatus = $"Copied ForRest example: {SelectedLanguageHelpTitle}.";
+	}
+
+	public async Task CopyResponseBodyAsync()
+	{
+		if (string.IsNullOrWhiteSpace(ResponseBodyText))
+		{
+			ExecutionStatus = "No response body available to copy.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(ResponseBodyText);
+		ExecutionStatus = "Copied response body.";
+	}
+
+	public async Task CopyRawResponseAsync()
+	{
+		if (string.IsNullOrWhiteSpace(ResponseRawText))
+		{
+			ExecutionStatus = "No raw exchange available to copy.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(ResponseRawText);
+		ExecutionStatus = "Copied raw exchange.";
+	}
+
+	public async Task CopyResponseVariableAsync(int lineNumber, int column)
+	{
+		if (!ResponseVariableExpressionService.TryBuildExpression(ResponseBodyText, lineNumber, column, out string expression))
+		{
+			ExecutionStatus = "No response property was detected at that location.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(expression);
+		ExecutionStatus = $"Copied response variable: {expression}";
 	}
 
 	private void ApplyWorkspaceSelection(Guid workspaceId)
@@ -1679,6 +1883,9 @@ public sealed class MainPageViewModel : ObservableObject
 		_activeDocumentKind = RequestDocumentKind;
 		ActivateCurrentCenterTabEditor();
 		OnPropertyChanged(nameof(ShowEditorDebugStrip));
+		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
+		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
+		OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
 		OnPropertyChanged(nameof(CanMoveRequestUp));
 		OnPropertyChanged(nameof(CanMoveRequestDown));
 	}
@@ -1696,6 +1903,9 @@ public sealed class MainPageViewModel : ObservableObject
 		SetActiveEditorTextInternal(_themeConfigText);
 		ForceActiveEditorRefresh();
 		OnPropertyChanged(nameof(ShowEditorDebugStrip));
+		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
+		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
+		OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
 		OnPropertyChanged(nameof(CanSend));
 		OnPropertyChanged(nameof(CanMoveRequestUp));
 		OnPropertyChanged(nameof(CanMoveRequestDown));
@@ -1717,6 +1927,9 @@ public sealed class MainPageViewModel : ObservableObject
 		SetActiveEditorTextInternal(RequestEditorText);
 		ForceActiveEditorRefresh();
 		OnPropertyChanged(nameof(ShowEditorDebugStrip));
+		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
+		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
+		OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
 		OnPropertyChanged(nameof(CanSend));
 	}
 
@@ -2108,6 +2321,38 @@ public sealed class MainPageViewModel : ObservableObject
 		};
 	}
 
+	private void RefreshLanguageHelpEntries()
+	{
+		List<LanguageHelpEntryViewModel> matches =
+		[
+			.. _languageHelpSourceEntries.Where(entry => entry.MatchesSearch(LanguageHelpSearchText))
+		];
+
+		LanguageHelpEntries.Clear();
+		foreach (LanguageHelpEntryViewModel entry in matches)
+		{
+			LanguageHelpEntries.Add(entry);
+		}
+
+		LanguageHelpEntryViewModel? selectedEntry = matches.FirstOrDefault(entry => string.Equals(entry.Key, _selectedLanguageHelpKey, StringComparison.Ordinal))
+			?? matches.FirstOrDefault();
+		ApplySelectedLanguageHelpEntry(selectedEntry);
+		OnPropertyChanged(nameof(LanguageHelpEmptyStateText));
+	}
+
+	private void ApplySelectedLanguageHelpEntry(LanguageHelpEntryViewModel? entry)
+	{
+		_selectedLanguageHelpKey = entry?.Key ?? string.Empty;
+		SelectedLanguageHelpTitle = entry?.Title ?? string.Empty;
+		SelectedLanguageHelpCategory = entry?.Category ?? string.Empty;
+		SelectedLanguageHelpSummary = entry?.Summary ?? string.Empty;
+		SelectedLanguageHelpDocumentation = entry?.Documentation ?? string.Empty;
+		SelectedLanguageHelpExample = entry?.Example ?? string.Empty;
+		OnPropertyChanged(nameof(HasSelectedLanguageHelpEntry));
+		OnPropertyChanged(nameof(ShowLanguageHelpEmptyState));
+		OnPropertyChanged(nameof(CanCopyLanguageHelpExample));
+	}
+
 	private void SetActiveEditorTextInternal(string value)
 	{
 		_activeEditorText = value;
@@ -2241,6 +2486,111 @@ public sealed class MainPageViewModel : ObservableObject
 		DebugOutputText = snapshot.DebugOutputText;
 	}
 
+	private async Task ReloadHistoryAsync(Guid? selectedRunId = null)
+	{
+		try
+		{
+			List<ExecutionRun> historyRuns = await _executionHistoryRepository.Load(GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId);
+			HistoryItems.Clear();
+			foreach (ExecutionRun run in historyRuns.Take(8))
+			{
+				HistoryItems.Add(CreateHistoryEntry(run, selectedRunId));
+			}
+		}
+		catch (Exception exception)
+		{
+			HistoryItems.Clear();
+			ExecutionStatus = $"History unavailable: {exception.Message}";
+		}
+	}
+
+	private HistoryEntryViewModel CreateHistoryEntry(ExecutionRun run, Guid? selectedRunId)
+	{
+		string method = ResolveHistoryMethod(run);
+		string summary = run.Response is not null
+			? $"{run.Response.StatusCode} in {run.Response.DurationMilliseconds} ms"
+			: !string.IsNullOrWhiteSpace(run.ErrorMessage)
+				? run.ErrorMessage
+				: run.State.ToString();
+
+		return new HistoryEntryViewModel(
+			run,
+			method,
+			run.RequestName,
+			summary,
+			run.StartedUtc.ToLocalTime().ToString("t"),
+			ResolveMethodAccent(method),
+			selectedRunId.HasValue && run.Id == selectedRunId.Value);
+	}
+
+	private static string ResolveHistoryMethod(ExecutionRun run)
+	{
+		if (string.IsNullOrWhiteSpace(run.RawRequest))
+		{
+			return "RUN";
+		}
+
+		string firstLine = run.RawRequest
+			.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+			.FirstOrDefault()
+			?? string.Empty;
+		string method = firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+		return method is "GET" or "POST" or "PUT" or "PATCH" or "DELETE" or "OPTIONS" or "HEAD"
+			? method
+			: "RUN";
+	}
+
+	private void ApplyHistoryRunToInspector(ExecutionRun run, string? methodOverride = null)
+	{
+		string method = string.IsNullOrWhiteSpace(methodOverride) ? ResolveHistoryMethod(run) : methodOverride;
+		Color methodAccent = ResolveMethodAccent(method);
+		ResponseSnapshot? response = run.Response;
+
+		ResponseState = response is not null
+			? $"{response.StatusCode} {response.ReasonPhrase}".Trim()
+			: run.State.ToString();
+		ExecutionStatus = $"Loaded history run: {run.RequestName}";
+		_latestResponseSnapshot = response;
+		RefreshResponsePresentation();
+		_responseTimeStatus = response is not null ? $"{response.DurationMilliseconds} ms" : "--";
+		_responseSizeStatus = response is not null ? FormatResponseSize(response.SizeBytes) : "--";
+		DebugOutputText = BuildDebugOutput(run, SelectedWorkspace, SelectedEnvironment, method);
+
+		ResponseHeaderRows.Clear();
+		foreach (KeyValueDefinition header in response?.Headers ?? [])
+		{
+			ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
+		}
+
+		TraceEntries.Clear();
+		TraceEntries.Add(new TraceEntryViewModel("history", run.RequestName, run.StartedUtc.ToLocalTime().ToString("T"), _methodNeutral));
+		if (response is not null)
+		{
+			TraceEntries.Add(new TraceEntryViewModel("send", ResponseState, response.ReceivedUtc.ToLocalTime().ToString("T"), methodAccent));
+		}
+
+		if (!string.IsNullOrWhiteSpace(run.ErrorMessage))
+		{
+			TraceEntries.Add(new TraceEntryViewModel("error", run.ErrorMessage, (run.CompletedUtc ?? run.StartedUtc).ToLocalTime().ToString("T"), _dangerColor));
+		}
+
+		if (run.Tests.Count > 0)
+		{
+			string summary = $"{run.Tests.Count(static item => item.State == TestOutcomeState.Passed)}/{run.Tests.Count} tests passed";
+			TraceEntries.Add(new TraceEntryViewModel("tests", summary, (run.CompletedUtc ?? run.StartedUtc).ToLocalTime().ToString("T"), run.Tests.All(static item => item.State == TestOutcomeState.Passed) ? _successColor : _dangerColor));
+		}
+
+		OutputMetrics.Clear();
+		OutputMetrics.Add(new OutputMetricViewModel("Status", ResponseState, response is not null && response.StatusCode is >= 200 and < 300 ? _successColor : _dangerColor));
+		OutputMetrics.Add(new OutputMetricViewModel("Time", _responseTimeStatus, methodAccent));
+		OutputMetrics.Add(new OutputMetricViewModel("Size", _responseSizeStatus, _methodNeutral));
+		OutputMetrics.Add(new OutputMetricViewModel("Type", response?.ContentType ?? "n/a", methodAccent));
+		OnPropertyChanged(nameof(ResponseTimeStatus));
+		OnPropertyChanged(nameof(ResponseSizeStatus));
+
+		FocusRightPaneTab(response is not null && string.IsNullOrWhiteSpace(run.ErrorMessage) ? "response" : "debug");
+	}
+
 	private string BuildDebugOutput(ForRestScriptExecutionOutcome outcome)
 	{
 		ExecutionRun? latestRun = outcome.Execution?.Runs.LastOrDefault();
@@ -2293,6 +2643,47 @@ public sealed class MainPageViewModel : ObservableObject
 			lines.Add(string.Empty);
 			lines.Add("Tests:");
 			lines.AddRange(outcome.Execution.Tests.Select(entry => $"  [{entry.State}] {entry.Name}"));
+		}
+
+		return string.Join(Environment.NewLine, lines);
+	}
+
+	private string BuildDebugOutput(ExecutionRun run, string workspaceName, string environmentName, string requestMethod)
+	{
+		List<string> lines =
+		[
+			$"Workspace: {workspaceName}",
+			$"Environment: {environmentName}",
+			$"Request: {requestMethod} {run.RequestName}",
+			$"Target: {run.TargetUri}"
+		];
+
+		lines.Add(string.Empty);
+		lines.Add($"Execution state: {run.State}");
+		if (run.Response is { } response)
+		{
+			lines.Add($"Response: {response.StatusCode} {response.ReasonPhrase}".Trim());
+			lines.Add($"Duration: {response.DurationMilliseconds} ms");
+			lines.Add($"Size: {FormatResponseSize(response.SizeBytes)}");
+		}
+
+		if (!string.IsNullOrWhiteSpace(run.ErrorMessage))
+		{
+			lines.Add($"Error: {run.ErrorMessage}");
+		}
+
+		if (run.ConsoleEntries.Count > 0)
+		{
+			lines.Add(string.Empty);
+			lines.Add("Console:");
+			lines.AddRange(run.ConsoleEntries.Select(entry => $"  [{entry.Level}] {entry.Message}"));
+		}
+
+		if (run.Tests.Count > 0)
+		{
+			lines.Add(string.Empty);
+			lines.Add("Tests:");
+			lines.AddRange(run.Tests.Select(entry => $"  [{entry.State}] {entry.Name}"));
 		}
 
 		return string.Join(Environment.NewLine, lines);
@@ -2414,16 +2805,27 @@ public sealed class MainPageViewModel : ObservableObject
 						[
 							"# Probe a collection response like code, not a form.",
 							"request.headers[\"X-Request-Source\"] = \"maui\"",
-							"let sent = request.send()",
+							"let attempts = [0..1]",
+							"let sent = null",
 							string.Empty,
-							"if sent.status == 200 {",
-							"  runtime first_user_email = sent[0].email",
-							"  foreach index in range(0, 2) {",
-							"    log sent[index].username",
+							"foreach attempt in attempts {",
+							"  sent = request.send()",
+							"  if sent.status == 200 and sent.length() > 2 {",
+							"    runtime first_user_email = sent[0].email",
+							"    foreach index in [0..2] {",
+							"      log sent[index].username",
+							"    }",
+							"    break",
 							"  }",
+							"",
+							"  warn $\"Attempt {attempt} returned {sent.status}.\"",
+							"}",
+							"",
+							"if sent == null or sent.length() == 0 {",
+							"  error \"The users feed did not return a usable collection.\"",
 							"} else {",
-							"  warn sent.status",
-							"}"
+							"  log $\"Loaded {sent.length()} users.\"",
+							"  }",
 						],
 						tests:
 						[
@@ -2612,17 +3014,29 @@ public sealed class MainPageViewModel : ObservableObject
 		return scriptLines
 			??
 			[
-				"# Write ForRest code here. request.send() returns the latest response snapshot.",
+				"# ForRest is code-first. request.send() updates response and returns the latest snapshot.",
 				"request.headers[\"X-Request-Source\"] = \"maui\"",
-				"let sent = request.send()",
+				"let attempts = [0..2]",
+				"let sent = null",
 				string.Empty,
-				"if sent.status == 200 {",
-				"  runtime last_status = sent.status",
-				"  foreach step in range(0, 2) {",
-				"    log step",
+				"foreach attempt in attempts {",
+				"  sent = request.send()",
+				"  runtime last_attempt = attempt",
+				"  if sent.status == 200 and not (sent.body.length() == 0) {",
+				"    log $\"Attempt {attempt} returned {sent.status}.\"",
+				"    break",
 				"  }",
+				"",
+				"  warn $\"Attempt {attempt} returned {sent.status}.\"",
+				"}",
+				string.Empty,
+				"if sent == null or sent.status != 200 {",
+				"  error \"The request never returned HTTP 200.\"",
 				"} else {",
-				"  warn sent.status",
+				"  runtime last_status = sent.status",
+				"  foreach step in [0..1] {",
+				"    log $\"Replay step {step}\"",
+				"  }",
 				"}"
 			];
 	}

@@ -52,9 +52,11 @@ public sealed class RequestWorkbenchDocumentFactoryTests
 		StringAssert.Contains(created.RequestSource, "max_send_iterations 3");
 		StringAssert.Contains(created.RequestSource, "https://httpbin.org/anything?source=%2Frequests%2Fecho-lab%2Fnew-request-3");
 		StringAssert.Contains(created.RequestSource, "request.headers[\"X-Request-Source\"] = \"maui\"");
-		StringAssert.Contains(created.RequestSource, "let sent = request.send()");
-		StringAssert.Contains(created.RequestSource, "runtime last_status = sent.status");
-		StringAssert.Contains(created.RequestSource, "foreach step in range(0, 2) {");
+		StringAssert.Contains(created.RequestSource, "let attempts = [0..2]");
+		StringAssert.Contains(created.RequestSource, "sent = request.send()");
+		StringAssert.Contains(created.RequestSource, "if sent.status == 200 and not (sent.body.length() == 0) {");
+		StringAssert.Contains(created.RequestSource, "if sent == null or sent.status != 200 {");
+		StringAssert.Contains(created.RequestSource, "foreach step in [0..1] {");
 		Assert.AreEqual(string.Empty, created.PreRequestScript);
 	}
 
@@ -74,12 +76,14 @@ public sealed class RequestWorkbenchDocumentFactoryTests
 
 		Assert.AreEqual("New request ready to edit and send", created.Summary);
 		StringAssert.Contains(created.RequestSource, "expect header \"Content-Type\" contains \"json\" \"json response\"");
-		StringAssert.Contains(created.RequestSource, "# Write ForRest code here. request.send() returns the latest response snapshot.");
+		StringAssert.Contains(created.RequestSource, "# ForRest is code-first. request.send() updates response and returns the latest snapshot.");
 		StringAssert.Contains(created.RequestSource, "method GET");
 		StringAssert.Contains(created.RequestSource, "request.headers[\"X-Request-Source\"] = \"maui\"");
-		StringAssert.Contains(created.RequestSource, "let sent = request.send()");
-		StringAssert.Contains(created.RequestSource, "runtime last_status = sent.status");
-		StringAssert.Contains(created.RequestSource, "foreach step in range(0, 2) {");
+		StringAssert.Contains(created.RequestSource, "let attempts = [0..2]");
+		StringAssert.Contains(created.RequestSource, "sent = request.send()");
+		StringAssert.Contains(created.RequestSource, "if sent.status == 200 and not (sent.body.length() == 0) {");
+		StringAssert.Contains(created.RequestSource, "if sent == null or sent.status != 200 {");
+		StringAssert.Contains(created.RequestSource, "foreach step in [0..1] {");
 		Assert.AreEqual(string.Empty, created.PreRequestScript);
 	}
 

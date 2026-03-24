@@ -1,3 +1,4 @@
+using System.Linq;
 using ForRest.Maui.ViewModels;
 using ForRest.Maui.Services;
 using Microsoft.Maui.Controls.Shapes;
@@ -30,6 +31,26 @@ public partial class WorkbenchCenterPane : ContentView
 		await ViewModel.SendAsync();
 	}
 
+	private async void OnCopyClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyActiveEditorAsync();
+	}
+
+	private void OnToggleLanguageHelpClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ToggleLanguageHelp();
+	}
+
+	private async void OnCopyLanguageHelpExampleClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopySelectedLanguageHelpExampleAsync();
+	}
+
+	private void OnLanguageHelpSelectionChanged(object? sender, SelectionChangedEventArgs e)
+	{
+		ViewModel.SelectLanguageHelpEntry(e.CurrentSelection.OfType<LanguageHelpEntryViewModel>().FirstOrDefault());
+	}
+
 	private void EnsureEditorSurface()
 	{
 		if (EditorHost.Content is not null)
@@ -58,6 +79,7 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.SetBinding(MonacoEditorSurface.EditableRangesJsonProperty, nameof(MainPageViewModel.ActiveEditorEditableRangesJson));
 		editor.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
 		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
+		editor.SetBinding(MonacoEditorSurface.LanguageHelpJsonProperty, nameof(MainPageViewModel.LanguageHelpCatalogJson));
 		editor.SendRequested += OnEditorSendRequested;
 		return editor;
 	}

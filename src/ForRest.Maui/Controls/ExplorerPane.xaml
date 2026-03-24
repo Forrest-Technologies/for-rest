@@ -46,51 +46,65 @@
 
             <Grid Grid.Row="2"
                   Padding="10,0,10,8"
-                  ColumnDefinitions="Auto,*,Auto"
-                  ColumnSpacing="8">
-                <Label Text="WORKSPACES"
-                       VerticalTextAlignment="Start"
-                       Style="{StaticResource MonoMetaStyle}" />
-                <ScrollView Grid.Column="1"
-                            Orientation="Horizontal"
-                            HorizontalScrollBarVisibility="Never">
-                    <HorizontalStackLayout Spacing="6"
-                                           BindableLayout.ItemsSource="{Binding Workspaces}">
+                  RowDefinitions="Auto,Auto"
+                  RowSpacing="6">
+                <Grid ColumnDefinitions="*,Auto"
+                      ColumnSpacing="8">
+                    <Label Text="WORKSPACES"
+                           VerticalTextAlignment="Center"
+                           Style="{StaticResource MonoMetaStyle}" />
+                    <HorizontalStackLayout Grid.Column="1"
+                                           Spacing="4">
+                        <Button Text="^"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnMoveWorkspaceLeftClicked"
+                                SemanticProperties.Description="Move selected workspace up"
+                                IsEnabled="{Binding CanMoveWorkspaceLeft}" />
+                        <Button Text="v"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnMoveWorkspaceRightClicked"
+                                SemanticProperties.Description="Move selected workspace down"
+                                IsEnabled="{Binding CanMoveWorkspaceRight}" />
+                        <Button Text="+"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnAddWorkspaceClicked"
+                                SemanticProperties.Description="Add workspace" />
+                    </HorizontalStackLayout>
+                </Grid>
+
+                <ScrollView Grid.Row="1"
+                            MaximumHeightRequest="168">
+                    <VerticalStackLayout Spacing="2"
+                                         BindableLayout.ItemsSource="{Binding Workspaces}">
                         <BindableLayout.ItemTemplate>
                             <DataTemplate>
-                                <Button Text="{Binding Title}"
-                                        Style="{StaticResource DenseTabButtonStyle}"
-                                        Clicked="OnWorkspaceClicked"
-                                        CommandParameter="{Binding .}">
-                                    <Button.Triggers>
-                                        <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
-                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
-                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
+                                <Border Style="{StaticResource NavigationRowBorderStyle}"
+                                        Margin="0">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnWorkspaceTapped"
+                                                              CommandParameter="{Binding .}" />
+                                    </Border.GestureRecognizers>
+                                    <VerticalStackLayout Spacing="1">
+                                        <Label Text="{Binding Title}"
+                                               FontFamily="OpenSansSemibold"
+                                               FontSize="12"
+                                               LineBreakMode="TailTruncation" />
+                                        <Label Text="{Binding Subtitle}"
+                                               Style="{StaticResource PaneMetaStyle}"
+                                               LineBreakMode="TailTruncation" />
+                                    </VerticalStackLayout>
+                                    <Border.Triggers>
+                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
+                                            <Setter Property="Stroke" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            <Setter Property="StrokeThickness" Value="1" />
                                         </DataTrigger>
-                                    </Button.Triggers>
-                                </Button>
+                                    </Border.Triggers>
+                                </Border>
                             </DataTemplate>
                         </BindableLayout.ItemTemplate>
-                    </HorizontalStackLayout>
+                    </VerticalStackLayout>
                 </ScrollView>
-                <HorizontalStackLayout Grid.Column="2"
-                                       Spacing="4">
-                    <Button Text="&lt;"
-                            Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnMoveWorkspaceLeftClicked"
-                            SemanticProperties.Description="Move selected workspace left"
-                            IsEnabled="{Binding CanMoveWorkspaceLeft}" />
-                    <Button Text="&gt;"
-                            Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnMoveWorkspaceRightClicked"
-                            SemanticProperties.Description="Move selected workspace right"
-                            IsEnabled="{Binding CanMoveWorkspaceRight}" />
-                    <Button Text="+"
-                            Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnAddWorkspaceClicked"
-                            SemanticProperties.Description="Add workspace" />
-                </HorizontalStackLayout>
             </Grid>
 
             <Grid Grid.Row="3">
@@ -183,6 +197,10 @@
                         <BindableLayout.ItemTemplate>
                             <DataTemplate>
                                 <Border Style="{StaticResource NavigationRowBorderStyle}">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnHistoryTapped"
+                                                              CommandParameter="{Binding .}" />
+                                    </Border.GestureRecognizers>
                                     <Grid ColumnDefinitions="Auto,*,Auto"
                                           ColumnSpacing="8">
                                         <Label Text="{Binding Method}"
@@ -200,6 +218,13 @@
                                                Text="{Binding When}"
                                                Style="{StaticResource MonoMetaStyle}" />
                                     </Grid>
+                                    <Border.Triggers>
+                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
+                                            <Setter Property="Stroke" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            <Setter Property="StrokeThickness" Value="1" />
+                                        </DataTrigger>
+                                    </Border.Triggers>
                                 </Border>
                             </DataTemplate>
                         </BindableLayout.ItemTemplate>

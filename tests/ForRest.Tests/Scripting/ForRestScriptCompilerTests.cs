@@ -102,7 +102,7 @@ public sealed class ForRestScriptCompilerTests
         Assert.IsTrue(result.Succeeded);
         Assert.IsNotNull(result.Payload);
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Headers[\"X-Flow\"] = \"enabled\";");
-        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = await request.send();");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "if (response.Status == 200) {");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "variables.Set(\"last_attempt\"");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "foreach (dynamic item in __flow.Range(0, 2)) {");
@@ -135,7 +135,7 @@ public sealed class ForRestScriptCompilerTests
 
         Assert.IsTrue(result.Succeeded);
         Assert.IsNotNull(result.Payload);
-        StringAssert.Contains(result.Payload.Request.PreRequestScript, "await request.send();");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "(await request.send());");
         Assert.IsFalse(result.Payload.Request.PreRequestScript.Contains("await await", StringComparison.Ordinal));
     }
 
@@ -261,7 +261,7 @@ public sealed class ForRestScriptCompilerTests
         Assert.AreEqual("Sync Profile", result.Payload.RuntimeSeeds.Single(static item => item.Key == "request_name").LiteralValue);
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.SetHeader(\"X-Shell-Surface\", \"editor-first\");");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "console.Log(\"Prepared request before send.\");");
-        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = await request.send();");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
     }
 
     [TestMethod]
@@ -324,12 +324,60 @@ public sealed class ForRestScriptCompilerTests
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
         Assert.IsNotNull(result.Payload);
-        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = await request.send();");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "if (sent.status == 200) {");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic __runtimeValue1 = sent[0].email;");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "foreach (dynamic index in __flow.Range(0, 2)) {");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "console.Log(sent[index].username);");
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "console.Warn(sent.status);");
+    }
+
+    [TestMethod]
+    public void Compile_supports_multiline_conditions_range_literals_and_length_aliases()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Natural Flow"
+            method POST
+            url "https://api.example.test/anything"
+            max_send_iterations 3
+
+            request.headers["X-Request-Source"] = "maui"
+            let iter = [0..9]
+            let sent = null
+
+            foreach loop in iter
+            {
+              sent = request.send()
+              if sent.status == 200 and not (sent.body.length() == 0)
+              {
+                log $"Response status {sent.status}."
+                break
+              }
+            }
+
+            if response.Id == 1
+               or response.Id.length() > 32
+            {
+              log $"Error condition failed."
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic iter = __flow.RangeClosed(0, 9);");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "foreach (dynamic loop in iter) {");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "sent = (await request.send());");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "if (sent.status == 200 && !(__flow.Count(sent.body) == 0)) {");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "if (response.Id == 1 || __flow.Count(response.Id) > 32) {");
     }
 
     [TestMethod]

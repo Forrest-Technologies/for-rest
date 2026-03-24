@@ -60,6 +60,22 @@ public partial class ExplorerPane : ContentView
 		ViewModel.AddRequest();
 	}
 
+	private void OnWorkspaceTapped(object? sender, TappedEventArgs e)
+	{
+		if (e.Parameter is WorkspaceItemViewModel workspace)
+		{
+			ViewModel.SelectWorkspace(workspace);
+		}
+	}
+
+	private void OnHistoryTapped(object? sender, TappedEventArgs e)
+	{
+		if (e.Parameter is HistoryEntryViewModel entry)
+		{
+			ViewModel.SelectHistoryEntry(entry);
+		}
+	}
+
 	private void OnMoveRequestUpClicked(object? sender, EventArgs e)
 	{
 		ViewModel.MoveSelectedRequestUp();

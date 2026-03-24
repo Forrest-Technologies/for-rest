@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -263,8 +264,7 @@ internal static class ForRestFlowScriptCompiler
         HashSet<string> locals,
         ref int tempCounter)
     {
-        var trimmed = lines[index].Trim();
-        if (!TryReadBlockHeader(trimmed, "if", out var condition))
+        if (!TryReadBlockHeader(lines, index, "if", out var condition, out var consumedLineCount))
         {
             return false;
         }
@@ -272,7 +272,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append("if (");
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
-        index++;
+        index += consumedLineCount;
         CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
         builder.AppendLine("}");
 
@@ -294,21 +294,21 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
-            if (TryReadBlockHeader(elseLine, "else if", out var elseIfCondition))
+            if (TryReadBlockHeader(lines, index, "else if", out var elseIfCondition, out consumedLineCount))
             {
                 builder.Append("else if (");
                 builder.Append(TranslateExpression(elseIfCondition, locals));
                 builder.AppendLine(") {");
-                index++;
+                index += consumedLineCount;
                 CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
                 builder.AppendLine("}");
                 continue;
             }
 
-            if (IsElseBlockHeader(elseLine))
+            if (IsElseBlockHeader(lines, index, out consumedLineCount))
             {
                 builder.AppendLine("else {");
-                index++;
+                index += consumedLineCount;
                 CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
                 builder.AppendLine("}");
             }
@@ -327,8 +327,7 @@ internal static class ForRestFlowScriptCompiler
         HashSet<string> locals,
         ref int tempCounter)
     {
-        var trimmed = lines[index].Trim();
-        if (!TryReadBlockHeader(trimmed, "while", out var condition))
+        if (!TryReadBlockHeader(lines, index, "while", out var condition, out var consumedLineCount))
         {
             return false;
         }
@@ -336,7 +335,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append("while (");
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
-        index++;
+        index += consumedLineCount;
         CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
         builder.AppendLine("}");
         return true;
@@ -350,8 +349,7 @@ internal static class ForRestFlowScriptCompiler
         HashSet<string> locals,
         ref int tempCounter)
     {
-        var trimmed = lines[index].Trim();
-        if (!TryReadForEachHeader(trimmed, out var iteratorName, out var sourceExpression))
+        if (!TryReadForEachHeader(lines, index, out var iteratorName, out var sourceExpression, out var consumedLineCount))
         {
             return false;
         }
@@ -361,11 +359,11 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(" in ");
         builder.Append(TranslateExpression(sourceExpression, locals));
         builder.AppendLine(") {");
-        index++;
         var nestedLocals = new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase)
         {
             iteratorName
         };
+        index += consumedLineCount;
         CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, ref tempCounter, allowBlockTerminator: true);
         builder.AppendLine("}");
         return true;
@@ -491,6 +489,9 @@ internal static class ForRestFlowScriptCompiler
                 segment = segment.Replace("now()", "time.Now", StringComparison.OrdinalIgnoreCase);
                 segment = segment.Replace("utc_now()", "time.UtcNow", StringComparison.OrdinalIgnoreCase);
                 segment = NormalizeSendCalls(segment);
+                segment = RewriteKeywordBooleanOperators(segment);
+                segment = RewriteRangeLiterals(segment);
+                segment = RewriteCountAliases(segment);
                 segment = segment.Replace("range(", "__flow.Range(", StringComparison.OrdinalIgnoreCase);
                 segment = segment.Replace("random(", "random.Number(", StringComparison.OrdinalIgnoreCase);
                 return segment;
@@ -717,9 +718,167 @@ internal static class ForRestFlowScriptCompiler
         normalized = Regex.Replace(
             normalized,
             @"request\.send\s*\(\s*\)",
-            "await request.send()",
+            "(await request.send())",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        return normalized.Replace(awaitSendSentinel, "await request.send()", StringComparison.Ordinal);
+        return normalized.Replace(awaitSendSentinel, "(await request.send())", StringComparison.Ordinal);
+    }
+
+    private static string RewriteKeywordBooleanOperators(string expression)
+    {
+        var rewritten = Regex.Replace(
+            expression,
+            @"\band\b",
+            "&&",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        rewritten = Regex.Replace(
+            rewritten,
+            @"\bor\b",
+            "||",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        rewritten = Regex.Replace(
+            rewritten,
+            @"\bnot\s+(?=\()",
+            "!",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return Regex.Replace(
+            rewritten,
+            @"\bnot\s+(?<target>[A-Za-z_][A-Za-z0-9_\.\[\]]*)",
+            static match => $"!{match.Groups["target"].Value}",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static string RewriteRangeLiterals(string expression)
+    {
+        return Regex.Replace(
+            expression,
+            @"\[\s*(?<start>-?\d+)\s*\.\.\s*(?<end>-?\d+)\s*\]",
+            static match => $"__flow.RangeClosed({match.Groups["start"].Value}, {match.Groups["end"].Value})",
+            RegexOptions.CultureInvariant);
+    }
+
+    private static string RewriteCountAliases(string expression)
+    {
+        var rewritten = expression;
+        foreach (var alias in new[] { "length", "count", "size" })
+        {
+            rewritten = RewriteMemberFunctionAlias(rewritten, alias, "__flow.Count");
+        }
+
+        return rewritten;
+    }
+
+    private static string RewriteMemberFunctionAlias(string expression, string alias, string targetFunction)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            return string.Empty;
+        }
+
+        string pattern = $".{alias}()";
+        int searchIndex = 0;
+        while (searchIndex < expression.Length)
+        {
+            int matchIndex = expression.IndexOf(pattern, searchIndex, StringComparison.OrdinalIgnoreCase);
+            if (matchIndex < 0)
+            {
+                break;
+            }
+
+            if (!TryFindMemberAliasExpressionStart(expression, matchIndex - 1, out int startIndex))
+            {
+                searchIndex = matchIndex + pattern.Length;
+                continue;
+            }
+
+            string target = expression[startIndex..matchIndex].Trim();
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                searchIndex = matchIndex + pattern.Length;
+                continue;
+            }
+
+            string replacement = $"{targetFunction}({target})";
+            expression = string.Concat(expression.AsSpan(0, startIndex), replacement, expression.AsSpan(matchIndex + pattern.Length));
+            searchIndex = startIndex + replacement.Length;
+        }
+
+        return expression;
+    }
+
+    private static bool TryFindMemberAliasExpressionStart(string expression, int endIndex, out int startIndex)
+    {
+        startIndex = 0;
+        if (string.IsNullOrWhiteSpace(expression) || endIndex < 0 || endIndex >= expression.Length)
+        {
+            return false;
+        }
+
+        int parenthesisDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
+
+        for (int index = endIndex; index >= 0; index--)
+        {
+            char character = expression[index];
+            switch (character)
+            {
+                case ')':
+                    parenthesisDepth++;
+                    continue;
+                case '(':
+                    if (parenthesisDepth == 0)
+                    {
+                        startIndex = index + 1;
+                        return true;
+                    }
+
+                    parenthesisDepth--;
+                    continue;
+                case ']':
+                    bracketDepth++;
+                    continue;
+                case '[':
+                    if (bracketDepth == 0)
+                    {
+                        startIndex = index + 1;
+                        return true;
+                    }
+
+                    bracketDepth--;
+                    continue;
+                case '}':
+                    braceDepth++;
+                    continue;
+                case '{':
+                    if (braceDepth == 0)
+                    {
+                        startIndex = index + 1;
+                        return true;
+                    }
+
+                    braceDepth--;
+                    continue;
+            }
+
+            if (parenthesisDepth > 0 || bracketDepth > 0 || braceDepth > 0)
+            {
+                continue;
+            }
+
+            if (char.IsWhiteSpace(character) || IsExpressionBoundary(character))
+            {
+                startIndex = index + 1;
+                return true;
+            }
+        }
+
+        startIndex = 0;
+        return true;
+    }
+
+    private static bool IsExpressionBoundary(char character)
+    {
+        return character is ',' or ';' or '=' or '+' or '-' or '*' or '/' or '%' or '!' or '<' or '>' or '&' or '|' or '^' or '?' or ':';
     }
 
     private static bool TryReportMalformedLegacyHelperCall(string trimmed, int index, List<ForRestScriptDiagnostic> diagnostics)
@@ -875,15 +1034,20 @@ internal static class ForRestFlowScriptCompiler
         }
     }
 
-    private static bool TryReadBlockHeader(string trimmed, string keyword, out string expression)
+    private static bool TryReadBlockHeader(
+        IReadOnlyList<string> lines,
+        int startIndex,
+        string keyword,
+        out string expression,
+        out int consumedLineCount)
     {
         expression = string.Empty;
-        if (!trimmed.EndsWith('{'))
+        if (!TryCollectHeaderText(lines, startIndex, out string combinedHeader, out consumedLineCount))
         {
             return false;
         }
 
-        var withoutBrace = trimmed[..^1].TrimEnd();
+        var withoutBrace = combinedHeader[..^1].TrimEnd();
         string remainder;
         if (string.Equals(keyword, "else if", StringComparison.Ordinal))
         {
@@ -922,16 +1086,21 @@ internal static class ForRestFlowScriptCompiler
         return !string.IsNullOrWhiteSpace(expression);
     }
 
-    private static bool TryReadForEachHeader(string trimmed, out string iteratorName, out string sourceExpression)
+    private static bool TryReadForEachHeader(
+        IReadOnlyList<string> lines,
+        int startIndex,
+        out string iteratorName,
+        out string sourceExpression,
+        out int consumedLineCount)
     {
         iteratorName = string.Empty;
         sourceExpression = string.Empty;
-        if (!trimmed.EndsWith('{'))
+        if (!TryCollectHeaderText(lines, startIndex, out string combinedHeader, out consumedLineCount))
         {
             return false;
         }
 
-        var withoutBrace = trimmed[..^1].TrimEnd();
+        var withoutBrace = combinedHeader[..^1].TrimEnd();
         string header;
         if (withoutBrace.StartsWith("foreach", StringComparison.Ordinal))
         {
@@ -974,14 +1143,57 @@ internal static class ForRestFlowScriptCompiler
         return IsFlowIdentifier(iteratorName) && !string.IsNullOrWhiteSpace(sourceExpression);
     }
 
-    private static bool IsElseBlockHeader(string text)
+    private static bool IsElseBlockHeader(IReadOnlyList<string> lines, int startIndex, out int consumedLineCount)
     {
-        if (!text.EndsWith('{'))
+        consumedLineCount = 0;
+        if (!TryCollectHeaderText(lines, startIndex, out string combinedHeader, out consumedLineCount))
         {
             return false;
         }
 
-        return string.Equals(text[..^1].TrimEnd(), "else", StringComparison.Ordinal);
+        return string.Equals(combinedHeader[..^1].TrimEnd(), "else", StringComparison.Ordinal);
+    }
+
+    private static bool TryCollectHeaderText(
+        IReadOnlyList<string> lines,
+        int startIndex,
+        out string combinedHeader,
+        out int consumedLineCount)
+    {
+        combinedHeader = string.Empty;
+        consumedLineCount = 0;
+        if (startIndex < 0 || startIndex >= lines.Count)
+        {
+            return false;
+        }
+
+        StringBuilder builder = new();
+        for (int index = startIndex; index < lines.Count; index++)
+        {
+            string trimmed = lines[index].Trim();
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#'))
+            {
+                break;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append(' ');
+            }
+
+            builder.Append(trimmed);
+            consumedLineCount++;
+
+            if (trimmed == "{" || trimmed.EndsWith('{'))
+            {
+                combinedHeader = builder.ToString();
+                return true;
+            }
+        }
+
+        consumedLineCount = 0;
+        combinedHeader = string.Empty;
+        return false;
     }
 
     private static bool TrySplitAssignment(string source, out string name, out string expression)
@@ -1276,6 +1488,32 @@ public sealed class ForRestFlowRuntime(VariablesApi variables)
     {
         var count = Math.Max(0, endExclusive - startInclusive);
         return Enumerable.Range(startInclusive, count);
+    }
+
+    public IEnumerable<int> RangeClosed(int startInclusive, int endInclusive)
+    {
+        if (startInclusive <= endInclusive)
+        {
+            return Enumerable.Range(startInclusive, (endInclusive - startInclusive) + 1);
+        }
+
+        return Enumerable.Range(endInclusive, (startInclusive - endInclusive) + 1).Reverse();
+    }
+
+    public int Count(object? value)
+    {
+        return value switch
+        {
+            null => 0,
+            string stringValue => stringValue.Length,
+            ScriptResponseApi response => Count(response.Json() ?? response.Body),
+            JsonArray jsonArray => jsonArray.Count,
+            JsonObject jsonObject => jsonObject.Count,
+            JsonNode jsonNode => jsonNode.ToJsonString().Length,
+            ICollection collection => collection.Count,
+            IEnumerable enumerable => enumerable.Cast<object?>().Count(),
+            _ => value.ToString()?.Length ?? 0,
+        };
     }
 
     public string S(object? value)
