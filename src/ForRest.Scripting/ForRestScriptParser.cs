@@ -25,9 +25,11 @@ public sealed class ForRestScriptParser
         var multipartValues = new List<ForRestScriptNamedValue>();
         var extractions = new List<ForRestScriptExtraction>();
         var tests = new List<ForRestScriptAssertion>();
+        var flowLines = new List<string>();
         ForRestScriptBodySection? body = null;
 
         var index = 0;
+        var rawFlowDepth = 0;
         while (index < lines.Length)
         {
             var line = lines[index];
@@ -38,65 +40,92 @@ public sealed class ForRestScriptParser
                 continue;
             }
 
+            if (rawFlowDepth > 0)
+            {
+                flowLines.Add(line);
+                rawFlowDepth = Math.Max(0, rawFlowDepth + CountBraceDelta(line));
+                index++;
+                continue;
+            }
+
             if (TryParseBody(lines, ref index, diagnostics, out var parsedBody))
             {
                 body = parsedBody;
                 continue;
             }
 
-            if (!trimmed.EndsWith('{'))
+            if (TryParseFlow(lines, ref index, diagnostics, out var parsedFlow))
             {
-                diagnostics.Add(CreateDiagnostic($"Expected a section opening, but found '{trimmed}'.", index + 1, line));
+                AppendFlowLines(flowLines, parsedFlow);
+                continue;
+            }
+
+            if (TryGetKnownSectionName(trimmed, out var sectionName))
+            {
+                index++;
+
+                switch (sectionName)
+                {
+                    case "meta":
+                        ParseKeyValueSection(lines, ref index, meta, diagnostics, sectionName);
+                        break;
+                    case "vars":
+                        ParseVariablesSection(lines, ref index, variables, diagnostics);
+                        break;
+                    case "request":
+                        ParseKeyValueSection(lines, ref index, request, diagnostics, sectionName);
+                        break;
+                    case "auth":
+                        ParseKeyValueSection(lines, ref index, auth, diagnostics, sectionName);
+                        break;
+                    case "query":
+                        ParseNamedValueSection(lines, ref index, query, diagnostics, sectionName);
+                        break;
+                    case "headers":
+                        ParseNamedValueSection(lines, ref index, headers, diagnostics, sectionName);
+                        break;
+                    case "form":
+                        ParseNamedValueSection(lines, ref index, formValues, diagnostics, sectionName);
+                        break;
+                    case "multipart":
+                        ParseNamedValueSection(lines, ref index, multipartValues, diagnostics, sectionName);
+                        break;
+                    case "extract":
+                        ParseExtractionSection(lines, ref index, extractions, diagnostics);
+                        break;
+                    case "tests":
+                        ParseTestsSection(lines, ref index, tests, diagnostics);
+                        break;
+                    case "repeat":
+                        ParseKeyValueSection(lines, ref index, repeat, diagnostics, sectionName);
+                        break;
+                    case "retry":
+                        ParseKeyValueSection(lines, ref index, retry, diagnostics, sectionName);
+                        break;
+                }
+
+                continue;
+            }
+
+            if (TryParseTopLevelMeta(trimmed, index + 1, line, meta, diagnostics)
+                || TryParseTopLevelRequest(trimmed, index + 1, line, request, diagnostics)
+                || TryParseTopLevelVariable(trimmed, index + 1, line, variables, diagnostics)
+                || TryParseTopLevelNamedValue(trimmed, index + 1, line, "header", headers, diagnostics)
+                || TryParseTopLevelNamedValue(trimmed, index + 1, line, "query", query, diagnostics)
+                || TryParseTopLevelNamedValue(trimmed, index + 1, line, "form", formValues, diagnostics)
+                || TryParseTopLevelNamedValue(trimmed, index + 1, line, "multipart", multipartValues, diagnostics)
+                || TryParseTopLevelExtraction(trimmed, index + 1, line, extractions, diagnostics)
+                || TryParseTopLevelAssertion(trimmed, index + 1, line, tests, diagnostics)
+                || TryParseTopLevelKeyValue(trimmed, index + 1, line, "repeat", repeat, diagnostics)
+                || TryParseTopLevelKeyValue(trimmed, index + 1, line, "retry", retry, diagnostics))
+            {
                 index++;
                 continue;
             }
 
-            var sectionName = trimmed[..^1].Trim().ToLowerInvariant();
+            flowLines.Add(line);
+            rawFlowDepth = Math.Max(0, CountBraceDelta(line));
             index++;
-
-            switch (sectionName)
-            {
-                case "meta":
-                    ParseKeyValueSection(lines, ref index, meta, diagnostics, sectionName);
-                    break;
-                case "vars":
-                    ParseVariablesSection(lines, ref index, variables, diagnostics);
-                    break;
-                case "request":
-                    ParseKeyValueSection(lines, ref index, request, diagnostics, sectionName);
-                    break;
-                case "auth":
-                    ParseKeyValueSection(lines, ref index, auth, diagnostics, sectionName);
-                    break;
-                case "query":
-                    ParseNamedValueSection(lines, ref index, query, diagnostics, sectionName);
-                    break;
-                case "headers":
-                    ParseNamedValueSection(lines, ref index, headers, diagnostics, sectionName);
-                    break;
-                case "form":
-                    ParseNamedValueSection(lines, ref index, formValues, diagnostics, sectionName);
-                    break;
-                case "multipart":
-                    ParseNamedValueSection(lines, ref index, multipartValues, diagnostics, sectionName);
-                    break;
-                case "extract":
-                    ParseExtractionSection(lines, ref index, extractions, diagnostics);
-                    break;
-                case "tests":
-                    ParseTestsSection(lines, ref index, tests, diagnostics);
-                    break;
-                case "repeat":
-                    ParseKeyValueSection(lines, ref index, repeat, diagnostics, sectionName);
-                    break;
-                case "retry":
-                    ParseKeyValueSection(lines, ref index, retry, diagnostics, sectionName);
-                    break;
-                default:
-                    diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"Unknown section '{sectionName}'.", index, 1));
-                    SkipSection(lines, ref index);
-                    break;
-            }
         }
 
         if (diagnostics.Any(static item => item.Severity == ForRestScriptDiagnosticSeverity.Error))
@@ -117,6 +146,7 @@ public sealed class ForRestScriptParser
                 FormValues = formValues,
                 MultipartValues = multipartValues,
                 Extractions = extractions,
+                Flow = string.Join(Environment.NewLine, flowLines).Trim(),
                 Tests = tests,
                 Repeat = repeat,
                 Retry = retry,
@@ -128,6 +158,16 @@ public sealed class ForRestScriptParser
 
     #region Private Methods
 
+    private static void AppendFlowLines(List<string> flowLines, string? flow)
+    {
+        if (string.IsNullOrWhiteSpace(flow))
+        {
+            return;
+        }
+
+        flowLines.AddRange(Normalize(flow).Split('\n'));
+    }
+
     private static string Normalize(string source)
     {
         return (source ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
@@ -136,6 +176,249 @@ public sealed class ForRestScriptParser
     private static bool IsComment(string trimmedLine)
     {
         return trimmedLine.StartsWith('#');
+    }
+
+    private static bool TryGetKnownSectionName(string trimmed, out string sectionName)
+    {
+        sectionName = string.Empty;
+        if (!trimmed.EndsWith('{'))
+        {
+            return false;
+        }
+
+        string candidate = trimmed[..^1].Trim().ToLowerInvariant();
+        if (candidate is not ("meta" or "vars" or "request" or "auth" or "query" or "headers" or "form" or "multipart" or "extract" or "tests" or "repeat" or "retry"))
+        {
+            return false;
+        }
+
+        sectionName = candidate;
+        return true;
+    }
+
+    private static bool TryParseTopLevelMeta(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        Dictionary<string, ForRestScriptValueExpression> meta,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        return TryParseTopLevelDirective(trimmed, lineNumber, sourceLine, "name", "name", meta, diagnostics);
+    }
+
+    private static bool TryParseTopLevelRequest(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        Dictionary<string, ForRestScriptValueExpression> request,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        foreach ((string Alias, string Key) mapping in new[]
+                 {
+                     ("method", "method"),
+                     ("url", "url"),
+                     ("timeout", "timeout"),
+                     ("max_send_iterations", "max_send_iterations"),
+                     ("redirects", "redirects"),
+                     ("ssl", "ssl"),
+                     ("history", "history"),
+                     ("content_type", "content_type"),
+                     ("request.method", "method"),
+                     ("request.url", "url"),
+                     ("request.timeout", "timeout"),
+                     ("request.max_send_iterations", "max_send_iterations"),
+                     ("request.redirects", "redirects"),
+                     ("request.ssl", "ssl"),
+                     ("request.history", "history"),
+                     ("request.content_type", "content_type"),
+                 })
+        {
+            if (TryParseTopLevelDirective(trimmed, lineNumber, sourceLine, mapping.Alias, mapping.Key, request, diagnostics))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryParseTopLevelDirective(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        string alias,
+        string key,
+        Dictionary<string, ForRestScriptValueExpression> target,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!TryReadDirectiveValue(trimmed, alias, out var rawValue))
+        {
+            return false;
+        }
+
+        if (!TryParseExpression(rawValue, out var expression))
+        {
+            diagnostics.Add(CreateDiagnostic($"Could not parse the value '{rawValue}' for '{alias}'.", lineNumber, sourceLine));
+            return true;
+        }
+
+        target[key] = expression!;
+        return true;
+    }
+
+    private static bool TryParseTopLevelVariable(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        List<ForRestScriptVariableDeclaration> variables,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!TryParseVariableDeclaration(trimmed, out var declaration, out var errorMessage))
+        {
+            return false;
+        }
+
+        if (declaration is null)
+        {
+            diagnostics.Add(CreateDiagnostic(errorMessage ?? "Invalid variable declaration.", lineNumber, sourceLine));
+            return true;
+        }
+
+        variables.Add(declaration);
+        return true;
+    }
+
+    private static bool TryParseTopLevelNamedValue(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        string keyword,
+        List<ForRestScriptNamedValue> target,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!TryParseNamedValueDirective(trimmed, keyword, out var value, out var errorMessage))
+        {
+            return false;
+        }
+
+        if (value is null)
+        {
+            diagnostics.Add(CreateDiagnostic(errorMessage ?? $"Invalid '{keyword}' directive.", lineNumber, sourceLine));
+            return true;
+        }
+
+        target.Add(value);
+        return true;
+    }
+
+    private static bool TryParseTopLevelExtraction(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        List<ForRestScriptExtraction> extractions,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!trimmed.StartsWith("extract ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!TryParseExtractionDirective(trimmed[8..].Trim(), out var extraction, out var errorMessage))
+        {
+            diagnostics.Add(CreateDiagnostic(errorMessage ?? "Invalid extract directive.", lineNumber, sourceLine));
+            return true;
+        }
+
+        extractions.Add(extraction!);
+        return true;
+    }
+
+    private static bool TryParseTopLevelAssertion(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        List<ForRestScriptAssertion> tests,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!trimmed.StartsWith("expect ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string assertionText = trimmed[7..].Trim();
+        if (TryParseStatusAssertion(assertionText, out var assertion)
+            || TryParseBodyAssertion(assertionText, out assertion)
+            || TryParseHeaderAssertion(assertionText, out assertion)
+            || TryParseJsonAssertion(assertionText, out assertion))
+        {
+            tests.Add(assertion!);
+            return true;
+        }
+
+        diagnostics.Add(CreateDiagnostic("Could not parse the expectation.", lineNumber, sourceLine));
+        return true;
+    }
+
+    private static bool TryParseTopLevelKeyValue(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        string keyword,
+        Dictionary<string, ForRestScriptValueExpression> target,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!trimmed.StartsWith(keyword + " ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string remainder = trimmed[(keyword.Length + 1)..].Trim();
+        int separatorIndex = remainder.IndexOf('=');
+        if (separatorIndex < 0)
+        {
+            diagnostics.Add(CreateDiagnostic($"The '{keyword}' directive must use '<name> = <value>'.", lineNumber, sourceLine));
+            return true;
+        }
+
+        string key = remainder[..separatorIndex].Trim();
+        string rawValue = TrimOptionalTerminator(remainder[(separatorIndex + 1)..]);
+        if (!TryParseExpression(rawValue, out var expression))
+        {
+            diagnostics.Add(CreateDiagnostic($"Could not parse the value '{rawValue}' for '{keyword} {key}'.", lineNumber, sourceLine));
+            return true;
+        }
+
+        target[key] = expression!;
+        return true;
+    }
+
+    private static bool TryReadDirectiveValue(string trimmed, string directive, out string rawValue)
+    {
+        rawValue = string.Empty;
+        if (!trimmed.StartsWith(directive, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string remainder = trimmed[directive.Length..];
+        if (remainder.Length == 0)
+        {
+            return false;
+        }
+
+        char first = remainder[0];
+        if (!char.IsWhiteSpace(first) && first != '=')
+        {
+            return false;
+        }
+
+        rawValue = TrimOptionalTerminator(remainder);
+        if (rawValue.StartsWith("="))
+        {
+            rawValue = TrimOptionalTerminator(rawValue[1..]);
+        }
+
+        return !string.IsNullOrWhiteSpace(rawValue);
     }
 
     private static bool TryParseBody(
@@ -236,7 +519,7 @@ public sealed class ForRestScriptParser
             }
 
             var key = trimmed[..separatorIndex].Trim();
-            var rawValue = trimmed[(separatorIndex + 1)..].Trim();
+            var rawValue = TrimOptionalTerminator(trimmed[(separatorIndex + 1)..]);
             if (!TryParseExpression(rawValue, out var expression))
             {
                 diagnostics.Add(CreateDiagnostic($"Could not parse the value '{rawValue}' inside '{sectionName}'.", index + 1, line));
@@ -281,24 +564,14 @@ public sealed class ForRestScriptParser
                 continue;
             }
 
-            var left = trimmed[..separatorIndex].Trim();
-            var rawValue = trimmed[(separatorIndex + 1)..].Trim();
-            var leftParts = left.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (leftParts.Length != 2 || !TryParseVariableScope(leftParts[0], out var scope))
+            if (!TryParseVariableDeclaration(trimmed, out var declaration, out var errorMessage))
             {
-                diagnostics.Add(CreateDiagnostic("Variable declarations must start with 'request' or 'runtime'.", index + 1, line));
+                diagnostics.Add(CreateDiagnostic(errorMessage ?? "Variable declarations must start with 'request' or 'runtime'.", index + 1, line));
                 index++;
                 continue;
             }
 
-            if (!TryParseExpression(rawValue, out var expression))
-            {
-                diagnostics.Add(CreateDiagnostic($"Could not parse the value '{rawValue}' for variable '{leftParts[1]}'.", index + 1, line));
-                index++;
-                continue;
-            }
-
-            variables.Add(new(scope, leftParts[1], expression!));
+            variables.Add(declaration!);
             index++;
         }
 
@@ -336,20 +609,14 @@ public sealed class ForRestScriptParser
                 continue;
             }
 
-            var rawKey = trimmed[..separatorIndex].Trim();
-            var rawValue = trimmed[(separatorIndex + 1)..].Trim();
-            var key = TryParseQuotedString(rawKey, out var stringKey)
-                ? stringKey!
-                : rawKey;
-
-            if (!TryParseExpression(rawValue, out var expression))
+            if (!TryParseNamedValueDirective(trimmed, string.Empty, out var namedValue, out var errorMessage))
             {
-                diagnostics.Add(CreateDiagnostic($"Could not parse the value '{rawValue}' for '{key}'.", index + 1, line));
+                diagnostics.Add(CreateDiagnostic(errorMessage ?? $"Could not parse the value for '{sectionName}'.", index + 1, line));
                 index++;
                 continue;
             }
 
-            values.Add(new(key, expression!));
+            values.Add(namedValue!);
             index++;
         }
 
@@ -386,36 +653,145 @@ public sealed class ForRestScriptParser
                 continue;
             }
 
-            var left = trimmed[..separatorIndex].Trim();
-            var right = trimmed[(separatorIndex + 1)..].Trim();
-            var leftParts = left.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (leftParts.Length != 2 || !TryParseExtractionScope(leftParts[0], out var targetScope))
+            if (!TryParseExtractionDirective(trimmed, out var extraction, out var errorMessage))
             {
-                diagnostics.Add(CreateDiagnostic("Extraction targets must use 'runtime' or 'request'.", index + 1, line));
+                diagnostics.Add(CreateDiagnostic(errorMessage ?? "Invalid extraction directive.", index + 1, line));
                 index++;
                 continue;
             }
 
-            if (!right.StartsWith("json ", StringComparison.OrdinalIgnoreCase))
-            {
-                diagnostics.Add(CreateDiagnostic("Extraction selectors currently support only the 'json' selector type.", index + 1, line));
-                index++;
-                continue;
-            }
-
-            var rawSelector = right[5..].Trim();
-            if (!TryParseQuotedString(rawSelector, out var selector))
-            {
-                diagnostics.Add(CreateDiagnostic("Extraction selectors must be quoted JSON selector strings.", index + 1, line));
-                index++;
-                continue;
-            }
-
-            extractions.Add(new(targetScope, leftParts[1], selector!));
+            extractions.Add(extraction!);
             index++;
         }
 
         diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The 'extract' section is missing a closing '}'.", index, 1));
+    }
+
+    private static bool TryParseVariableDeclaration(
+        string trimmed,
+        out ForRestScriptVariableDeclaration? declaration,
+        out string? errorMessage)
+    {
+        declaration = null;
+        errorMessage = null;
+        int separatorIndex = trimmed.IndexOf('=');
+        if (separatorIndex < 0)
+        {
+            return false;
+        }
+
+        string left = trimmed[..separatorIndex].Trim();
+        string rawValue = TrimOptionalTerminator(trimmed[(separatorIndex + 1)..]);
+        string[] leftParts = left.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (leftParts.Length != 2 || !TryParseVariableScope(leftParts[0], out var scope))
+        {
+            return false;
+        }
+
+        if (!IsFlowSafeVariableName(leftParts[1]))
+        {
+            errorMessage = $"Variable '{leftParts[1]}' is not a valid ForRest identifier. Use letters, numbers, and underscores only.";
+            return true;
+        }
+
+        if (!TryParseExpression(rawValue, out var expression))
+        {
+            errorMessage = $"Could not parse the value '{rawValue}' for variable '{leftParts[1]}'.";
+            return true;
+        }
+
+        declaration = new(scope, leftParts[1], expression!);
+        return true;
+    }
+
+    private static bool TryParseNamedValueDirective(
+        string trimmed,
+        string keyword,
+        out ForRestScriptNamedValue? namedValue,
+        out string? errorMessage)
+    {
+        namedValue = null;
+        errorMessage = null;
+
+        string remainder = trimmed;
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            if (!trimmed.StartsWith(keyword + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            remainder = trimmed[(keyword.Length + 1)..].Trim();
+        }
+
+        int separatorIndex = remainder.IndexOf('=');
+        if (separatorIndex < 0)
+        {
+            errorMessage = $"Entries in '{keyword}' must use '<name> = <value>'.";
+            return true;
+        }
+
+        string rawKey = remainder[..separatorIndex].Trim();
+        string rawValue = TrimOptionalTerminator(remainder[(separatorIndex + 1)..]);
+        string key = TryParseQuotedString(rawKey, out var stringKey)
+            ? stringKey!
+            : rawKey;
+
+        if (!TryParseExpression(rawValue, out var expression))
+        {
+            errorMessage = $"Could not parse the value '{rawValue}' for '{key}'.";
+            return true;
+        }
+
+        namedValue = new(key, expression!);
+        return true;
+    }
+
+    private static bool TryParseExtractionDirective(
+        string trimmed,
+        out ForRestScriptExtraction? extraction,
+        out string? errorMessage)
+    {
+        extraction = null;
+        errorMessage = null;
+
+        int separatorIndex = trimmed.IndexOf('=');
+        if (separatorIndex < 0)
+        {
+            errorMessage = "Extraction declarations must use '<scope> <name> = json \"$.path\"'.";
+            return false;
+        }
+
+        string left = trimmed[..separatorIndex].Trim();
+        string right = TrimOptionalTerminator(trimmed[(separatorIndex + 1)..]);
+        string[] leftParts = left.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (leftParts.Length != 2 || !TryParseExtractionScope(leftParts[0], out var targetScope))
+        {
+            errorMessage = "Extraction targets must use 'runtime' or 'request'.";
+            return false;
+        }
+
+        if (!IsFlowSafeVariableName(leftParts[1]))
+        {
+            errorMessage = $"Variable '{leftParts[1]}' is not a valid ForRest identifier. Use letters, numbers, and underscores only.";
+            return false;
+        }
+
+        if (!right.StartsWith("json ", StringComparison.OrdinalIgnoreCase))
+        {
+            errorMessage = "Extraction selectors currently support only the 'json' selector type.";
+            return false;
+        }
+
+        string rawSelector = TrimOptionalTerminator(right[5..]);
+        if (!TryParseQuotedString(rawSelector, out var selector))
+        {
+            errorMessage = "Extraction selectors must be quoted JSON selector strings.";
+            return false;
+        }
+
+        extraction = new(targetScope, leftParts[1], selector!);
+        return true;
     }
 
     private static void ParseTestsSection(
@@ -455,6 +831,52 @@ public sealed class ForRestScriptParser
         }
 
         diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The 'tests' section is missing a closing '}'.", index, 1));
+    }
+
+    private static bool TryParseFlow(
+        IReadOnlyList<string> lines,
+        ref int index,
+        List<ForRestScriptDiagnostic> diagnostics,
+        out string? flow)
+    {
+        flow = null;
+        var line = lines[index];
+        var trimmed = line.Trim();
+        if (!string.Equals(trimmed, "flow {", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var builder = new StringBuilder();
+        var depth = 1;
+        index++;
+
+        while (index < lines.Count)
+        {
+            var currentLine = lines[index];
+            var currentTrimmed = currentLine.Trim();
+            var braceDelta = CountBraceDelta(currentLine);
+
+            if (depth == 1 && braceDelta == -1 && currentTrimmed == "}")
+            {
+                index++;
+                flow = builder.ToString().TrimEnd();
+                return true;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.Append(currentLine);
+            depth += braceDelta;
+            index++;
+        }
+
+        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The 'flow' section is missing a closing '}'.", index, 1));
+        flow = builder.ToString().TrimEnd();
+        return true;
     }
 
     private static bool TryParseStatusAssertion(string trimmedLine, out ForRestScriptAssertion? assertion)
@@ -559,62 +981,50 @@ public sealed class ForRestScriptParser
     {
         expressionText = string.Empty;
         message = null;
-        var lastQuoteIndex = text.LastIndexOf('"');
-        if (lastQuoteIndex < 0)
+        text = TrimOptionalTerminator(text);
+        if (!TryReadTrailingQuotedString(text, out expressionText, out message))
         {
             return false;
         }
-
-        var startQuoteIndex = text.LastIndexOf('"', lastQuoteIndex - 1);
-        if (startQuoteIndex < 0)
-        {
-            return false;
-        }
-
-        var rawMessage = text[startQuoteIndex..];
-        if (!TryParseQuotedString(rawMessage, out message))
-        {
-            return false;
-        }
-
-        expressionText = text[..startQuoteIndex].Trim();
-        return !string.IsNullOrWhiteSpace(expressionText);
+        return true;
     }
 
     private static bool TryReadQuotedToken(string text, out string value, out string remainder)
     {
+        return TryReadQuotedToken(text, out value, out remainder, out _);
+    }
+
+    private static bool TryReadQuotedToken(string text, out string value, out string remainder, out int consumedLength)
+    {
         value = string.Empty;
         remainder = string.Empty;
-        if (!text.StartsWith('"'))
+        consumedLength = 0;
+        if (string.IsNullOrWhiteSpace(text))
         {
             return false;
         }
 
-        var escaped = false;
-        for (var index = 1; index < text.Length; index++)
+        text = text.TrimStart();
+        if (!IsSupportedQuotedStringStart(text[0]))
         {
-            var character = text[index];
-            if (character == '"' && !escaped)
-            {
-                var raw = text[..(index + 1)];
-                if (!TryParseQuotedString(raw, out var parsed))
-                {
-                    return false;
-                }
-
-                value = parsed!;
-                remainder = index + 1 < text.Length ? text[(index + 1)..] : string.Empty;
-                return true;
-            }
-
-            escaped = character == '\\' && !escaped;
-            if (character != '\\')
-            {
-                escaped = false;
-            }
+            return false;
         }
 
-        return false;
+        if (!TryFindQuotedTokenEnd(text, 0, out int endIndex))
+        {
+            return false;
+        }
+
+        var raw = text[..(endIndex + 1)];
+        if (!TryParseQuotedString(raw, out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed!;
+        remainder = endIndex + 1 < text.Length ? text[(endIndex + 1)..] : string.Empty;
+        consumedLength = endIndex + 1;
+        return true;
     }
 
     private static bool TrySplitOperator(
@@ -686,7 +1096,7 @@ public sealed class ForRestScriptParser
     private static bool TryParseExpression(string rawValue, out ForRestScriptValueExpression? expression)
     {
         expression = null;
-        var trimmed = rawValue.Trim();
+        var trimmed = TrimOptionalTerminator(rawValue);
         if (TryParseQuotedString(trimmed, out var stringValue))
         {
             expression = new ForRestScriptStringExpression(stringValue!);
@@ -726,13 +1136,21 @@ public sealed class ForRestScriptParser
             return true;
         }
 
-        if (Regex.IsMatch(trimmed, @"^[A-Za-z_][A-Za-z0-9_\-\.]*$"))
+        if (Regex.IsMatch(trimmed, @"^[A-Za-z_][A-Za-z0-9_]*$"))
         {
             expression = new ForRestScriptIdentifierExpression(trimmed);
             return true;
         }
 
         return false;
+    }
+
+    private static string TrimOptionalTerminator(string text)
+    {
+        var trimmed = (text ?? string.Empty).Trim();
+        return trimmed.EndsWith(';')
+            ? trimmed[..^1].TrimEnd()
+            : trimmed;
     }
 
     private static List<string> SplitArguments(string rawArguments)
@@ -747,15 +1165,23 @@ public sealed class ForRestScriptParser
         var depth = 0;
         var inString = false;
         var escaped = false;
+        var stringDelimiter = '\0';
 
         foreach (var character in rawArguments)
         {
-            if (character == '"' && !escaped)
+            if (inString)
             {
-                inString = !inString;
+                if (IsMatchingQuotedStringDelimiter(stringDelimiter, character) && !escaped)
+                {
+                    inString = false;
+                }
             }
-
-            if (!inString)
+            else if (IsSupportedQuotedStringStart(character))
+            {
+                inString = true;
+                stringDelimiter = character;
+            }
+            else
             {
                 if (character == '(')
                 {
@@ -793,20 +1219,198 @@ public sealed class ForRestScriptParser
     private static bool TryParseQuotedString(string rawValue, out string? value)
     {
         value = null;
-        if (!rawValue.StartsWith('"') || !rawValue.EndsWith('"'))
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return false;
+        }
+
+        string normalized = NormalizeQuotedStringLiteral(rawValue);
+        if (!normalized.StartsWith('"') || !normalized.EndsWith('"'))
         {
             return false;
         }
 
         try
         {
-            value = JsonSerializer.Deserialize<string>(rawValue);
+            value = JsonSerializer.Deserialize<string>(normalized);
             return value is not null;
         }
         catch (JsonException)
         {
             return false;
         }
+    }
+
+    private static string NormalizeQuotedStringLiteral(string rawValue)
+    {
+        if (string.IsNullOrEmpty(rawValue))
+        {
+            return string.Empty;
+        }
+
+        char[] characters = rawValue.ToCharArray();
+        if (IsSupportedDoubleQuoteDelimiter(characters[0]))
+        {
+            characters[0] = '"';
+        }
+
+        int lastIndex = characters.Length - 1;
+        if (lastIndex >= 0 && IsSupportedDoubleQuoteDelimiter(characters[lastIndex]))
+        {
+            characters[lastIndex] = '"';
+        }
+
+        return new string(characters);
+    }
+
+    private static bool IsSupportedQuotedStringStart(char character)
+    {
+        return IsSupportedDoubleQuoteDelimiter(character);
+    }
+
+    private static bool IsSupportedDoubleQuoteDelimiter(char character)
+    {
+        return character is '"' or '\u201C' or '\u201D' or '\u201E' or '\u00AB' or '\u00BB';
+    }
+
+    private static bool IsMatchingQuotedStringDelimiter(char openingDelimiter, char candidate)
+    {
+        return openingDelimiter switch
+        {
+            '"' or '\u201C' or '\u201D' or '\u201E' or '\u00AB' or '\u00BB' => IsSupportedDoubleQuoteDelimiter(candidate),
+            _ => candidate == openingDelimiter,
+        };
+    }
+
+    private static bool TryReadTrailingQuotedString(string text, out string expressionText, out string? value)
+    {
+        expressionText = string.Empty;
+        value = null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (!IsSupportedQuotedStringStart(text[index]))
+            {
+                continue;
+            }
+
+            if (!TryReadQuotedToken(text[index..], out var parsedValue, out var remainder, out var consumedLength))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(remainder))
+            {
+                index += Math.Max(consumedLength - 1, 0);
+                continue;
+            }
+
+            expressionText = text[..index].Trim();
+            if (string.IsNullOrWhiteSpace(expressionText))
+            {
+                return false;
+            }
+
+            value = parsedValue;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryFindQuotedTokenEnd(string text, int startIndex, out int endIndex)
+    {
+        endIndex = -1;
+        if (string.IsNullOrWhiteSpace(text) ||
+            startIndex < 0 ||
+            startIndex >= text.Length ||
+            !IsSupportedQuotedStringStart(text[startIndex]))
+        {
+            return false;
+        }
+
+        char openingDelimiter = text[startIndex];
+        bool escaped = false;
+        for (int index = startIndex + 1; index < text.Length; index++)
+        {
+            char character = text[index];
+            if (IsMatchingQuotedStringDelimiter(openingDelimiter, character) && !escaped)
+            {
+                endIndex = index;
+                return true;
+            }
+
+            if (character == '\\' && !escaped)
+            {
+                escaped = true;
+            }
+            else
+            {
+                escaped = false;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsFlowSafeVariableName(string value)
+    {
+        return Regex.IsMatch(value ?? string.Empty, @"^[A-Za-z_][A-Za-z0-9_]*$");
+    }
+
+    private static int CountBraceDelta(string line)
+    {
+        var delta = 0;
+        var inString = false;
+        var escaped = false;
+        var stringDelimiter = '\0';
+
+        foreach (var character in line)
+        {
+            if (character == '#' && !inString)
+            {
+                break;
+            }
+
+            if (inString)
+            {
+                if (IsMatchingQuotedStringDelimiter(stringDelimiter, character) && !escaped)
+                {
+                    inString = false;
+                }
+            }
+            else if (IsSupportedQuotedStringStart(character) || character == '\'')
+            {
+                inString = true;
+                stringDelimiter = character;
+            }
+            else
+            {
+                if (character == '{')
+                {
+                    delta++;
+                }
+                else if (character == '}')
+                {
+                    delta--;
+                }
+            }
+
+            if (character == '\\' && !escaped)
+            {
+                escaped = true;
+            }
+            else
+            {
+                escaped = false;
+            }
+        }
+
+        return delta;
     }
 
     private static bool TryParseVariableScope(string rawValue, out ForRestScriptVariableScope scope)

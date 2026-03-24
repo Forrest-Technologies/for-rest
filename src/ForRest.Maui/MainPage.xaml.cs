@@ -1,4 +1,5 @@
 using ForRest.Maui.ViewModels;
+using ForRest.Maui.Services;
 #if WINDOWS
 using System.Reflection;
 using Microsoft.UI.Input;
@@ -119,7 +120,40 @@ public partial class MainPage : ContentPage
 		}
 
 		_isInitialized = true;
-		await ViewModel.InitializeAsync();
+		try
+		{
+			await ViewModel.InitializeAsync();
+			AppLaunchGuard.MarkLaunchCompleted();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("MainPage initialization failed.", exception);
+			Content = new ScrollView
+			{
+				Content = new VerticalStackLayout
+				{
+					Padding = new Microsoft.Maui.Thickness(24),
+					Spacing = 12,
+					Children =
+					{
+						new Label
+						{
+							Text = "ForRest failed during startup.",
+							FontAttributes = FontAttributes.Bold,
+							FontSize = 20
+						},
+						new Label
+						{
+							Text = $"Diagnostics were written to:{Environment.NewLine}{AppLaunchGuard.StartupLogPath}"
+						},
+						new Label
+						{
+							Text = exception.ToString()
+						}
+					}
+				}
+			};
+		}
 	}
 
 	private static void SetSplitterActive(BoxView splitterLine, bool isActive)

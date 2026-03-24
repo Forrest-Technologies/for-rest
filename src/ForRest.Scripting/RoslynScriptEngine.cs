@@ -10,13 +10,17 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             typeof(Enumerable).Assembly,
             typeof(JsonNode).Assembly,
             typeof(Microsoft.CSharp.RuntimeBinder.Binder).Assembly,
+            typeof(ForRestFlowRuntime).Assembly,
             typeof(PreparedRequest).Assembly,
             typeof(VariableDefinition).Assembly)
         .AddImports(
             "System",
             "System.Linq",
             "System.Collections.Generic",
+            "System.Text",
             "System.Text.Json.Nodes",
+            "System.Text.RegularExpressions",
+            "ForRest.Scripting",
             "ForRest.Models");
 
     #endregion
@@ -44,11 +48,6 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         try
         {
             responseApi = new ScriptResponseApi(request.Response);
-            requestApi = new ScriptRequestApi(
-                request.PreparedRequest,
-                responseApi,
-                request.SendAsync,
-                request.MaxSendIterations);
             variablesApi = new VariablesApi(
             [
                 .. request.GlobalVariables,
@@ -57,6 +56,12 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 .. request.RequestVariables,
                 .. request.RuntimeVariables,
             ]);
+            requestApi = new ScriptRequestApi(
+                request.PreparedRequest,
+                responseApi,
+                variablesApi,
+                request.SendAsync,
+                request.MaxSendIterations);
             globals = new ScriptGlobals
             {
                 request = requestApi,
@@ -66,6 +71,9 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 console = consoleApi,
                 time = new TimeApi(),
                 json = new JsonApi(),
+                encoding = new EncodingApi(),
+                crypto = new CryptoApi(),
+                regex = new RegexApi(),
                 random = new RandomApi(),
                 workspace = new WorkspaceApi(request.Workspace),
             };
@@ -108,6 +116,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             {
                 PreparedRequest = originalRequest.PreparedRequest,
                 Response = originalRequest.Response,
+                SendCount = requestApi?.SendCount ?? 0,
                 RuntimeVariables =
                 [
                     .. originalRequest.RuntimeVariables.Where(static item => item.Scope == VariableScope.Runtime),
@@ -126,8 +135,9 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
 
         return new()
         {
-            PreparedRequest = requestApi.ToPreparedRequest(),
+            PreparedRequest = BuildPreparedRequestOrFallback(originalRequest.PreparedRequest, requestApi),
             Response = responseApi?.Snapshot ?? originalRequest.Response,
+            SendCount = requestApi.SendCount,
             RuntimeVariables =
             [
                 .. variablesApi.All().Where(static item => item.Scope == VariableScope.Runtime),
@@ -142,6 +152,18 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             ],
             ErrorMessage = errorMessage,
         };
+    }
+
+    private static PreparedRequest BuildPreparedRequestOrFallback(PreparedRequest fallback, ScriptRequestApi requestApi)
+    {
+        try
+        {
+            return requestApi.ToPreparedRequest();
+        }
+        catch (InvalidOperationException)
+        {
+            return fallback;
+        }
     }
 
     #endregion

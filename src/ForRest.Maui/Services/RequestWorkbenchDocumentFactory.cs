@@ -23,7 +23,7 @@ public static class RequestWorkbenchDocumentFactory
             Summary = string.IsNullOrWhiteSpace(summary) ? "New request ready to edit and send" : summary,
             Location = location,
             RequestSource = BuildRequestEditorText(title, method, target),
-            PreRequestScript = BuildScriptEditorText(title),
+            PreRequestScript = string.Empty,
         };
     }
 
@@ -94,49 +94,50 @@ public static class RequestWorkbenchDocumentFactory
 
     private static string BuildRequestEditorText(string title, string method, string target)
     {
+        string escapedTitle = EscapeForForRestString(title);
+        string escapedTarget = EscapeForForRestString(target);
+
         return string.Join(
             Environment.NewLine,
             [
-                "meta {",
-                $"  name = \"{title}\"",
+                $"name \"{escapedTitle}\"",
+                $"method {method}",
+                $"url \"{escapedTarget}\"",
+                "timeout 15000",
+                "max_send_iterations 3",
+                "redirects true",
+                "ssl true",
+                "history true",
+                string.Empty,
+                "runtime trace_id = guid()",
+                string.Empty,
+                "header \"Accept\" = \"application/json\"",
+                "header \"X-Workspace\" = \"{{workspace_name}}\"",
+                "header \"X-Environment\" = \"{{environment_name}}\"",
+                "header \"X-Correlation-Id\" = \"{{trace_id}}\"",
+                string.Empty,
+                "# Write ForRest code here. request.send() returns the latest response snapshot.",
+                "request.headers[\"X-Request-Source\"] = \"maui\"",
+                "let sent = request.send()",
+                string.Empty,
+                "if sent.status == 200 {",
+                "  runtime last_status = sent.status",
+                "  foreach step in range(0, 2) {",
+                "    log step",
+                "  }",
+                "} else {",
+                "  warn sent.status",
                 "}",
                 string.Empty,
-                "vars {",
-                "  runtime trace_id = guid()",
-                "}",
-                string.Empty,
-                "request {",
-                $"  method = {method}",
-                $"  url = \"{target}\"",
-                "  timeout = 15000",
-                "  max_send_iterations = 3",
-                "  redirects = true",
-                "  ssl = true",
-                "  history = true",
-                "}",
-                string.Empty,
-                "headers {",
-                "  Accept = \"application/json\"",
-                "  X-Workspace = \"{{workspace_name}}\"",
-                "  X-Environment = \"{{environment_name}}\"",
-                "  X-Correlation-Id = \"{{trace_id}}\"",
-                "}",
-                string.Empty,
-                "tests {",
-                "  status == 200 \"returns 200\"",
-                "  header \"Content-Type\" contains \"json\" \"json response\"",
-                "}",
+                "expect status == 200 \"returns 200\"",
+                "expect header \"Content-Type\" contains \"json\" \"json response\"",
             ]);
     }
 
-    private static string BuildScriptEditorText(string title)
+    private static string EscapeForForRestString(string value)
     {
-        return string.Join(
-            Environment.NewLine,
-            [
-                $"variables.Set(\"request_name\", \"{title}\");",
-                "request.SetHeader(\"X-Request-Source\", \"maui\");",
-                "console.Log(\"Prepared request before send.\");",
-            ]);
+        return (value ?? string.Empty)
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 }

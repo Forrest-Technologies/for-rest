@@ -307,18 +307,19 @@ public partial class MonacoEditorSurface : ContentView
           tokenizer: {
             root: [
               [/#[^\n]*/, "comment"],
-              [/^@\w[\w-]*/, "keyword.directive"],
+              [/\b(name|method|url|timeout|max_send_iterations|redirects|ssl|history|content_type|header|query|body|form|multipart|extract|expect|repeat|retry|auth)\b/, "keyword.directive"],
               [/\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/, "keyword.method"],
-              [/\b(header|body|retry|delay|when|capture|as|json|let|use|with|from|if|else|for|in)\b/, "keyword.flow"],
+              [/\b(request\.send)\b/, "keyword.flow"],
+              [/\b(await|runtime|request|response|workspace|variables|json|console|encoding|crypto|regex|log|warn|error|let|if|else|while|for|foreach|in)\b/, "keyword.flow"],
               [/\b(true|false|null)\b/, "keyword.literal"],
-              [/[A-Za-z_][\w-]*(?=\s*=)/, "variable.definition"],
+              [/[A-Za-z_][A-Za-z0-9_]*(?=\s*=)/, "variable.definition"],
               [/\{\{[\w.\-]+\}\}/, "variable.placeholder"],
               [/\{[\w.\-]+\}/, "variable.placeholder"],
-              [/[A-Za-z_][\w-]*(?=\s*:)/, "attribute.name"],
+              [/[A-Za-z_][A-Za-z0-9_]*(?=\s*:)/, "attribute.name"],
               [/\bhttps?:\/\/[^\s]+/, "string.url"],
+              [/[“„«][^”»\n]*[”»]/, "string"],
               [/"([^"\\]|\\.)*"/, "string"],
-              [/'([^'\\]|\\.)*'/, "string"],
-              [/\b\d+(ms|s|m)?\b/, "number"],
+              [/\b\d+\b/, "number"],
               [/[><=!]=?/, "operator"]
             ]
           }
@@ -326,11 +327,14 @@ public partial class MonacoEditorSurface : ContentView
 
         monaco.languages.setLanguageConfiguration("forrest", {
           comments: { lineComment: "#" },
+          wordPattern: /\{\{[\w.\-]+\}\}|[A-Za-z_][A-Za-z0-9_\.]*/,
           autoClosingPairs: [
             { open: "{", close: "}" },
             { open: "[", close: "]" },
             { open: "(", close: ")" },
             { open: "\"", close: "\"" },
+            { open: "“", close: "”" },
+            { open: "«", close: "»" },
             { open: "'", close: "'" }
           ],
           surroundingPairs: [
@@ -338,8 +342,273 @@ public partial class MonacoEditorSurface : ContentView
             { open: "[", close: "]" },
             { open: "(", close: ")" },
             { open: "\"", close: "\"" },
+            { open: "“", close: "”" },
+            { open: "«", close: "»" },
             { open: "'", close: "'" }
           ]
+        });
+
+        monaco.languages.registerCompletionItemProvider("forrest", {
+          provideCompletionItems: function (model, position) {
+            const word = model.getWordUntilPosition(position) || {
+              startColumn: position.column,
+              endColumn: position.column
+            };
+            const range = {
+              startLineNumber: position.lineNumber,
+              endLineNumber: position.lineNumber,
+              startColumn: word.startColumn,
+              endColumn: word.endColumn
+            };
+
+            const insertAsSnippet = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+            const kind = monaco.languages.CompletionItemKind;
+            return {
+              suggestions: [
+                {
+                  label: "name",
+                  kind: kind.Keyword,
+                  insertText: "name \"${1:Request Name}\"",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Give the current .frs program a request name.",
+                  range
+                },
+                {
+                  label: "method",
+                  kind: kind.Keyword,
+                  insertText: "method ${1|GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD|}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Set the HTTP method.",
+                  range
+                },
+                {
+                  label: "url",
+                  kind: kind.Keyword,
+                  insertText: "url \"${1:https://httpbin.org/anything}\"",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Set the target URL.",
+                  range
+                },
+                {
+                  label: "header",
+                  kind: kind.Keyword,
+                  insertText: "header \"${1:Header-Name}\" = ${2:\"value\"}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Add a request header.",
+                  range
+                },
+                {
+                  label: "expect",
+                  kind: kind.Keyword,
+                  insertText: "expect status == ${1:200} \"${2:returns 200}\"",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Add a response assertion.",
+                  range
+                },
+                {
+                  label: "body json",
+                  kind: kind.Snippet,
+                  insertText: "body json \"\"\"\n${1:{\n  \\\"id\\\": \\\"{{trace_id}}\\\"\n}}\n\"\"\"",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Add a JSON request body.",
+                  range
+                },
+                {
+                  label: "if",
+                  kind: kind.Snippet,
+                  insertText: "if ${1:condition} {\n  $0\n}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Conditional flow block.",
+                  range
+                },
+                {
+                  label: "while",
+                  kind: kind.Snippet,
+                  insertText: "while ${1:condition} {\n  $0\n}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Loop while a condition is true.",
+                  range
+                },
+                {
+                  label: "foreach",
+                  kind: kind.Snippet,
+                  insertText: "foreach ${1:item} in ${2:response.items} {\n  $0\n}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Iterate a collection.",
+                  range
+                },
+                {
+                  label: "request.send()",
+                  kind: kind.Method,
+                  insertText: "request.send()",
+                  documentation: "Send the current request and update the global response.",
+                  range
+                },
+                {
+                  label: "response.json()",
+                  kind: kind.Method,
+                  insertText: "response.json()",
+                  documentation: "Parse the latest response body as JSON when the body is valid JSON.",
+                  range
+                },
+                {
+                  label: "runtime",
+                  kind: kind.Keyword,
+                  insertText: "runtime ${1:name} = ${2:value}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Persist a runtime variable for later interpolation or tests.",
+                  range
+                },
+                {
+                  label: "request.headers",
+                  kind: kind.Property,
+                  insertText: "request.headers[\"${1:Header-Name}\"] = ${2:\"value\"}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Set a request header from flow.",
+                  range
+                },
+                {
+                  label: "response.status",
+                  kind: kind.Property,
+                  insertText: "response.status",
+                  documentation: "Latest response status code.",
+                  range
+                },
+                {
+                  label: "log",
+                  kind: kind.Function,
+                  insertText: "log ${1:\"message\"}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Write an info entry to the debug console.",
+                  range
+                },
+                {
+                  label: "warn",
+                  kind: kind.Function,
+                  insertText: "warn ${1:\"message\"}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Write a warning entry to the debug console.",
+                  range
+                },
+                {
+                  label: "error",
+                  kind: kind.Function,
+                  insertText: "error ${1:\"message\"}",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Write an error entry to the debug console.",
+                  range
+                },
+                {
+                  label: "range",
+                  kind: kind.Function,
+                  insertText: "range(${1:0}, ${2:3})",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Produce a sequence that works well with foreach loops.",
+                  range
+                },
+                {
+                  label: "encoding.base64",
+                  kind: kind.Function,
+                  insertText: "encoding.Base64Encode(${1:value})",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Encode a value to Base64.",
+                  range
+                },
+                {
+                  label: "crypto.sha256",
+                  kind: kind.Function,
+                  insertText: "crypto.Sha256(${1:value})",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Hash a value with SHA-256.",
+                  range
+                },
+                {
+                  label: "regex.match",
+                  kind: kind.Function,
+                  insertText: "regex.Match(${1:input}, ${2:pattern})",
+                  insertTextRules: insertAsSnippet,
+                  documentation: "Extract a regex match or capture group.",
+                  range
+                }
+              ]
+            };
+          }
+        });
+
+        monaco.languages.registerHoverProvider("forrest", {
+          provideHover: function (model, position) {
+            const lineText = model.getLineContent(position.lineNumber) || "";
+            const wordInfo = model.getWordAtPosition(position);
+            const word = wordInfo ? wordInfo.word : "";
+            const docs = {
+              "request": [
+                "**request**",
+                "Mutable request API for the current `.frs` program.",
+                "Core members: `request.method`, `request.url`, `request.body`, `request.headers`, `request.send()`."
+              ],
+              "request.send": [
+                "**request.send()**",
+                "Sends the current request, updates the global `response`, and returns the latest response snapshot.",
+                "Guarded by `max_send_iterations` to keep scripted send loops safe."
+              ],
+              "response": [
+                "**response**",
+                "Latest response snapshot. Properties are available directly from JSON payload fields as dynamic members.",
+                "Examples: `response.status`, `response.headers`, `response.traceId`, `response.items[0]`, `response.json()`."
+              ],
+              "response.json": [
+                "**response.json()**",
+                "Parses the latest response body as JSON and returns a dynamic JSON node when possible."
+              ],
+              "runtime": [
+                "**runtime name = value**",
+                "Creates or updates a runtime variable that can be reused later in the script and in `{{templates}}`."
+              ],
+              "expect": [
+                "**expect ...**",
+                "Adds a response assertion. Examples: `expect status == 200 \\\"ok\\\"`, `expect header \\\"Content-Type\\\" contains \\\"json\\\" \\\"json body\\\"`."
+              ],
+              "foreach": [
+                "**foreach item in source { }**",
+                "Preferred loop form in ForRest. Iterate arrays, `range(...)`, header collections, or JSON arrays from `response`."
+              ],
+              "while": [
+                "**while condition { }**",
+                "Repeat while the condition stays truthy. Use `request.remaining_send_iterations` to keep loops safe."
+              ],
+              "if": [
+                "**if / else if / else**",
+                "Standard conditional control flow for `.frs` scripts."
+              ],
+              "log": [
+                "**log**",
+                "Writes an info entry to the debug console."
+              ],
+              "warn": [
+                "**warn**",
+                "Writes a warning entry to the debug console."
+              ],
+              "error": [
+                "**error**",
+                "Writes an error entry to the debug console."
+              ]
+            };
+
+            const lookupWord = docs[word]
+              ? word
+              : (word.includes(".") ? word.split(".")[0] : word);
+            const content = docs[lookupWord];
+            if (!content) {
+              return null;
+            }
+
+            const startColumn = wordInfo ? wordInfo.startColumn : 1;
+            const endColumn = wordInfo ? wordInfo.endColumn : Math.max(1, lineText.length + 1);
+            return {
+              range: new monaco.Range(position.lineNumber, startColumn, position.lineNumber, endColumn),
+              contents: content.map((value) => ({ value }))
+            };
+          }
         });
 
         monaco.languages.register({ id: "settings-toml" });
@@ -381,6 +650,8 @@ public partial class MonacoEditorSurface : ContentView
         pendingTheme: "forrest-azure",
         pendingReadOnly: false,
         pendingEditableRanges: [],
+        pendingDiagnostics: [],
+        pendingShouldApplyText: true,
         editableDecorations: [],
         currentEditableRanges: [],
         lastKnownValue: "",
@@ -407,6 +678,7 @@ public partial class MonacoEditorSurface : ContentView
             lineHeight: 20,
             letterSpacing: 0.1,
             wordWrap: "on",
+            wordBasedSuggestions: "off",
             smoothScrolling: true,
             renderLineHighlight: "line",
             renderWhitespace: "selection",
@@ -422,6 +694,9 @@ public partial class MonacoEditorSurface : ContentView
             },
             matchBrackets: "always",
             overviewRulerBorder: false,
+            suggest: {
+              showWords: false
+            },
             scrollbar: {
               verticalScrollbarSize: 10,
               horizontalScrollbarSize: 10,
@@ -448,7 +723,9 @@ public partial class MonacoEditorSurface : ContentView
             language: this.pendingLanguage,
             themeKey: this.pendingTheme,
             isReadOnly: this.pendingReadOnly,
-            editableRanges: this.pendingEditableRanges
+            editableRanges: this.pendingEditableRanges,
+            diagnostics: this.pendingDiagnostics,
+            applyText: this.pendingShouldApplyText
           });
           this.editor.focus();
         },
@@ -486,9 +763,57 @@ public partial class MonacoEditorSurface : ContentView
 
           return [];
         },
+        parseDiagnostics: function (state) {
+          if (Array.isArray(state?.diagnostics)) {
+            return state.diagnostics;
+          }
+
+          if (typeof state?.diagnosticsJson === "string" && state.diagnosticsJson.length > 0) {
+            try {
+              const parsed = JSON.parse(state.diagnosticsJson);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          }
+
+          return [];
+        },
+        applyDiagnostics: function () {
+          if (!this.model || !window.monaco) {
+            return;
+          }
+
+          if (this.model.getLanguageId() !== "forrest") {
+            window.monaco.editor.setModelMarkers(this.model, "forrest-diagnostics", []);
+            return;
+          }
+
+          const severityLookup = {
+            "error": window.monaco.MarkerSeverity.Error,
+            "warning": window.monaco.MarkerSeverity.Warning
+          };
+
+          const markers = (this.pendingDiagnostics || [])
+            .filter((item) => item && typeof item.startLineNumber === "number")
+            .map((item) => ({
+              startLineNumber: item.startLineNumber,
+              startColumn: item.startColumn,
+              endLineNumber: item.endLineNumber,
+              endColumn: item.endColumn,
+              message: typeof item.message === "string" ? item.message : "ForRest diagnostic",
+              severity: severityLookup[String(item.severity || "error").toLowerCase()] || window.monaco.MarkerSeverity.Error
+            }));
+
+          window.monaco.editor.setModelMarkers(this.model, "forrest-diagnostics", markers);
+        },
         applyState: function (state) {
           const nextState = state || {};
-          this.pendingValue = typeof nextState.text === "string" ? nextState.text : "";
+          const shouldApplyText = !!nextState.applyText;
+          this.pendingShouldApplyText = shouldApplyText;
+          if (shouldApplyText || !this.model) {
+            this.pendingValue = typeof nextState.text === "string" ? nextState.text : "";
+          }
           this.pendingLanguage = typeof nextState.language === "string" && nextState.language.length > 0
             ? nextState.language
             : "forrest";
@@ -497,6 +822,7 @@ public partial class MonacoEditorSurface : ContentView
             : "forrest-azure";
           this.pendingReadOnly = !!nextState.isReadOnly;
           this.pendingEditableRanges = this.parseEditableRanges(nextState);
+          this.pendingDiagnostics = this.parseDiagnostics(nextState);
           applyHostThemeChrome(this.pendingTheme);
 
           if (this.model && window.monaco && this.model.getLanguageId() !== this.pendingLanguage) {
@@ -506,9 +832,14 @@ public partial class MonacoEditorSurface : ContentView
           if (this.editor) {
             this.editor.updateOptions({ readOnly: this.pendingReadOnly });
 
-            const normalized = this.pendingValue ?? "";
-            if (this.editor.getValue() !== normalized) {
-              this.replaceEditorValue(normalized, true);
+            if (shouldApplyText) {
+              const normalized = this.pendingValue ?? "";
+              if (this.editor.getValue() !== normalized) {
+                this.replaceEditorValue(normalized, true);
+              } else {
+                this.refreshEditableDecorations();
+                this.editor.layout();
+              }
             } else {
               this.refreshEditableDecorations();
               this.editor.layout();
@@ -518,6 +849,8 @@ public partial class MonacoEditorSurface : ContentView
           if (this.editor && window.monaco) {
             window.monaco.editor.setTheme(this.pendingTheme);
           }
+
+          this.applyDiagnostics();
 
           this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
 
@@ -760,6 +1093,13 @@ public partial class MonacoEditorSurface : ContentView
 		"[]",
 		propertyChanged: OnEditableRangesJsonChanged);
 
+	public static readonly BindableProperty DiagnosticsJsonProperty = BindableProperty.Create(
+		nameof(DiagnosticsJson),
+		typeof(string),
+		typeof(MonacoEditorSurface),
+		"[]",
+		propertyChanged: OnDiagnosticsJsonChanged);
+
 	public static readonly BindableProperty IsReadOnlyProperty = BindableProperty.Create(
 		nameof(IsReadOnly),
 		typeof(bool),
@@ -781,8 +1121,10 @@ public partial class MonacoEditorSurface : ContentView
 	private string _pendingLanguage = "forrest";
 	private string _pendingThemeKey = "forrest-azure";
 	private string _pendingEditableRangesJson = "[]";
+	private string _pendingDiagnosticsJson = "[]";
 	private bool _pendingIsReadOnly;
 	private bool _contentHydrated;
+	private bool _shouldApplyTextToEditor = true;
 
 	public MonacoEditorSurface()
 	{
@@ -817,6 +1159,12 @@ public partial class MonacoEditorSurface : ContentView
 		set => SetValue(EditableRangesJsonProperty, value);
 	}
 
+	public string DiagnosticsJson
+	{
+		get => (string)GetValue(DiagnosticsJsonProperty);
+		set => SetValue(DiagnosticsJsonProperty, value);
+	}
+
 	public bool IsReadOnly
 	{
 		get => (bool)GetValue(IsReadOnlyProperty);
@@ -844,6 +1192,7 @@ public partial class MonacoEditorSurface : ContentView
 			return;
 		}
 
+		editor._shouldApplyTextToEditor = true;
 		editor.RequestStateApply();
 	}
 
@@ -865,6 +1214,13 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
 		editor._pendingEditableRangesJson = newValue as string ?? "[]";
+		editor.RequestStateApply();
+	}
+
+	private static void OnDiagnosticsJsonChanged(BindableObject bindable, object? oldValue, object? newValue)
+	{
+		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
+		editor._pendingDiagnosticsJson = newValue as string ?? "[]";
 		editor.RequestStateApply();
 	}
 
@@ -925,8 +1281,10 @@ public partial class MonacoEditorSurface : ContentView
 				_pendingLanguage = Language;
 				_pendingThemeKey = ThemeKey;
 				_pendingEditableRangesJson = EditableRangesJson;
+				_pendingDiagnosticsJson = DiagnosticsJson;
 				_pendingIsReadOnly = IsReadOnly;
 				_pendingText = Text;
+				_shouldApplyTextToEditor = true;
 				_contentHydrated = string.IsNullOrWhiteSpace(_pendingText);
 
 				RequestStateApply();
@@ -1014,7 +1372,9 @@ public partial class MonacoEditorSurface : ContentView
 			Language: string.IsNullOrWhiteSpace(_pendingLanguage) ? "forrest" : _pendingLanguage,
 			ThemeKey: string.IsNullOrWhiteSpace(_pendingThemeKey) ? "forrest-azure" : _pendingThemeKey,
 			IsReadOnly: _pendingIsReadOnly,
-			EditableRangesJson: string.IsNullOrWhiteSpace(_pendingEditableRangesJson) ? "[]" : _pendingEditableRangesJson);
+			EditableRangesJson: string.IsNullOrWhiteSpace(_pendingEditableRangesJson) ? "[]" : _pendingEditableRangesJson,
+			DiagnosticsJson: string.IsNullOrWhiteSpace(_pendingDiagnosticsJson) ? "[]" : _pendingDiagnosticsJson,
+			ApplyText: _shouldApplyTextToEditor);
 	}
 
 	private async Task ApplyEditorStateAsync(EditorStatePayload state)
@@ -1043,7 +1403,11 @@ public partial class MonacoEditorSurface : ContentView
 				throw new InvalidOperationException($"Monaco applyState failed. Result: {result}");
 			}
 
-			await EnsureTextAppliedAsync(state);
+			if (state.ApplyText)
+			{
+				await EnsureTextAppliedAsync(state);
+				_shouldApplyTextToEditor = false;
+			}
 		}
 		finally
 		{
@@ -1209,5 +1573,7 @@ public partial class MonacoEditorSurface : ContentView
 		string Language,
 		string ThemeKey,
 		bool IsReadOnly,
-		string EditableRangesJson);
+		string EditableRangesJson,
+		string DiagnosticsJson,
+		bool ApplyText);
 }

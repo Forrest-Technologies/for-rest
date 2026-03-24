@@ -8,6 +8,8 @@ public sealed class RequestExecutionService(
     IScriptEngine scriptEngine,
     ILogger<RequestExecutionService> logger) : IRequestExecutionService
 {
+    private const string DefaultRequestFlowScript = "await request.send();";
+
     #region Public Methods
 
     public async Task<RequestExecutionResult> Execute(
@@ -66,9 +68,12 @@ public sealed class RequestExecutionService(
             }
 
             var preparedRequest = compileResult.Value;
+            PreparedRequest? lastSentPreparedRequest = null;
+            int remainingSendIterations = Math.Max(0, request.MaxSendIterations);
 
             async Task<ResponseSnapshot?> ExecuteScriptSend(PreparedRequest scriptedRequest)
             {
+                lastSentPreparedRequest = scriptedRequest;
                 using var scriptedHandler = new HttpClientHandler
                 {
                     AllowAutoRedirect = scriptedRequest.FollowRedirects,
@@ -106,7 +111,9 @@ public sealed class RequestExecutionService(
             var preRequestResult = await scriptEngine.Run(
                 new()
                 {
-                    Script = request.PreRequestScript,
+                    Script = string.IsNullOrWhiteSpace(request.PreRequestScript)
+                        ? DefaultRequestFlowScript
+                        : request.PreRequestScript,
                     PreparedRequest = preparedRequest,
                     Workspace = workspace.Workspace,
                     GlobalVariables = profile.GlobalVariables,
@@ -120,9 +127,12 @@ public sealed class RequestExecutionService(
                 iterationCancellationToken);
 
             consoleEntries.AddRange(preRequestResult.ConsoleEntries);
+            runtimeVariables = MergeRuntimeVariables(runtimeVariables, preRequestResult.RuntimeVariables);
+            remainingSendIterations = Math.Max(0, remainingSendIterations - preRequestResult.SendCount);
             if (!string.IsNullOrWhiteSpace(preRequestResult.ErrorMessage))
             {
-                return new()
+                PreparedRequest failedRequest = lastSentPreparedRequest ?? preRequestResult.PreparedRequest ?? preparedRequest;
+                var failedRun = new ExecutionRun
                 {
                     WorkspaceId = workspace.Workspace.Id,
                     RequestId = request.Id,
@@ -132,39 +142,53 @@ public sealed class RequestExecutionService(
                     CompletedUtc = DateTimeOffset.UtcNow,
                     State = ExecutionState.Failed,
                     ErrorMessage = preRequestResult.ErrorMessage,
+                    TargetUri = failedRequest.Uri.ToString(),
+                    RawRequest = failedRequest.RawRequest,
+                    Response = preRequestResult.Response,
                     ConsoleEntries = [.. preRequestResult.ConsoleEntries],
+                    RuntimeVariables = [.. runtimeVariables],
                 };
-            }
 
-            runtimeVariables = MergeRuntimeVariables(runtimeVariables, preRequestResult.RuntimeVariables);
-            preparedRequest = preRequestResult.PreparedRequest;
-
-            using var handler = new HttpClientHandler
-            {
-                AllowAutoRedirect = preparedRequest.FollowRedirects,
-                ServerCertificateCustomValidationCallback = preparedRequest.ValidateSsl
-                    ? DefaultCertificateValidation
-                    : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
-            };
-            using var client = new HttpClient(handler)
-            {
-                Timeout = TimeSpan.FromMilliseconds(Math.Max(1, preparedRequest.TimeoutMilliseconds)),
-            };
-            HttpResponseMessage? httpResponse = null;
-            string errorMessage = string.Empty;
-            long durationMilliseconds = 0;
-
-            (httpResponse, durationMilliseconds, errorMessage) = await SendWithRetry(client, preparedRequest, request, iterationCancellationToken);
-            ResponseSnapshot? responseSnapshot;
-            if (httpResponse is null)
-            {
-                responseSnapshot = null;
-            }
-            else
-            {
-                using (httpResponse)
+                if (request.SaveResponseToHistory)
                 {
-                    responseSnapshot = await BuildResponseSnapshot(httpResponse, durationMilliseconds, iterationCancellationToken);
+                    await executionHistoryRepository.Add(failedRun, iterationCancellationToken);
+                }
+
+                return failedRun;
+            }
+
+            preparedRequest = preRequestResult.PreparedRequest;
+            ResponseSnapshot? responseSnapshot = preRequestResult.Response;
+            string errorMessage = string.Empty;
+
+            if (responseSnapshot is null)
+            {
+                using var handler = new HttpClientHandler
+                {
+                    AllowAutoRedirect = preparedRequest.FollowRedirects,
+                    ServerCertificateCustomValidationCallback = preparedRequest.ValidateSsl
+                        ? DefaultCertificateValidation
+                        : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+                };
+                using var client = new HttpClient(handler)
+                {
+                    Timeout = TimeSpan.FromMilliseconds(Math.Max(1, preparedRequest.TimeoutMilliseconds)),
+                };
+                HttpResponseMessage? httpResponse = null;
+                long durationMilliseconds = 0;
+
+                lastSentPreparedRequest = preparedRequest;
+                (httpResponse, durationMilliseconds, errorMessage) = await SendWithRetry(client, preparedRequest, request, iterationCancellationToken);
+                if (httpResponse is null)
+                {
+                    responseSnapshot = null;
+                }
+                else
+                {
+                    using (httpResponse)
+                    {
+                        responseSnapshot = await BuildResponseSnapshot(httpResponse, durationMilliseconds, iterationCancellationToken);
+                    }
                 }
             }
 
@@ -184,14 +208,17 @@ public sealed class RequestExecutionService(
                     RequestVariables = request.Variables,
                     RuntimeVariables = runtimeVariables,
                     SendAsync = ExecuteScriptSend,
-                    MaxSendIterations = request.MaxSendIterations,
+                    MaxSendIterations = remainingSendIterations,
                 },
                 iterationCancellationToken);
 
             responseSnapshot = testScriptResult.Response ?? responseSnapshot;
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, testScriptResult.RuntimeVariables);
+            var finalExtractedVariables = responseExtractionService.Extract(responseSnapshot, request.Extractions);
+            runtimeVariables = MergeRuntimeVariables(runtimeVariables, finalExtractedVariables);
             consoleEntries.AddRange(testScriptResult.ConsoleEntries);
             testResults.AddRange(testScriptResult.Tests);
+            PreparedRequest executedRequest = lastSentPreparedRequest ?? preparedRequest;
 
             var run = new ExecutionRun
             {
@@ -207,8 +234,8 @@ public sealed class RequestExecutionService(
                 ErrorMessage = string.Join(
                     Environment.NewLine,
                     new[] { errorMessage, testScriptResult.ErrorMessage }.Where(static item => !string.IsNullOrWhiteSpace(item))),
-                TargetUri = preparedRequest.Uri.ToString(),
-                RawRequest = preparedRequest.RawRequest,
+                TargetUri = executedRequest.Uri.ToString(),
+                RawRequest = executedRequest.RawRequest,
                 Response = responseSnapshot,
                 ConsoleEntries =
                 [

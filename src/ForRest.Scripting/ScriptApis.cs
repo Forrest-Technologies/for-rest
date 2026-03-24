@@ -1,4 +1,10 @@
+using System.Collections;
 using System.Dynamic;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using ForRest.Domain;
 
 namespace ForRest.Scripting;
 
@@ -9,23 +15,20 @@ public sealed class ScriptRequestApi
     public ScriptRequestApi(
         PreparedRequest request,
         ScriptResponseApi responseApi,
+        VariablesApi variablesApi,
         Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync = null,
         int maxSendIterations = 0)
     {
         originalRequest = request;
         this.responseApi = responseApi;
+        this.variablesApi = variablesApi;
         this.sendAsync = sendAsync;
         this.maxSendIterations = Math.Max(0, maxSendIterations);
         Method = request.Method.ToString().ToUpperInvariant();
         Url = request.Uri.ToString();
         Body = request.Body.RawContent;
         ContentType = request.Body.ContentType;
-        Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var header in request.Headers.Where(static item => item.IsEnabled))
-        {
-            Headers[header.Key] = header.Value;
-        }
+        Headers = new ScriptHeaderCollection(request.Headers);
     }
 
     #endregion
@@ -35,6 +38,8 @@ public sealed class ScriptRequestApi
     private readonly PreparedRequest originalRequest;
 
     private readonly ScriptResponseApi responseApi;
+
+    private readonly VariablesApi variablesApi;
 
     private readonly Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync;
 
@@ -50,11 +55,13 @@ public sealed class ScriptRequestApi
 
     public string ContentType { get; set; }
 
-    public Dictionary<string, string> Headers { get; }
+    public ScriptHeaderCollection Headers { get; }
 
     public int MaxSendIterations => maxSendIterations;
 
     public int RemainingSendIterations => Math.Max(0, maxSendIterations - sendCount);
+
+    public int SendCount => Volatile.Read(ref sendCount);
 
     #endregion
 
@@ -65,32 +72,38 @@ public sealed class ScriptRequestApi
         Headers[key] = value;
     }
 
+    public void AddHeader(string key, string value)
+    {
+        Headers.Add(key, value);
+    }
+
     public void RemoveHeader(string key)
     {
         Headers.Remove(key);
     }
 
-    public Task<ScriptResponseApi> send()
+    public Task<dynamic> send()
     {
         return SendAsync();
     }
 
-    public async Task<ScriptResponseApi> SendAsync()
+    public async Task<dynamic> SendAsync()
     {
         if (sendAsync is null || maxSendIterations <= 0)
         {
             throw new InvalidOperationException("request.send() is disabled for this request. Increase max_send_iterations to enable it.");
         }
 
+        var preparedRequest = ToPreparedRequest();
         var nextSendCount = Interlocked.Increment(ref sendCount);
         if (nextSendCount > maxSendIterations)
         {
             throw new InvalidOperationException($"request.send() exceeded max_send_iterations ({maxSendIterations}).");
         }
 
-        ResponseSnapshot? response = await sendAsync(ToPreparedRequest());
+        ResponseSnapshot? response = await sendAsync(preparedRequest);
         responseApi.Update(response);
-        return responseApi;
+        return new ScriptResponseApi(response);
     }
 
     public PreparedRequest ToPreparedRequest()
@@ -99,38 +112,149 @@ public sealed class ScriptRequestApi
             ? parsedMethod
             : originalRequest.Method;
 
+        string renderedUrl = variablesApi.RenderTemplate(Url);
+        string renderedBody = variablesApi.RenderTemplate(Body);
+        string renderedContentType = variablesApi.RenderTemplate(ContentType);
+        List<KeyValueDefinition> renderedHeaders =
+        [
+            .. Headers.All().Select(
+                item => new KeyValueDefinition
+                {
+                    Key = variablesApi.RenderTemplate(item.Key),
+                    Value = variablesApi.RenderTemplate(item.Value),
+                }),
+        ];
         var bodyMode = string.IsNullOrWhiteSpace(Body)
             ? RequestBodyMode.None
             : originalRequest.Body.Mode == RequestBodyMode.None
                 ? RequestBodyMode.RawText
                 : originalRequest.Body.Mode;
 
+        if (!Uri.TryCreate(renderedUrl, UriKind.Absolute, out var uri))
+        {
+            throw new InvalidOperationException($"request.Url must be a valid absolute URL. Received '{renderedUrl}'.");
+        }
+
+        RequestBodyDefinition renderedBodyDefinition = originalRequest.Body with
+        {
+            Mode = bodyMode,
+            RawContent = renderedBody,
+            ContentType = renderedContentType,
+        };
+
         return originalRequest with
         {
             Method = method,
-            Uri = Uri.TryCreate(Url, UriKind.Absolute, out var uri) ? uri : originalRequest.Uri,
-            Headers =
-            [
-                .. Headers.Select(
-                    item => new KeyValueDefinition
-                    {
-                        Key = item.Key,
-                        Value = item.Value,
-                    }),
-            ],
-            Body = originalRequest.Body with
-            {
-                Mode = bodyMode,
-                RawContent = Body,
-                ContentType = ContentType,
-            },
+            Uri = uri,
+            Headers = renderedHeaders,
+            Body = renderedBodyDefinition,
+            RawRequest = BuildRawRequest(method, uri, renderedHeaders, renderedBodyDefinition),
         };
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    private static string BuildRawRequest(
+        HttpMethodKind method,
+        Uri uri,
+        IEnumerable<KeyValueDefinition> headers,
+        RequestBodyDefinition body)
+    {
+        StringBuilder builder = new();
+        builder.Append(method.ToString().ToUpperInvariant());
+        builder.Append(' ');
+        builder.Append(uri);
+        builder.AppendLine();
+
+        foreach (KeyValueDefinition header in headers.Where(static item => item.IsEnabled))
+        {
+            builder.Append(header.Key);
+            builder.Append(": ");
+            builder.AppendLine(header.Value);
+        }
+
+        if (body.Mode != RequestBodyMode.None)
+        {
+            builder.AppendLine();
+            if (body.Mode is RequestBodyMode.FormUrlEncoded or RequestBodyMode.MultipartFormData)
+            {
+                builder.AppendLine(string.Join("&", body.FormValues.Where(static item => item.IsEnabled).Select(static item => $"{item.Key}={item.Value}")));
+            }
+            else
+            {
+                builder.AppendLine(body.RawContent);
+            }
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     #endregion
 }
 
-public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : DynamicObject
+public sealed class ScriptHeaderCollection : IEnumerable<KeyValuePair<string, string>>
+{
+    private readonly List<KeyValueDefinition> headers = [];
+
+    public ScriptHeaderCollection(IEnumerable<KeyValueDefinition> seedHeaders)
+    {
+        foreach (KeyValueDefinition header in seedHeaders.Where(static header => header.IsEnabled && !string.IsNullOrWhiteSpace(header.Key)))
+        {
+            headers.Add(header);
+        }
+    }
+
+    public string this[string key]
+    {
+        get => headers.LastOrDefault(header => string.Equals(header.Key, key, StringComparison.OrdinalIgnoreCase))?.Value ?? string.Empty;
+        set
+        {
+            Remove(key);
+            Add(key, value);
+        }
+    }
+
+    public void Add(string key, string value)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException("Header names cannot be empty.");
+        }
+
+        headers.Add(
+            new()
+            {
+                Key = key,
+                Value = value ?? string.Empty,
+            });
+    }
+
+    public void Remove(string key)
+    {
+        headers.RemoveAll(header => string.Equals(header.Key, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public IReadOnlyList<KeyValueDefinition> All()
+    {
+        return headers.ToList();
+    }
+
+    public IEnumerator<KeyValuePair<string, string>> GetEnumerator()
+    {
+        return headers
+            .Select(static header => new KeyValuePair<string, string>(header.Key, header.Value))
+            .GetEnumerator();
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+}
+
+public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : DynamicObject, IEnumerable<object?>
 {
     #region Properties
 
@@ -169,24 +293,38 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
         }
 
         jsonParsed = true;
-        parsedJson = string.IsNullOrWhiteSpace(response?.Body) ? null : JsonNode.Parse(response.Body);
+        if (string.IsNullOrWhiteSpace(response?.Body))
+        {
+            parsedJson = null;
+            return parsedJson;
+        }
+
+        try
+        {
+            parsedJson = JsonNode.Parse(response.Body);
+        }
+        catch (JsonException)
+        {
+            parsedJson = null;
+        }
+
         return parsedJson;
     }
 
     public override bool TryGetMember(GetMemberBinder binder, out object? result)
     {
-        switch (binder.Name)
+        switch (NormalizeMemberName(binder.Name))
         {
-            case nameof(Status):
+            case "status":
                 result = Status;
                 return true;
-            case nameof(Body):
+            case "body":
                 result = Body;
                 return true;
-            case nameof(ContentType):
+            case "contenttype":
                 result = ContentType;
                 return true;
-            case nameof(Headers):
+            case "headers":
                 result = Headers;
                 return true;
         }
@@ -197,7 +335,29 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
         }
 
         result = null;
-        return false;
+        return true;
+    }
+
+    public override bool TryGetIndex(GetIndexBinder binder, object?[] indexes, out object? result)
+    {
+        if (indexes.Length != 1)
+        {
+            result = null;
+            return true;
+        }
+
+        JsonNode? node = Json();
+        switch (node)
+        {
+            case JsonObject jsonObject when indexes[0] is string key:
+                return DynamicJsonObject.TryResolveMember(jsonObject, key, out result);
+            case JsonArray jsonArray when TryConvertIndex(indexes[0], out int index) && index >= 0 && index < jsonArray.Count:
+                result = DynamicJsonObject.Wrap(jsonArray[index]);
+                return true;
+            default:
+                result = null;
+                return true;
+        }
     }
 
     public override IEnumerable<string> GetDynamicMemberNames()
@@ -210,9 +370,37 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
         return jsonObject.Select(static item => item.Key);
     }
 
+    public IEnumerator<object?> GetEnumerator()
+    {
+        return Json() is JsonArray jsonArray
+            ? jsonArray.Select(DynamicJsonObject.Wrap).GetEnumerator()
+            : Enumerable.Empty<object?>().GetEnumerator();
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
     #endregion
 
     #region Private Methods
+
+    private static bool TryConvertIndex(object? value, out int index)
+    {
+        switch (value)
+        {
+            case int intValue:
+                index = intValue;
+                return true;
+            case long longValue when longValue >= int.MinValue && longValue <= int.MaxValue:
+                index = (int)longValue;
+                return true;
+            default:
+                index = -1;
+                return false;
+        }
+    }
 
     private static Dictionary<string, string> BuildHeaders(ResponseSnapshot? response)
     {
@@ -235,6 +423,16 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
         return headers;
     }
 
+    private static string NormalizeMemberName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value.Where(static character => char.IsLetterOrDigit(character)).ToArray()).ToLowerInvariant();
+    }
+
     #endregion
 }
 
@@ -253,7 +451,7 @@ internal sealed class DynamicJsonObject(JsonObject source) : DynamicObject
         }
 
         result = null;
-        return false;
+        return true;
     }
 
     public override IEnumerable<string> GetDynamicMemberNames()
@@ -263,17 +461,39 @@ internal sealed class DynamicJsonObject(JsonObject source) : DynamicObject
 
     public static bool TryResolveMember(JsonObject source, string memberName, out object? result)
     {
-        if (source.TryGetPropertyValue(memberName, out JsonNode? node))
+        if (TryResolveNode(source, memberName, out JsonNode? node))
         {
             result = Wrap(node);
             return true;
         }
 
         result = null;
+        return true;
+    }
+
+    private static bool TryResolveNode(JsonObject source, string memberName, out JsonNode? node)
+    {
+        if (source.TryGetPropertyValue(memberName, out node))
+        {
+            return true;
+        }
+
+        string normalizedMemberName = NormalizeMemberName(memberName);
+        foreach (KeyValuePair<string, JsonNode?> property in source)
+        {
+            if (string.Equals(property.Key, memberName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(NormalizeMemberName(property.Key), normalizedMemberName, StringComparison.OrdinalIgnoreCase))
+            {
+                node = property.Value;
+                return true;
+            }
+        }
+
+        node = null;
         return false;
     }
 
-    private static object? Wrap(JsonNode? node)
+    internal static object? Wrap(JsonNode? node)
     {
         return node switch
         {
@@ -319,11 +539,23 @@ internal sealed class DynamicJsonObject(JsonObject source) : DynamicObject
 
         return value.ToJsonString().Trim('"');
     }
+
+    private static string NormalizeMemberName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value.Where(static character => char.IsLetterOrDigit(character)).ToArray());
+    }
 }
 
 public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
 {
     #region Private Fields
+
+    private static readonly Regex VariableTokenPattern = new(@"\{\{(?<key>[\w\.\-]+)\}\}", RegexOptions.Compiled);
 
     private readonly Dictionary<string, VariableDefinition> variables = BuildVariableMap(seedVariables);
 
@@ -350,6 +582,19 @@ public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
     public IReadOnlyCollection<VariableDefinition> All()
     {
         return variables.Values.ToList();
+    }
+
+    public string RenderTemplate(string template)
+    {
+        return VariableTokenPattern.Replace(
+            template ?? string.Empty,
+            match =>
+            {
+                string key = match.Groups["key"].Value;
+                return variables.TryGetValue(key, out VariableDefinition? variable)
+                    ? variable.Value ?? string.Empty
+                    : match.Value;
+            });
     }
 
     #endregion
@@ -513,6 +758,96 @@ public sealed class JsonApi
     #endregion
 }
 
+public sealed class EncodingApi
+{
+    public string Base64Encode(string value)
+    {
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(value ?? string.Empty));
+    }
+
+    public string Base64Decode(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        byte[] bytes = Convert.FromBase64String(value);
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    public string UrlEncode(string value)
+    {
+        return Uri.EscapeDataString(value ?? string.Empty);
+    }
+
+    public string UrlDecode(string value)
+    {
+        return Uri.UnescapeDataString(value ?? string.Empty);
+    }
+}
+
+public sealed class CryptoApi
+{
+    public string Md5(string value)
+    {
+        using var algorithm = System.Security.Cryptography.MD5.Create();
+        return Hash(value, algorithm);
+    }
+
+    public string Sha1(string value)
+    {
+        using var algorithm = SHA1.Create();
+        return Hash(value, algorithm);
+    }
+
+    public string Sha256(string value)
+    {
+        using var algorithm = SHA256.Create();
+        return Hash(value, algorithm);
+    }
+
+    private static string Hash(string value, HashAlgorithm algorithm)
+    {
+        byte[] input = Encoding.UTF8.GetBytes(value ?? string.Empty);
+        byte[] hash = algorithm.ComputeHash(input);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+}
+
+public sealed class RegexApi
+{
+    public bool IsMatch(string input, string pattern, bool ignoreCase = false)
+    {
+        return Regex.IsMatch(input ?? string.Empty, pattern ?? string.Empty, BuildOptions(ignoreCase));
+    }
+
+    public string Match(string input, string pattern, int group = 0, bool ignoreCase = false)
+    {
+        System.Text.RegularExpressions.Match regexMatch = Regex.Match(input ?? string.Empty, pattern ?? string.Empty, BuildOptions(ignoreCase));
+        return regexMatch.Success && group >= 0 && group < regexMatch.Groups.Count
+            ? regexMatch.Groups[group].Value
+            : string.Empty;
+    }
+
+    public IReadOnlyList<string> Matches(string input, string pattern, int group = 0, bool ignoreCase = false)
+    {
+        MatchCollection matches = Regex.Matches(input ?? string.Empty, pattern ?? string.Empty, BuildOptions(ignoreCase));
+        return
+        [
+            .. matches
+                .Cast<System.Text.RegularExpressions.Match>()
+                .Where(static match => match.Success)
+                .Select(match => group >= 0 && group < match.Groups.Count ? match.Groups[group].Value : string.Empty)
+        ];
+    }
+
+    private static RegexOptions BuildOptions(bool ignoreCase)
+    {
+        return ignoreCase ? RegexOptions.IgnoreCase | RegexOptions.CultureInvariant : RegexOptions.CultureInvariant;
+    }
+}
+
 public sealed class RandomApi
 {
     #region Private Fields
@@ -558,6 +893,12 @@ public sealed class ScriptGlobals
     public required TimeApi time { get; init; }
 
     public required JsonApi json { get; init; }
+
+    public required EncodingApi encoding { get; init; }
+
+    public required CryptoApi crypto { get; init; }
+
+    public required RegexApi regex { get; init; }
 
     public required RandomApi random { get; init; }
 

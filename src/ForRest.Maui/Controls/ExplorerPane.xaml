@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="ForRest.Maui.Controls.ExplorerPane">
+             x:Class="ForRest.Maui.Controls.ExplorerPane"
+             x:Name="ExplorerRoot">
 
     <Border Style="{StaticResource PaneBorderStyle}">
         <Grid RowDefinitions="Auto,Auto,Auto,*">
@@ -47,7 +48,7 @@
                   Padding="10,0,10,8"
                   ColumnDefinitions="Auto,*,Auto"
                   ColumnSpacing="8">
-                <Label Text="ROOT"
+                <Label Text="WORKSPACES"
                        VerticalTextAlignment="Start"
                        Style="{StaticResource MonoMetaStyle}" />
                 <ScrollView Grid.Column="1"
@@ -73,10 +74,23 @@
                         </BindableLayout.ItemTemplate>
                     </HorizontalStackLayout>
                 </ScrollView>
-                <Button Grid.Column="2"
-                        Text="+"
-                        Style="{StaticResource DenseTabButtonStyle}"
-                        Clicked="OnAddWorkspaceClicked" />
+                <HorizontalStackLayout Grid.Column="2"
+                                       Spacing="4">
+                    <Button Text="&lt;"
+                            Style="{StaticResource DenseTabButtonStyle}"
+                            Clicked="OnMoveWorkspaceLeftClicked"
+                            SemanticProperties.Description="Move selected workspace left"
+                            IsEnabled="{Binding CanMoveWorkspaceLeft}" />
+                    <Button Text="&gt;"
+                            Style="{StaticResource DenseTabButtonStyle}"
+                            Clicked="OnMoveWorkspaceRightClicked"
+                            SemanticProperties.Description="Move selected workspace right"
+                            IsEnabled="{Binding CanMoveWorkspaceRight}" />
+                    <Button Text="+"
+                            Style="{StaticResource DenseTabButtonStyle}"
+                            Clicked="OnAddWorkspaceClicked"
+                            SemanticProperties.Description="Add workspace" />
+                </HorizontalStackLayout>
             </Grid>
 
             <Grid Grid.Row="3">
@@ -90,19 +104,30 @@
                                     <Grid Margin="12,6,12,4"
                                           ColumnDefinitions="*,Auto"
                                           ColumnSpacing="8">
-                                        <Label Text="{Binding Title}"
-                                               Style="{StaticResource SectionTitleStyle}" />
-                                        <Button Grid.Column="1"
-                                                Text="+ Request"
-                                                IsVisible="False"
-                                                Style="{StaticResource DenseTabButtonStyle}"
-                                                Clicked="OnAddRequestClicked">
-                                            <Button.Triggers>
-                                                <DataTrigger TargetType="Button" Binding="{Binding Title}" Value="Requests">
-                                                    <Setter Property="IsVisible" Value="True" />
-                                                </DataTrigger>
-                                            </Button.Triggers>
-                                        </Button>
+                                        <VerticalStackLayout Spacing="0">
+                                            <Label Text="{Binding Title}"
+                                                   Style="{StaticResource SectionTitleStyle}" />
+                                            <Label Text="{Binding Subtitle}"
+                                                   Style="{StaticResource MonoMetaStyle}" />
+                                        </VerticalStackLayout>
+                                        <HorizontalStackLayout Grid.Column="1"
+                                                               Spacing="4"
+                                                               IsVisible="{Binding SupportsRequestActions}">
+                                            <Button Text="^"
+                                                    Style="{StaticResource DenseTabButtonStyle}"
+                                                    Clicked="OnMoveRequestUpClicked"
+                                                    SemanticProperties.Description="Move selected file up"
+                                                    IsEnabled="{Binding BindingContext.CanMoveRequestUp, Source={x:Reference ExplorerRoot}}" />
+                                            <Button Text="v"
+                                                    Style="{StaticResource DenseTabButtonStyle}"
+                                                    Clicked="OnMoveRequestDownClicked"
+                                                    SemanticProperties.Description="Move selected file down"
+                                                    IsEnabled="{Binding BindingContext.CanMoveRequestDown, Source={x:Reference ExplorerRoot}}" />
+                                            <Button Text="+"
+                                                    Style="{StaticResource DenseTabButtonStyle}"
+                                                    Clicked="OnAddRequestClicked"
+                                                    SemanticProperties.Description="Add request or script file" />
+                                        </HorizontalStackLayout>
                                     </Grid>
                                     <VerticalStackLayout Spacing="0"
                                                          BindableLayout.ItemsSource="{Binding Items}">
@@ -110,17 +135,18 @@
                                             <DataTemplate>
                                                 <Border Style="{StaticResource NavigationRowBorderStyle}"
                                                         Margin="{Binding Indent}">
-                                                    <Border.GestureRecognizers>
-                                                        <TapGestureRecognizer Tapped="OnItemTapped"
+                                                        <Border.GestureRecognizers>
+                                                            <TapGestureRecognizer Tapped="OnItemTapped"
                                                                               CommandParameter="{Binding .}" />
-                                                    </Border.GestureRecognizers>
-                                                    <Grid ColumnDefinitions="Auto,*,Auto"
-                                                          ColumnSpacing="8">
+                                                        </Border.GestureRecognizers>
+                                                    <Grid ColumnDefinitions="Auto,*"
+                                                          ColumnSpacing="10">
                                                         <Label Text="{Binding Kind}"
                                                                TextColor="{Binding AccentColor}"
-                                                               Style="{StaticResource MonoMetaStyle}" />
+                                                               Style="{StaticResource MonoMetaStyle}"
+                                                               VerticalTextAlignment="Start" />
                                                         <VerticalStackLayout Grid.Column="1"
-                                                                             Spacing="1">
+                                                                             Spacing="2">
                                                             <Label Text="{Binding Title}"
                                                                    FontFamily="OpenSansSemibold"
                                                                    FontSize="12"
@@ -128,12 +154,10 @@
                                                             <Label Text="{Binding Detail}"
                                                                    Style="{StaticResource PaneMetaStyle}"
                                                                    LineBreakMode="TailTruncation" />
-                                                        </VerticalStackLayout>
-                                                        <Label Grid.Column="2"
-                                                               Text="{Binding Context}"
-                                                               HorizontalTextAlignment="End"
+                                                            <Label Text="{Binding ContextDisplay}"
                                                                LineBreakMode="TailTruncation"
                                                                Style="{StaticResource MonoMetaStyle}" />
+                                                        </VerticalStackLayout>
                                                     </Grid>
                                                     <Border.Triggers>
                                                         <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">

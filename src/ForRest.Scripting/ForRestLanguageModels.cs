@@ -118,6 +118,8 @@ public sealed record ForRestScriptDocument
 
     public List<ForRestScriptExtraction> Extractions { get; init; } = [];
 
+    public string Flow { get; init; } = string.Empty;
+
     public List<ForRestScriptAssertion> Tests { get; init; } = [];
 
     public Dictionary<string, ForRestScriptValueExpression> Repeat { get; init; } = new(StringComparer.OrdinalIgnoreCase);

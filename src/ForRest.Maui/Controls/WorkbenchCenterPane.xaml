@@ -21,46 +21,48 @@
                        Style="{StaticResource EditorDocumentTitleStyle}" />
             </Grid>
 
-            <Grid Grid.Row="1"
-                  Padding="6,0,6,6">
-                <ScrollView Orientation="Horizontal"
-                            HorizontalScrollBarVisibility="Never">
-                    <HorizontalStackLayout Spacing="4"
-                                           BindableLayout.ItemsSource="{Binding CenterTabs}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate>
-                                <Button Text="{Binding Title}"
-                                        Style="{StaticResource DenseTabButtonStyle}"
-                                        Clicked="OnTabClicked"
-                                        CommandParameter="{Binding .}">
-                                    <Button.Triggers>
-                                        <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
-                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
-                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
-                                        </DataTrigger>
-                                    </Button.Triggers>
-                                </Button>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </HorizontalStackLayout>
-                </ScrollView>
-            </Grid>
+            <Border Grid.Row="1"
+                    Margin="8,0,8,6"
+                    Padding="8,6"
+                    IsVisible="{Binding ShowEditorDebugStrip}"
+                    BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                    Stroke="{DynamicResource ThemeDividerColor}"
+                    StrokeThickness="1">
+                <Grid RowDefinitions="Auto,Auto"
+                      ColumnDefinitions="Auto,*"
+                      ColumnSpacing="8"
+                      RowSpacing="2">
+                    <Label Text="{Binding EditorDebugStateText}"
+                           TextColor="{Binding EditorDebugAccentColor}"
+                           Style="{StaticResource MonoMetaStyle}" />
+
+                    <Label Grid.Column="1"
+                           Text="{Binding EditorDebugSummaryText}"
+                           LineBreakMode="TailTruncation"
+                           Style="{StaticResource SectionTitleStyle}" />
+
+                    <Label Grid.Row="1"
+                           Grid.ColumnSpan="2"
+                           Text="{Binding EditorDebugDetailText}"
+                           LineBreakMode="TailTruncation"
+                           Style="{StaticResource PaneMetaStyle}" />
+                </Grid>
+            </Border>
 
             <Grid Grid.Row="2"
                   Padding="0">
-                <controls:MonacoEditorSurface Language="{Binding ActiveEditorLanguage}"
-                                              EditableRangesJson="{Binding ActiveEditorEditableRangesJson}"
-                                              SendRequested="OnEditorSendRequested"
-                                              ThemeKey="{Binding EditorThemeKey}"
-                                              Text="{Binding ActiveEditorText}" />
+                <ContentView x:Name="EditorHost" />
 
-                <Button Text="Send"
+                <Button Text="&#x25B6;"
                         Clicked="OnSendClicked"
                         IsEnabled="{Binding CanSend}"
                         HorizontalOptions="End"
                         VerticalOptions="End"
                         Margin="0,0,18,18"
+                        FontSize="18"
+                        Padding="0"
+                        SemanticProperties.Description="Run script"
+                        SemanticProperties.Hint="Runs the current request script"
                         Style="{StaticResource FloatingActionButtonStyle}"
                         ZIndex="10" />
             </Grid>

@@ -45,8 +45,28 @@ public partial class ExplorerPane : ContentView
 		ViewModel.AddWorkspace();
 	}
 
+	private void OnMoveWorkspaceLeftClicked(object? sender, EventArgs e)
+	{
+		ViewModel.MoveSelectedWorkspaceLeft();
+	}
+
+	private void OnMoveWorkspaceRightClicked(object? sender, EventArgs e)
+	{
+		ViewModel.MoveSelectedWorkspaceRight();
+	}
+
 	private void OnAddRequestClicked(object? sender, EventArgs e)
 	{
 		ViewModel.AddRequest();
+	}
+
+	private void OnMoveRequestUpClicked(object? sender, EventArgs e)
+	{
+		ViewModel.MoveSelectedRequestUp();
+	}
+
+	private void OnMoveRequestDownClicked(object? sender, EventArgs e)
+	{
+		ViewModel.MoveSelectedRequestDown();
 	}
 }

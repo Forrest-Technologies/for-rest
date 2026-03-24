@@ -111,11 +111,19 @@ public sealed class RequestDocumentViewModel(
 	}
 }
 
-public sealed class NavigationSectionViewModel(string title, IEnumerable<NavigationItemViewModel> items)
+public sealed class NavigationSectionViewModel(
+	string title,
+	IEnumerable<NavigationItemViewModel> items,
+	string subtitle = "",
+	bool supportsRequestActions = false)
 {
 	public string Title { get; } = title;
 
 	public ObservableCollection<NavigationItemViewModel> Items { get; } = new(items);
+
+	public string Subtitle { get; } = subtitle;
+
+	public bool SupportsRequestActions { get; } = supportsRequestActions;
 }
 
 public sealed class NavigationItemViewModel(
@@ -151,6 +159,8 @@ public sealed class NavigationItemViewModel(
 
 	public string Context { get; } = context;
 
+	public string ContextDisplay => FormatContext(Context);
+
 	public Color AccentColor
 	{
 		get => _accentColor;
@@ -171,6 +181,18 @@ public sealed class NavigationItemViewModel(
 	{
 		get => _isSelected;
 		set => SetProperty(ref _isSelected, value);
+	}
+
+	private static string FormatContext(string value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			return "~";
+		}
+
+		return value.StartsWith("/", StringComparison.Ordinal)
+			? value[1..]
+			: value;
 	}
 }
 

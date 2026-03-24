@@ -9,24 +9,15 @@ public sealed class ForRestScriptDocumentTextServiceTests
         var service = new ForRestScriptDocumentTextService();
         var source =
             """"
-            meta {
-              name = "Create Echo"
-            }
+            name "Create Echo"
+            method POST
+            url "https://api.example.test/echo/{{resource_id}}"
 
-            vars {
-              request resource_id = "42"
-              runtime trace_id = guid()
-            }
+            request resource_id = "42"
+            runtime trace_id = guid()
 
-            request {
-              method = POST
-              url = "https://api.example.test/echo/{{resource_id}}"
-            }
-
-            headers {
-              Accept = "application/json"
-              X-Trace-Id = "{{trace_id}}"
-            }
+            header "Accept" = "application/json"
+            header "X-Trace-Id" = "{{trace_id}}"
 
             body json """
             {
@@ -34,16 +25,14 @@ public sealed class ForRestScriptDocumentTextServiceTests
             }
             """
 
-            tests {
-              status == 200 "returns 200"
-            }
+            expect status == 200 "returns 200"
             """";
 
         var sections = service.Extract(source);
 
         Assert.AreEqual("Create Echo", sections.Name);
         StringAssert.Contains(sections.Variables, "request resource_id = \"42\"");
-        StringAssert.Contains(sections.Headers, "X-Trace-Id = \"{{trace_id}}\"");
+        StringAssert.Contains(sections.Headers, "header \"X-Trace-Id\" = \"{{trace_id}}\"");
         Assert.AreEqual(RequestBodyMode.Json, sections.BodyMode);
         StringAssert.Contains(sections.Body, "\"id\": \"{{resource_id}}\"");
         StringAssert.Contains(sections.Tests, "status == 200 \"returns 200\"");
@@ -55,33 +44,26 @@ public sealed class ForRestScriptDocumentTextServiceTests
         var service = new ForRestScriptDocumentTextService();
         var source =
             """
-            meta {
-              name = "Old"
-            }
+            name "Old"
+            method GET
+            url "https://api.example.test/items"
 
-            request {
-              method = GET
-              url = "https://api.example.test/items"
-            }
-
-            retry {
-              count = 2
-              interval = 500
-            }
+            retry count = 2
+            retry interval = 500
             """;
 
         var updated = service.UpsertMetaName(source, "New Name");
         updated = service.UpsertVariables(updated, "runtime trace_id = guid()");
-        updated = service.UpsertHeaders(updated, "Accept = \"application/json\"");
+        updated = service.UpsertHeaders(updated, "header \"Accept\" = \"application/json\"");
         updated = service.UpsertBody(updated, RequestBodyMode.Json, """{"id":"42"}""");
-        updated = service.UpsertTests(updated, "status == 200 \"returns 200\"");
+        updated = service.UpsertTests(updated, "expect status == 200 \"returns 200\"");
 
-        StringAssert.Contains(updated, "name = \"New Name\"");
-        StringAssert.Contains(updated, "vars {");
-        StringAssert.Contains(updated, "headers {");
+        StringAssert.Contains(updated, "name \"New Name\"");
+        StringAssert.Contains(updated, "runtime trace_id = guid()");
+        StringAssert.Contains(updated, "header \"Accept\" = \"application/json\"");
         StringAssert.Contains(updated, "body json \"\"\"");
-        StringAssert.Contains(updated, "tests {");
-        StringAssert.Contains(updated, "retry {");
-        StringAssert.Contains(updated, "count = 2");
+        StringAssert.Contains(updated, "expect status == 200 \"returns 200\"");
+        StringAssert.Contains(updated, "retry count = 2");
+        StringAssert.Contains(updated, "retry interval = 500");
     }
 }

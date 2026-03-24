@@ -85,6 +85,12 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _activeDocumentLabel;
 	private Color _activeDocumentKindColor;
 	private string _activeEditorEditableRangesJson;
+	private string _activeEditorDiagnosticsJson;
+	private string _requestEditorDiagnosticsJson;
+	private string _editorDebugStateText;
+	private string _editorDebugSummaryText;
+	private string _editorDebugDetailText;
+	private Color _editorDebugAccentColor;
 	private CancellationTokenSource? _settingsSaveSource;
 	private CancellationTokenSource? _requestSaveSource;
 	private bool _suppressSettingsAutosave;
@@ -119,10 +125,10 @@ public sealed class MainPageViewModel : ObservableObject
 		_requestSummary = starterDocument.Summary;
 		_requestLocation = starterDocument.Location;
 		_requestTarget = BuildDefaultRequestUrl(_requestLocation);
-		_requestEditorText = NormalizeLineEndings(starterDocument.RequestSource);
+		_requestEditorText = NormalizeLineEndings(RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(starterDocument.RequestSource, starterDocument.PreRequestScript, starterDocument.Title));
 		_headersEditorText = string.Empty;
 		_bodyEditorText = string.Empty;
-		_scriptEditorText = NormalizeLineEndings(starterDocument.PreRequestScript);
+		_scriptEditorText = string.Empty;
 		_testsEditorText = string.Empty;
 		_variablesEditorText = string.Empty;
 		_responseBodyText = string.Empty;
@@ -142,6 +148,12 @@ public sealed class MainPageViewModel : ObservableObject
 		_activeDocumentLabel = BuildRequestDocumentLabel(_requestName);
 		_activeDocumentKindColor = _methodPost;
 		_activeEditorEditableRangesJson = "[]";
+		_activeEditorDiagnosticsJson = "[]";
+		_requestEditorDiagnosticsJson = "[]";
+		_editorDebugStateText = "Ready";
+		_editorDebugSummaryText = "POST Starter Request";
+		_editorDebugDetailText = "https://httpbin.org/anything  send<=3  vars 0  tests 0  extracts 0";
+		_editorDebugAccentColor = _successColor;
 
 		LeftPaneTabs =
 		[
@@ -159,12 +171,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		CenterTabs =
 		[
-			new PaneTabViewModel("request", "Request", true),
-			new PaneTabViewModel("headers", "Headers"),
-			new PaneTabViewModel("body", "Body"),
-			new PaneTabViewModel("script", "Script"),
-			new PaneTabViewModel("tests", "Tests"),
-			new PaneTabViewModel("variables", "Variables")
+			new PaneTabViewModel("request", "Request", true)
 		];
 
 		RightPaneTabs =
@@ -288,7 +295,7 @@ public sealed class MainPageViewModel : ObservableObject
 				RefreshRequestDraftSignature();
 				OnPropertyChanged(nameof(SelectedMethodColor));
 				OnPropertyChanged(nameof(RequestStateStatus));
-				if (IsActiveRequestEditor && string.Equals(GetSelectedCenterTabKey(), "request", StringComparison.Ordinal))
+				if (IsActiveRequestEditor)
 				{
 					ActiveDocumentKindLabel = value;
 					ActiveDocumentKindColor = SelectedMethodColor;
@@ -336,6 +343,8 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				OnPropertyChanged(nameof(RequestDocumentLabel));
 				OnPropertyChanged(nameof(ActiveDocumentSummary));
+				OnPropertyChanged(nameof(CanMoveRequestUp));
+				OnPropertyChanged(nameof(CanMoveRequestDown));
 			}
 		}
 	}
@@ -483,6 +492,12 @@ public sealed class MainPageViewModel : ObservableObject
 		set => SetProperty(ref _activeEditorEditableRangesJson, value);
 	}
 
+	public string ActiveEditorDiagnosticsJson
+	{
+		get => _activeEditorDiagnosticsJson;
+		set => SetProperty(ref _activeEditorDiagnosticsJson, value);
+	}
+
 	public string ActiveDocumentKindLabel
 	{
 		get => _activeDocumentKindLabel;
@@ -499,6 +514,32 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		get => _activeDocumentKindColor;
 		set => SetProperty(ref _activeDocumentKindColor, value);
+	}
+
+	public bool ShowEditorDebugStrip => IsActiveRequestEditor;
+
+	public string EditorDebugStateText
+	{
+		get => _editorDebugStateText;
+		set => SetProperty(ref _editorDebugStateText, value);
+	}
+
+	public string EditorDebugSummaryText
+	{
+		get => _editorDebugSummaryText;
+		set => SetProperty(ref _editorDebugSummaryText, value);
+	}
+
+	public string EditorDebugDetailText
+	{
+		get => _editorDebugDetailText;
+		set => SetProperty(ref _editorDebugDetailText, value);
+	}
+
+	public Color EditorDebugAccentColor
+	{
+		get => _editorDebugAccentColor;
+		set => SetProperty(ref _editorDebugAccentColor, value);
 	}
 
 	public string ResponseState
@@ -576,6 +617,34 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool CanSend => !_isSending && IsActiveRequestEditor;
 
+	public bool CanMoveWorkspaceLeft => GetSelectedWorkspaceIndex() > 0;
+
+	public bool CanMoveWorkspaceRight
+	{
+		get
+		{
+			int index = GetSelectedWorkspaceIndex();
+			return index >= 0 && index < Workspaces.Count - 1;
+		}
+	}
+
+	public bool CanMoveRequestUp => IsActiveRequestEditor && GetSelectedRequestIndex() > 0;
+
+	public bool CanMoveRequestDown
+	{
+		get
+		{
+			if (!IsActiveRequestEditor)
+			{
+				return false;
+			}
+
+			RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+			int index = GetSelectedRequestIndex();
+			return workspace is not null && index >= 0 && index < workspace.Documents.Count - 1;
+		}
+	}
+
 	public Color SelectedMethodColor => SelectedMethod switch
 	{
 		"GET" => _methodGet,
@@ -585,16 +654,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_ => _methodNeutral
 	};
 
-	public string CenterSurfaceStatus => CenterTabs.FirstOrDefault(tab => tab.IsSelected)?.Key switch
-	{
-		"request" => "HTTP-shaped draft surface",
-		"headers" => "Text-defined request header surface",
-		"body" => "Primary payload editor surface",
-		"script" => "Pre-execution logic surface",
-		"tests" => "Assertion and verification surface",
-		"variables" => "Workspace and request variables surface",
-		_ => "Editor-first center surface"
-	};
+	public string CenterSurfaceStatus => "FRS program editor surface";
 
 	public string RightSurfaceStatus => RightPaneTabs.FirstOrDefault(tab => tab.IsSelected)?.Key switch
 	{
@@ -645,6 +705,11 @@ public sealed class MainPageViewModel : ObservableObject
 
 		List<RequestWorkbenchWorkspaceState> defaults = BuildDefaultWorkspaces();
 		RequestWorkbenchState state = await _requestWorkbenchStateStore.LoadAsync(defaults);
+		state = RequestWorkbenchDocumentNormalizer.NormalizeLoadedWorkbenchState(state, out bool stateWasNormalized);
+		if (stateWasNormalized)
+		{
+			await _requestWorkbenchStateStore.SaveAsync(state);
+		}
 
 		_workspaceStates.Clear();
 		Workspaces.Clear();
@@ -678,14 +743,14 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(CanSend));
 		try
 		{
+			string executionSource = NormalizeCurrentRequestEditorSource(applyToEditor: true);
 			await PersistCurrentRequestAsync();
 			ForRestScriptExecutionOutcome outcome = await _scriptExecutionService.Execute(
 				BuildProfile(),
 				BuildWorkspaceSnapshot(),
-				RequestEditorText,
+				executionSource,
 				BuildEnvironmentDefinition(),
-				RequestName,
-				ScriptEditorText);
+				RequestName);
 
 			if (!outcome.Compilation.Succeeded || outcome.Compilation.Payload is null)
 			{
@@ -695,10 +760,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 			RequestName = outcome.Compilation.Payload.Request.Name;
 			SelectedMethod = outcome.Compilation.Payload.Request.Method.ToString().ToUpperInvariant();
-			ExecutionRun? latestRun = outcome.Execution?.Runs.LastOrDefault();
-			RequestTarget = string.IsNullOrWhiteSpace(latestRun?.TargetUri)
-				? outcome.Compilation.Payload.Request.UrlTemplate
-				: latestRun.TargetUri;
+			RequestTarget = outcome.Compilation.Payload.Request.UrlTemplate;
 			RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
 			UpdateCurrentDocumentMetadata();
 			ResponseState = outcome.Execution?.LatestResponse is { } response
@@ -713,7 +775,7 @@ public sealed class MainPageViewModel : ObservableObject
 				? FormatResponseSize(latestSizeResponse.SizeBytes)
 				: "--";
 			ExecutionStatus = outcome.Execution?.State == ExecutionState.Completed
-				? "Sent via .frs execution pipeline"
+				? "Ran request script"
 				: outcome.Execution?.State == ExecutionState.Failed
 					? "Execution failed"
 					: "Compiled request document";
@@ -999,6 +1061,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public void AddWorkspace()
 	{
+		CaptureActiveRequestIntoWorkspaceState();
 		string workspaceName = BuildNextWorkspaceName();
 		RequestWorkbenchWorkspaceState workspace = BuildUserWorkspace(workspaceName);
 		_workspaceStates[workspace.Id] = workspace;
@@ -1014,6 +1077,16 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			_ = PersistWorkbenchStateInBackground();
 		}
+	}
+
+	public void MoveSelectedWorkspaceLeft()
+	{
+		MoveSelectedWorkspace(-1);
+	}
+
+	public void MoveSelectedWorkspaceRight()
+	{
+		MoveSelectedWorkspace(1);
 	}
 
 	public void AddRequest()
@@ -1045,6 +1118,16 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			_ = PersistWorkbenchStateInBackground();
 		}
+	}
+
+	public void MoveSelectedRequestUp()
+	{
+		MoveSelectedRequest(-1);
+	}
+
+	public void MoveSelectedRequestDown()
+	{
+		MoveSelectedRequest(1);
 	}
 
 	public void SelectDocument(RequestDocumentViewModel? document)
@@ -1150,9 +1233,14 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		ExplorerSections.Clear();
+		foreach (NavigationSectionViewModel section in BuildExplorerSections(workspace))
+		{
+			ExplorerSections.Add(section);
+		}
+
 		ExplorerSections.Add(
 			new NavigationSectionViewModel(
-				"Workspace",
+				"Settings",
 				[
 					new NavigationItemViewModel(
 						"CFG",
@@ -1163,20 +1251,95 @@ public sealed class MainPageViewModel : ObservableObject
 						depth: 0,
 						documentKind: SettingsDocumentKind,
 						editorLanguage: "settings-toml")
-				]));
-		ExplorerSections.Add(
-			new NavigationSectionViewModel(
-				"Requests",
-				[
-					.. workspace.Documents.Select(
-						document => new NavigationItemViewModel(
-							document.Method.ToUpperInvariant(),
-							document.Title,
-							document.Summary,
-							document.Location,
-							ResolveMethodAccent(document.Method),
-							document.Method))
-				]));
+				],
+				"Workspace configuration",
+				supportsRequestActions: false));
+		OnPropertyChanged(nameof(CanMoveWorkspaceLeft));
+		OnPropertyChanged(nameof(CanMoveWorkspaceRight));
+		OnPropertyChanged(nameof(CanMoveRequestUp));
+		OnPropertyChanged(nameof(CanMoveRequestDown));
+	}
+
+	private IReadOnlyList<NavigationSectionViewModel> BuildExplorerSections(RequestWorkbenchWorkspaceState workspace)
+	{
+		List<NavigationSectionViewModel> sections = [];
+		bool supportsRequestActionsAssigned = false;
+
+		AddExplorerSection(
+			sections,
+			"Requests",
+			"Runnable request programs",
+			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "requests")),
+			ref supportsRequestActionsAssigned);
+		AddExplorerSection(
+			sections,
+			"Scratch",
+			"Ad hoc probes and experiments",
+			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "scratch")),
+			ref supportsRequestActionsAssigned);
+		AddExplorerSection(
+			sections,
+			"Scripts",
+			"Shared helpers and reusable flows",
+			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "scripts")),
+			ref supportsRequestActionsAssigned);
+		AddExplorerSection(
+			sections,
+			"Files",
+			"Other workspace documents",
+			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "files")),
+			ref supportsRequestActionsAssigned);
+
+		if (!supportsRequestActionsAssigned)
+		{
+			sections.Add(new NavigationSectionViewModel("Requests", [], "No request files yet", supportsRequestActions: true));
+		}
+
+		return sections;
+	}
+
+	private void AddExplorerSection(
+		ICollection<NavigationSectionViewModel> sections,
+		string title,
+		string description,
+		IEnumerable<RequestWorkbenchDocumentState> documents,
+		ref bool supportsRequestActionsAssigned)
+	{
+		List<NavigationItemViewModel> items =
+		[
+			.. documents.Select(
+				document => new NavigationItemViewModel(
+					document.Method.ToUpperInvariant(),
+					document.Title,
+					document.Summary,
+					document.Location,
+					ResolveMethodAccent(document.Method),
+					document.Method))
+		];
+
+		if (items.Count == 0)
+		{
+			return;
+		}
+
+		string subtitle = $"{items.Count} {(items.Count == 1 ? "file" : "files")}  {description}";
+		sections.Add(new NavigationSectionViewModel(title, items, subtitle, supportsRequestActions: !supportsRequestActionsAssigned));
+		supportsRequestActionsAssigned = true;
+	}
+
+	private static bool IsExplorerLocationInBucket(string location, string bucket)
+	{
+		string normalized = NormalizeExplorerLocation(location);
+		return bucket switch
+		{
+			"requests" => normalized.StartsWith("requests/", StringComparison.OrdinalIgnoreCase),
+			"scratch" => normalized.StartsWith("scratch/", StringComparison.OrdinalIgnoreCase),
+			"scripts" => normalized.StartsWith("scripts/", StringComparison.OrdinalIgnoreCase),
+			"files" => !normalized.StartsWith("requests/", StringComparison.OrdinalIgnoreCase)
+			           && !normalized.StartsWith("scratch/", StringComparison.OrdinalIgnoreCase)
+			           && !normalized.StartsWith("scripts/", StringComparison.OrdinalIgnoreCase),
+			_ => false
+		};
 	}
 
 	private RequestWorkbenchWorkspaceState? GetSelectedWorkspaceState()
@@ -1276,13 +1439,45 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private static RequestWorkbenchWorkspaceState BuildUserWorkspace(string workspaceName)
 	{
+		string workspaceSlug = BuildSlug(workspaceName, "workspace");
 		return BuildWorkspace(
 			Guid.NewGuid(),
 			workspaceName,
 			[
-				BuildDefaultDocumentState("Get Headers", "GET", "Inspect request headers round-trip", "/requests/httpbin/headers"),
-				BuildDefaultDocumentState("Post Echo", "POST", "Echo a JSON payload through httpbin", "/requests/httpbin/post"),
-				BuildDefaultDocumentState("Get UUID", "GET", "Fetch a quick generated identifier", "/requests/httpbin/uuid")
+				BuildDefaultDocumentState(
+					"Get Headers",
+					"GET",
+					"Inspect request headers round-trip",
+					$"/requests/{workspaceSlug}/get-headers",
+					"https://httpbin.org/headers",
+					tests:
+					[
+						"status == 200 \"returns 200\"",
+						"header \"Content-Type\" contains \"json\" \"json response\""
+					]),
+				BuildDefaultDocumentState(
+					"Post Echo",
+					"POST",
+					"Echo a JSON payload through httpbin",
+					$"/requests/{workspaceSlug}/post-echo",
+					"https://httpbin.org/post",
+					bodyContent: BuildBodyEditorText("Post Echo"),
+					tests:
+					[
+						"status == 200 \"returns 200\"",
+						"header \"Content-Type\" contains \"json\" \"json response\""
+					]),
+				BuildDefaultDocumentState(
+					"Get UUID",
+					"GET",
+					"Fetch a quick generated identifier",
+					$"/requests/{workspaceSlug}/get-uuid",
+					"https://httpbin.org/uuid",
+					tests:
+					[
+						"status == 200 \"returns 200\"",
+						"body contains \"uuid\" \"uuid field exists\""
+					])
 			]);
 	}
 
@@ -1385,6 +1580,31 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 	}
 
+	private int GetSelectedRequestIndex()
+	{
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return -1;
+		}
+
+		return workspace.Documents.FindIndex(
+			document => string.Equals(document.Location, RequestLocation, StringComparison.OrdinalIgnoreCase));
+	}
+
+	private int GetSelectedWorkspaceIndex()
+	{
+		for (int index = 0; index < Workspaces.Count; index++)
+		{
+			if (Workspaces[index].Id == _selectedWorkspaceId)
+			{
+				return index;
+			}
+		}
+
+		return -1;
+	}
+
 	private void SetSelected(IEnumerable<PaneTabViewModel> tabs, PaneTabViewModel selected)
 	{
 		foreach (PaneTabViewModel tab in tabs)
@@ -1408,8 +1628,8 @@ public sealed class MainPageViewModel : ObservableObject
 			SelectedMethod = state.Method;
 			RequestSummary = state.Summary;
 			RequestLocation = state.Location;
-			RequestEditorText = NormalizeLineEndings(state.RequestSource);
-			ScriptEditorText = NormalizeLineEndings(state.PreRequestScript);
+			RequestEditorText = NormalizeLineEndings(RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(state.RequestSource, state.PreRequestScript, state.Title));
+			ScriptEditorText = string.Empty;
 			SyncSupportEditorsFromRequestSource();
 		}
 		finally
@@ -1458,6 +1678,9 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		_activeDocumentKind = RequestDocumentKind;
 		ActivateCurrentCenterTabEditor();
+		OnPropertyChanged(nameof(ShowEditorDebugStrip));
+		OnPropertyChanged(nameof(CanMoveRequestUp));
+		OnPropertyChanged(nameof(CanMoveRequestDown));
 	}
 
 	private void ActivateSettingsEditor(NavigationItemViewModel item)
@@ -1469,9 +1692,13 @@ public sealed class MainPageViewModel : ObservableObject
 		ActiveDocumentLabel = item.Title;
 		ActiveEditorLanguage = item.EditorLanguage;
 		ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
+		ActiveEditorDiagnosticsJson = "[]";
 		SetActiveEditorTextInternal(_themeConfigText);
 		ForceActiveEditorRefresh();
+		OnPropertyChanged(nameof(ShowEditorDebugStrip));
 		OnPropertyChanged(nameof(CanSend));
+		OnPropertyChanged(nameof(CanMoveRequestUp));
+		OnPropertyChanged(nameof(CanMoveRequestDown));
 	}
 
 	private void ActivateCurrentCenterTabEditor()
@@ -1481,81 +1708,27 @@ public sealed class MainPageViewModel : ObservableObject
 			return;
 		}
 
-		string selectedTabKey = GetSelectedCenterTabKey();
 		ActiveDocumentLabel = RequestDocumentLabel;
-		ActiveDocumentKindLabel = selectedTabKey switch
-		{
-			"request" => SelectedMethod,
-			"headers" => "HEADERS",
-			"body" => _requestBodyMode == RequestBodyMode.Json ? "BODY JSON" : $"BODY {_requestBodyMode.ToString().ToUpperInvariant()}",
-			"script" => "SCRIPT",
-			"tests" => "TESTS",
-			"variables" => "VARS",
-			_ => SelectedMethod
-		};
-		ActiveDocumentKindColor = selectedTabKey switch
-		{
-			"script" => _warningColor,
-			"tests" => _successColor,
-			_ => SelectedMethodColor
-		};
-		ActiveEditorLanguage = selectedTabKey switch
-		{
-			"body" => _requestBodyMode == RequestBodyMode.Json ? "json" : "plaintext",
-			"script" => "csharp",
-			_ => "forrest"
-		};
+		ActiveDocumentKindLabel = SelectedMethod;
+		ActiveDocumentKindColor = SelectedMethodColor;
+		ActiveEditorLanguage = "forrest";
 		ActiveEditorEditableRangesJson = "[]";
-		SetActiveEditorTextInternal(selectedTabKey switch
-		{
-			"headers" => HeadersEditorText,
-			"body" => BodyEditorText,
-			"script" => ScriptEditorText,
-			"tests" => TestsEditorText,
-			"variables" => VariablesEditorText,
-			_ => RequestEditorText
-		});
+		ActiveEditorDiagnosticsJson = _requestEditorDiagnosticsJson;
+		SetActiveEditorTextInternal(RequestEditorText);
 		ForceActiveEditorRefresh();
+		OnPropertyChanged(nameof(ShowEditorDebugStrip));
 		OnPropertyChanged(nameof(CanSend));
 	}
 
 	private string GetSelectedCenterTabKey()
 	{
-		return CenterTabs.FirstOrDefault(static tab => tab.IsSelected)?.Key ?? "request";
+		return "request";
 	}
 
 	private void ApplyRequestEditorChange(string value)
 	{
-		string selectedTabKey = GetSelectedCenterTabKey();
-		switch (selectedTabKey)
-		{
-			case "request":
-				_requestEditorText = NormalizeLineEndings(value);
-				SyncSupportEditorsFromRequestSource();
-				break;
-			case "headers":
-				_headersEditorText = NormalizeLineEndings(value);
-				_requestEditorText = _documentTextService.UpsertHeaders(_requestEditorText, _headersEditorText);
-				break;
-			case "body":
-				_bodyEditorText = NormalizeLineEndings(value);
-				_requestEditorText = _documentTextService.UpsertBody(_requestEditorText, _requestBodyMode, _bodyEditorText);
-				break;
-			case "script":
-				_scriptEditorText = NormalizeLineEndings(value);
-				break;
-			case "tests":
-				_testsEditorText = NormalizeLineEndings(value);
-				_requestEditorText = _documentTextService.UpsertTests(_requestEditorText, _testsEditorText);
-				break;
-			case "variables":
-				_variablesEditorText = NormalizeLineEndings(value);
-				_requestEditorText = _documentTextService.UpsertVariables(_requestEditorText, _variablesEditorText);
-				break;
-			default:
-				_requestEditorText = NormalizeLineEndings(value);
-				break;
-		}
+		_requestEditorText = NormalizeLineEndings(value);
+		SyncSupportEditorsFromRequestSource();
 
 		UpdateRequestMetadataFromSource();
 		MarkCurrentDocumentDirty();
@@ -1606,6 +1779,15 @@ public sealed class MainPageViewModel : ObservableObject
 			_requestEditorText,
 			GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId,
 			RequestName);
+		ApplyEditorDebugSnapshot(
+			ForRestEditorDebugSnapshotFactory.Create(
+				_requestEditorText,
+				compilation,
+				SelectedWorkspace,
+				SelectedEnvironment,
+				RequestName,
+				BuildDefaultRequestUrl(RequestLocation)));
+
 		if (!compilation.Succeeded || compilation.Payload is null)
 		{
 			ExecutionStatus = compilation.Diagnostics.Count == 0
@@ -1696,9 +1878,34 @@ public sealed class MainPageViewModel : ObservableObject
 			Method = SelectedMethod,
 			Summary = RequestSummary,
 			Location = RequestLocation,
-			RequestSource = NormalizeLineEndings(RequestEditorText),
-			PreRequestScript = NormalizeLineEndings(ScriptEditorText)
+			RequestSource = NormalizeCurrentRequestEditorSource(applyToEditor: false),
+			PreRequestScript = string.Empty
 		};
+	}
+
+	private string NormalizeCurrentRequestEditorSource(bool applyToEditor)
+	{
+		string normalized = NormalizeLineEndings(
+			RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(
+				_requestEditorText,
+				preRequestScript: string.Empty,
+				string.IsNullOrWhiteSpace(RequestName) ? "Untitled Request" : RequestName));
+		if (!applyToEditor || string.Equals(_requestEditorText, normalized, StringComparison.Ordinal))
+		{
+			return normalized;
+		}
+
+		_requestEditorText = normalized;
+		OnPropertyChanged(nameof(RequestEditorText));
+		if (IsActiveRequestEditor && !string.Equals(_activeEditorText, normalized, StringComparison.Ordinal))
+		{
+			SetActiveEditorTextInternal(normalized);
+		}
+
+		SyncSupportEditorsFromRequestSource();
+		UpdateRequestMetadataFromSource();
+		MarkCurrentDocumentDirty();
+		return normalized;
 	}
 
 	private void UpdateCurrentDocumentMetadata()
@@ -1763,6 +1970,79 @@ public sealed class MainPageViewModel : ObservableObject
 				{
 				}
 			});
+	}
+
+	private void MoveSelectedRequest(int offset)
+	{
+		if (offset == 0)
+		{
+			return;
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return;
+		}
+
+		int currentIndex = workspace.Documents.FindIndex(
+			document => string.Equals(document.Location, RequestLocation, StringComparison.OrdinalIgnoreCase));
+		if (currentIndex < 0)
+		{
+			return;
+		}
+
+		int nextIndex = currentIndex + offset;
+		if (nextIndex < 0 || nextIndex >= workspace.Documents.Count)
+		{
+			return;
+		}
+
+		List<RequestWorkbenchDocumentState> reordered = [.. workspace.Documents];
+		(reordered[currentIndex], reordered[nextIndex]) = (reordered[nextIndex], reordered[currentIndex]);
+		UpdateSelectedWorkspaceState(
+			currentWorkspace => currentWorkspace with
+			{
+				SelectedEnvironment = SelectedEnvironment,
+				SelectedDocumentLocation = RequestLocation,
+				Documents = reordered
+			});
+
+		ApplyWorkspaceSelection(workspace.Id);
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+		}
+	}
+
+	private void MoveSelectedWorkspace(int offset)
+	{
+		if (offset == 0)
+		{
+			return;
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		int currentIndex = GetSelectedWorkspaceIndex();
+		if (currentIndex < 0)
+		{
+			return;
+		}
+
+		int nextIndex = currentIndex + offset;
+		if (nextIndex < 0 || nextIndex >= Workspaces.Count)
+		{
+			return;
+		}
+
+		Workspaces.Move(currentIndex, nextIndex);
+		OnPropertyChanged(nameof(CanMoveWorkspaceLeft));
+		OnPropertyChanged(nameof(CanMoveWorkspaceRight));
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+		}
 	}
 
 	private void CaptureActiveRequestIntoWorkspaceState()
@@ -1946,14 +2226,33 @@ public sealed class MainPageViewModel : ObservableObject
 		ResponseRawText = ResponsePresentationFormatter.NormalizeDisplayText(_latestResponseSnapshot?.RawResponse);
 	}
 
+	private void ApplyEditorDebugSnapshot(ForRestEditorDebugSnapshot snapshot)
+	{
+		_requestEditorDiagnosticsJson = snapshot.DiagnosticsJson;
+		if (IsActiveRequestEditor)
+		{
+			ActiveEditorDiagnosticsJson = snapshot.DiagnosticsJson;
+		}
+
+		EditorDebugStateText = snapshot.StatusText;
+		EditorDebugSummaryText = snapshot.SummaryText;
+		EditorDebugDetailText = snapshot.DetailText;
+		EditorDebugAccentColor = ResolveEditorDebugAccentColor(snapshot.State);
+		DebugOutputText = snapshot.DebugOutputText;
+	}
+
 	private string BuildDebugOutput(ForRestScriptExecutionOutcome outcome)
 	{
+		ExecutionRun? latestRun = outcome.Execution?.Runs.LastOrDefault();
+		string target = string.IsNullOrWhiteSpace(latestRun?.TargetUri)
+			? outcome.Compilation.Payload?.Request.UrlTemplate ?? RequestTarget
+			: latestRun.TargetUri;
 		List<string> lines =
 		[
 			$"Workspace: {SelectedWorkspace}",
 			$"Environment: {SelectedEnvironment}",
 			$"Request: {SelectedMethod} {RequestName}",
-			$"Target: {RequestTarget}"
+			$"Target: {target}"
 		];
 
 		if (outcome.Compilation.Diagnostics.Count > 0)
@@ -1968,7 +2267,6 @@ public sealed class MainPageViewModel : ObservableObject
 			return string.Join(Environment.NewLine, lines);
 		}
 
-		ExecutionRun? latestRun = outcome.Execution.Runs.LastOrDefault();
 		lines.Add(string.Empty);
 		lines.Add($"Execution state: {outcome.Execution.State}");
 		if (latestRun?.Response is { } response)
@@ -1998,6 +2296,16 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		return string.Join(Environment.NewLine, lines);
+	}
+
+	private Color ResolveEditorDebugAccentColor(ForRestEditorDebugState state)
+	{
+		return state switch
+		{
+			ForRestEditorDebugState.Error => _dangerColor,
+			ForRestEditorDebugState.Warning => _warningColor,
+			_ => _successColor,
+		};
 	}
 
 	private void FocusRightPaneTab(string key)
@@ -2102,6 +2410,21 @@ public sealed class MainPageViewModel : ObservableObject
 						"Fetch a simple collection response",
 						"/requests/jsonplaceholder/users",
 						"https://jsonplaceholder.typicode.com/users",
+						scriptLines:
+						[
+							"# Probe a collection response like code, not a form.",
+							"request.headers[\"X-Request-Source\"] = \"maui\"",
+							"let sent = request.send()",
+							string.Empty,
+							"if sent.status == 200 {",
+							"  runtime first_user_email = sent[0].email",
+							"  foreach index in range(0, 2) {",
+							"    log sent[index].username",
+							"  }",
+							"} else {",
+							"  warn sent.status",
+							"}"
+						],
 						tests:
 						[
 							"status == 200 \"returns 200\"",
@@ -2154,8 +2477,8 @@ public sealed class MainPageViewModel : ObservableObject
 			Method = method,
 			Summary = summary,
 			Location = location,
-			RequestSource = BuildRequestEditorText(title, method, target, bodyContent, tests, variableLines),
-			PreRequestScript = BuildScriptEditorText(title, scriptLines)
+			RequestSource = BuildRequestEditorText(title, method, target, bodyContent, tests, variableLines, scriptLines),
+			PreRequestScript = string.Empty
 		};
 	}
 
@@ -2202,45 +2525,39 @@ public sealed class MainPageViewModel : ObservableObject
 		string target,
 		string? bodyContent = null,
 		IReadOnlyList<string>? tests = null,
-		IReadOnlyList<string>? variableLines = null)
+		IReadOnlyList<string>? variableLines = null,
+		IReadOnlyList<string>? scriptLines = null)
 	{
+		string escapedTitle = EscapeForForRestString(title);
+		string escapedTarget = EscapeForForRestString(target);
 		List<string> lines =
 		[
-			"meta {",
-			$"  name = \"{title}\"",
-			"}",
-			string.Empty,
-			"vars {"
+			$"name \"{escapedTitle}\"",
+			$"method {method}",
+			$"url \"{escapedTarget}\"",
+			"timeout 15000",
+			"max_send_iterations 3",
+			"redirects true",
+			"ssl true",
+			"history true"
 		];
 
-		foreach (string variableLine in variableLines ?? ["runtime trace_id = guid()"])
-		{
-			lines.Add($"  {variableLine}");
-		}
-
-		lines.Add("}");
-		lines.Add(string.Empty);
-		lines.Add("request {");
-		lines.Add($"  method = {method}");
-		lines.Add($"  url = \"{target}\"");
-		lines.Add("  timeout = 15000");
-		lines.Add("  max_send_iterations = 3");
-		lines.Add("  redirects = true");
-		lines.Add("  ssl = true");
-		lines.Add("  history = true");
 		if (!string.IsNullOrWhiteSpace(bodyContent))
 		{
-			lines.Add("  content_type = \"application/json\"");
+			lines.Add("content_type \"application/json\"");
 		}
 
-		lines.Add("}");
 		lines.Add(string.Empty);
-		lines.Add("headers {");
-		lines.Add("  Accept = \"application/json\"");
-		lines.Add("  X-Workspace = \"{{workspace_name}}\"");
-		lines.Add("  X-Environment = \"{{environment_name}}\"");
-		lines.Add("  X-Correlation-Id = \"{{trace_id}}\"");
-		lines.Add("}");
+		foreach (string variableLine in variableLines ?? ["runtime trace_id = guid()"])
+		{
+			lines.Add(variableLine);
+		}
+
+		lines.Add(string.Empty);
+		lines.Add("header \"Accept\" = \"application/json\"");
+		lines.Add("header \"X-Workspace\" = \"{{workspace_name}}\"");
+		lines.Add("header \"X-Environment\" = \"{{environment_name}}\"");
+		lines.Add("header \"X-Correlation-Id\" = \"{{trace_id}}\"");
 
 		if (!string.IsNullOrWhiteSpace(bodyContent))
 		{
@@ -2251,13 +2568,17 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		lines.Add(string.Empty);
-		lines.Add("tests {");
-		foreach (string testLine in tests ?? ["status == 200 \"returns 200\"", "header \"Content-Type\" contains \"json\" \"json response\""])
+		foreach (string scriptLine in BuildScriptEditorLines(scriptLines))
 		{
-			lines.Add($"  {testLine}");
+			lines.Add(scriptLine);
 		}
 
-		lines.Add("}");
+		lines.Add(string.Empty);
+		foreach (string testLine in tests ?? ["status == 200 \"returns 200\"", "header \"Content-Type\" contains \"json\" \"json response\""])
+		{
+			lines.Add($"expect {testLine}");
+		}
+
 		return string.Join(Environment.NewLine, lines);
 	}
 
@@ -2280,22 +2601,37 @@ public sealed class MainPageViewModel : ObservableObject
 			[
 				"{",
 				$"  \"request\": \"{title}\",",
-				"  \"createdBy\": \"for-rest\"",
+				"  \"createdBy\": \"for-rest\",",
+				"  \"traceId\": \"{{trace_id}}\"",
 				"}"
 			]);
 	}
 
-	private static string BuildScriptEditorText(string title, IReadOnlyList<string>? scriptLines = null)
+	private static IReadOnlyList<string> BuildScriptEditorLines(IReadOnlyList<string>? scriptLines = null)
 	{
-		return string.Join(
-			Environment.NewLine,
-			scriptLines
+		return scriptLines
 			??
 			[
-				$"variables.Set(\"request_name\", \"{title}\");",
-				"request.SetHeader(\"X-Request-Source\", \"maui\");",
-				"console.Log(\"Prepared request before send.\");"
-			]);
+				"# Write ForRest code here. request.send() returns the latest response snapshot.",
+				"request.headers[\"X-Request-Source\"] = \"maui\"",
+				"let sent = request.send()",
+				string.Empty,
+				"if sent.status == 200 {",
+				"  runtime last_status = sent.status",
+				"  foreach step in range(0, 2) {",
+				"    log step",
+				"  }",
+				"} else {",
+				"  warn sent.status",
+				"}"
+			];
+	}
+
+	private static string EscapeForForRestString(string value)
+	{
+		return (value ?? string.Empty)
+			.Replace("\\", "\\\\", StringComparison.Ordinal)
+			.Replace("\"", "\\\"", StringComparison.Ordinal);
 	}
 
 	private static string BuildTestsEditorText()
@@ -2321,6 +2657,30 @@ public sealed class MainPageViewModel : ObservableObject
 	private static string NormalizeLineEndings(string text)
 	{
 		return (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+	}
+
+	private static string NormalizeExplorerLocation(string location)
+	{
+		return (location ?? string.Empty)
+			.Replace('\\', '/')
+			.Trim()
+			.TrimStart('~')
+			.TrimStart('/');
+	}
+
+	private static string BuildSlug(string value, string fallback)
+	{
+		char[] slugCharacters = (value ?? string.Empty)
+			.ToLowerInvariant()
+			.Select(static character => char.IsLetterOrDigit(character) ? character : '-')
+			.ToArray();
+
+		string slug = string.Join(
+			"-",
+			new string(slugCharacters)
+				.Split('-', StringSplitOptions.RemoveEmptyEntries));
+
+		return string.IsNullOrWhiteSpace(slug) ? fallback : slug;
 	}
 
 	private static string FormatResponseSize(long sizeBytes)

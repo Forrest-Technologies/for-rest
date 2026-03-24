@@ -22,26 +22,17 @@ public sealed class ForRestScriptExecutionServiceTests
             var executionService = CreateService();
             var source =
                 """"
-                meta {
-                  name = "Scripted Echo"
-                }
+                name "Scripted Echo"
+                method POST
+                url "http://127.0.0.1:__PORT__/echo/{{resource_id}}?trace={{trace_id}}"
+                content_type "application/json"
+                history false
 
-                vars {
-                  request resource_id = "42"
-                  runtime trace_id = "trace-123"
-                }
+                request resource_id = "42"
+                runtime trace_id = "trace-123"
 
-                request {
-                  method = POST
-                  url = "http://127.0.0.1:__PORT__/echo/{{resource_id}}?trace={{trace_id}}"
-                  content_type = "application/json"
-                  history = false
-                }
-
-                headers {
-                  Accept = "application/json"
-                  X-Trace-Id = "{{trace_id}}"
-                }
+                header "Accept" = "application/json"
+                header "X-Trace-Id" = "{{trace_id}}"
 
                 body json """
                 {
@@ -50,15 +41,13 @@ public sealed class ForRestScriptExecutionServiceTests
                 }
                 """
 
-                extract {
-                  runtime echoed_id = json "$.payload.id"
-                }
+                extract runtime echoed_id = json "$.payload.id"
 
-                tests {
-                  status == 201 "returns 201"
-                  json "$.payload.trace" == "trace-123" "trace matches"
-                  header "Content-Type" contains "application/json" "content type matches"
-                }
+                let sent = request.send()
+
+                expect status == 201 "returns 201"
+                expect json "$.payload.trace" == "trace-123" "trace matches"
+                expect header "Content-Type" contains "application/json" "content type matches"
                 """".Replace("__PORT__", port.ToString());
 
             var result = await executionService.Execute(
@@ -76,14 +65,249 @@ public sealed class ForRestScriptExecutionServiceTests
 
             var capturedRequest = (await requestCaptureTask).Single();
 
-            Assert.IsTrue(result.Compilation.Succeeded);
+            Assert.IsTrue(
+                result.Compilation.Succeeded,
+                string.Join(Environment.NewLine, result.Compilation.Diagnostics.Select(static item => item.Message)));
             Assert.IsNotNull(result.Execution);
-            Assert.AreEqual(ExecutionState.Completed, result.Execution.State);
+            Assert.AreEqual(
+                ExecutionState.Completed,
+                result.Execution.State,
+                result.Execution.Runs.Single().ErrorMessage);
             Assert.AreEqual("/echo/42?trace=trace-123", capturedRequest.PathAndQuery);
             Assert.AreEqual($"http://127.0.0.1:{port}/echo/42?trace=trace-123", result.Execution.Runs.Single().TargetUri);
             Assert.AreEqual("trace-123", capturedRequest.Headers["X-Trace-Id"]);
             StringAssert.Contains(capturedRequest.Body, "\"trace\": \"trace-123\"");
             Assert.AreEqual("42", result.Execution.RuntimeVariables.Single(static item => item.Key == "echoed_id").Value);
+            Assert.IsTrue(result.Execution.Tests.All(static item => item.State == TestOutcomeState.Passed));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public async Task Execute_runs_request_send_from_top_level_frs_code()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(listener, 1, static _ => 200);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                name "Flow Send"
+                method GET
+                url "http://127.0.0.1:__PORT__/flow"
+                history false
+                max_send_iterations 2
+
+                request.headers["X-Flow-Step"] = "ran"
+                let sent = request.send()
+                if response.attempt == 1 {
+                  runtime probe_attempt = response.attempt
+                }
+
+                expect status == 200 "returns 200"
+                expect header "Content-Type" contains "application/json" "json response"
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Flow Demo",
+                    },
+                },
+                source,
+                null);
+
+            Assert.IsTrue(
+                result.Compilation.Succeeded,
+                string.Join(Environment.NewLine, result.Compilation.Diagnostics.Select(static item => item.Message)));
+            Assert.IsNotNull(result.Execution);
+            if (result.Execution.State != ExecutionState.Completed)
+            {
+                Assert.Fail(
+                    string.Join(
+                        Environment.NewLine,
+                        [
+                            $"State: {result.Execution.State}",
+                            $"Error: {result.Execution.Runs.Single().ErrorMessage}",
+                            $"Response: {result.Execution.LatestResponse?.StatusCode}",
+                            $"Tests: {string.Join(", ", result.Execution.Tests.Select(static test => $"{test.Name}:{test.State}"))}",
+                            $"Console: {string.Join(" | ", result.Execution.ConsoleEntries.Select(static entry => $"{entry.Level}:{entry.Message}"))}"
+                        ]));
+            }
+
+            var capturedRequest = (await WaitForRequestsAsync(requestCaptureTask)).Single();
+            Assert.AreEqual("ran", capturedRequest.Headers["X-Flow-Step"]);
+            Assert.AreEqual("1", result.Execution.RuntimeVariables.Single(static item => item.Key == "probe_attempt").Value);
+            StringAssert.Contains(result.Execution.LatestResponse?.Body ?? string.Empty, "\"attempt\":1");
+            Assert.IsTrue(result.Execution.Tests.All(static item => item.State == TestOutcomeState.Passed));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public async Task Execute_accepts_semicolon_heavy_mixed_style_scripts_without_parse_failures()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(listener, 1, static _ => 200);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                name "Mixed Script";
+                method GET;
+                url "http://127.0.0.1:__PORT__/mixed/{{resource_id}}";
+                history false;
+                max_send_iterations 1;
+
+                request resource_id = "42";
+                request.SetHeader("X-Mode", "mixed");
+                console.Log("Prepared request before send.");
+                let sent = request.send();
+                if (response.status == 200) {
+                  runtime attempt_seen = response.attempt;
+                }
+
+                expect status == 200 "returns 200";
+                expect header "Content-Type" contains "json" "json response";
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Mixed Demo",
+                    },
+                },
+                source,
+                null);
+
+            var capturedRequest = (await WaitForRequestsAsync(requestCaptureTask)).Single();
+
+            Assert.IsTrue(
+                result.Compilation.Succeeded,
+                string.Join(Environment.NewLine, result.Compilation.Diagnostics.Select(static item => item.Message)));
+            Assert.IsNotNull(result.Execution);
+            Assert.AreEqual(ExecutionState.Completed, result.Execution.State, result.Execution.Runs.Single().ErrorMessage);
+            Assert.AreEqual("/mixed/42", capturedRequest.PathAndQuery);
+            Assert.AreEqual("mixed", capturedRequest.Headers["X-Mode"]);
+            Assert.AreEqual("1", result.Execution.RuntimeVariables.Single(static item => item.Key == "attempt_seen").Value);
+            Assert.IsTrue(result.Execution.Tests.All(static item => item.State == TestOutcomeState.Passed));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public async Task Execute_supports_indexed_collection_access_on_request_send_results()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(
+            listener,
+            1,
+            static _ => 200,
+            static _ =>
+                """
+                [
+                  {
+                    "email": "alpha@example.test",
+                    "username": "alpha"
+                  },
+                  {
+                    "email": "beta@example.test",
+                    "username": "beta"
+                  }
+                ]
+                """);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                name "Users Feed"
+                method GET
+                url "http://127.0.0.1:__PORT__/requests/users/list/42"
+                history false
+                max_send_iterations 3
+
+                request.headers["X-Request-Source"] = "maui"
+                let sent = request.send()
+
+                if sent.status == 200 {
+                  runtime first_user_email = sent[0].email
+                  foreach index in range(0, 2) {
+                    log sent[index].username
+                  }
+                } else {
+                  warn sent.status
+                }
+
+                expect status == 200 "returns 200"
+                expect header "Content-Type" contains "json" "json response"
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Users Feed Demo",
+                    },
+                },
+                source,
+                null);
+
+            var capturedRequest = (await WaitForRequestsAsync(requestCaptureTask)).Single();
+
+            Assert.IsTrue(
+                result.Compilation.Succeeded,
+                string.Join(Environment.NewLine, result.Compilation.Diagnostics.Select(static item => item.Message)));
+            Assert.IsNotNull(result.Execution);
+            if (result.Execution.State != ExecutionState.Completed)
+            {
+                Assert.Fail(
+                    string.Join(
+                        Environment.NewLine,
+                        [
+                            $"State: {result.Execution.State}",
+                            $"Error: {result.Execution.Runs.Single().ErrorMessage}",
+                            $"Response: {result.Execution.LatestResponse?.StatusCode}",
+                            $"Console: {string.Join(" | ", result.Execution.ConsoleEntries.Select(static entry => $"{entry.Level}:{entry.Message}"))}"
+                        ]));
+            }
+
+            Assert.AreEqual("/requests/users/list/42", capturedRequest.PathAndQuery);
+            Assert.AreEqual("alpha@example.test", result.Execution.RuntimeVariables.Single(static item => item.Key == "first_user_email").Value);
+            CollectionAssert.AreEqual(
+                new[] { "alpha", "beta" },
+                result.Execution.ConsoleEntries.Select(static entry => entry.Message).Where(static message => !string.IsNullOrWhiteSpace(message)).ToArray());
             Assert.IsTrue(result.Execution.Tests.All(static item => item.State == TestOutcomeState.Passed));
         }
         finally
@@ -208,7 +432,7 @@ public sealed class ForRestScriptExecutionServiceTests
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var requestCaptureTask = CaptureRequests(listener, 2, static _ => 200);
+        var requestCaptureTask = CaptureRequests(listener, 1, static _ => 200);
 
         try
         {
@@ -253,9 +477,135 @@ public sealed class ForRestScriptExecutionServiceTests
             Assert.IsTrue(result.Compilation.Succeeded);
             Assert.IsNotNull(result.Execution);
             Assert.AreEqual(ExecutionState.Completed, result.Execution.State);
-            Assert.HasCount(2, capturedRequests);
+            Assert.HasCount(1, capturedRequests);
             Assert.AreEqual("1", result.Execution.RuntimeVariables.Single(static item => item.Key == "probe_attempt").Value);
+            StringAssert.Contains(result.Execution.LatestResponse?.Body ?? string.Empty, "\"attempt\":1");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public async Task Execute_allows_script_to_capture_each_send_and_uses_last_send_for_run_output()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(listener, 2, static _ => 200);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                meta {
+                  name = "Multi Send"
+                }
+
+                request {
+                  method = GET
+                  url = "http://127.0.0.1:__PORT__/probe?step=1"
+                  history = false
+                  max_send_iterations = 3
+                }
+
+                tests {
+                  status == 200 "returns 200"
+                }
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Multi Demo",
+                    },
+                },
+                source,
+                null,
+                preRequestScriptOverride:
+                """
+                var first = await request.send();
+                variables.Set("first_attempt", first.attempt.ToString());
+                request.Url = request.Url.Replace("step=1", "step=2", StringComparison.Ordinal);
+                var second = await request.send();
+                variables.Set("second_attempt", second.attempt.ToString());
+                """);
+
+            var capturedRequests = await requestCaptureTask;
+            ExecutionRun run = result.Execution!.Runs.Single();
+
+            Assert.IsTrue(result.Compilation.Succeeded);
+            Assert.IsNotNull(result.Execution);
+            Assert.AreEqual(ExecutionState.Completed, result.Execution.State);
+            Assert.HasCount(2, capturedRequests);
+            Assert.AreEqual("/probe?step=1", capturedRequests[0].PathAndQuery);
+            Assert.AreEqual("/probe?step=2", capturedRequests[1].PathAndQuery);
+            Assert.AreEqual("1", result.Execution.RuntimeVariables.Single(static item => item.Key == "first_attempt").Value);
+            Assert.AreEqual("2", result.Execution.RuntimeVariables.Single(static item => item.Key == "second_attempt").Value);
+            Assert.AreEqual($"http://127.0.0.1:{port}/probe?step=2", run.TargetUri);
             StringAssert.Contains(result.Execution.LatestResponse?.Body ?? string.Empty, "\"attempt\":2");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public async Task Execute_preserves_last_send_details_when_pre_request_script_fails_after_send()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(listener, 1, static _ => 200);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                request {
+                  method = GET
+                  url = "http://127.0.0.1:__PORT__/boom"
+                  history = false
+                }
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Failure Demo",
+                    },
+                },
+                source,
+                null,
+                preRequestScriptOverride:
+                """
+                await request.send();
+                throw new InvalidOperationException("boom after send");
+                """);
+
+            var capturedRequests = await requestCaptureTask;
+            ExecutionRun run = result.Execution!.Runs.Single();
+
+            Assert.IsTrue(result.Compilation.Succeeded);
+            Assert.IsNotNull(result.Execution);
+            Assert.AreEqual(ExecutionState.Failed, result.Execution.State);
+            Assert.HasCount(1, capturedRequests);
+            Assert.AreEqual($"http://127.0.0.1:{port}/boom", run.TargetUri);
+            Assert.IsNotNull(run.Response);
+            StringAssert.Contains(run.ErrorMessage, "boom after send");
+            StringAssert.Contains(run.Response.Body, "\"attempt\":1");
         }
         finally
         {
@@ -334,6 +684,7 @@ public sealed class ForRestScriptExecutionServiceTests
         TcpListener listener,
         int requestCount,
         Func<int, int> statusCodeSelector,
+        Func<int, string>? responseBodySelector = null,
         CancellationToken cancellationToken = default)
     {
         var requests = new List<CapturedRequest>();
@@ -386,7 +737,8 @@ public sealed class ForRestScriptExecutionServiceTests
 
             var statusCode = statusCodeSelector(attempt);
             var reasonPhrase = statusCode == 500 ? "Server Error" : statusCode == 201 ? "Created" : "OK";
-            var responseBody = $$"""{"payload":{"id":"42","trace":"trace-123"},"attempt":{{attempt}}}""";
+            var responseBody = responseBodySelector?.Invoke(attempt)
+                ?? $$"""{"payload":{"id":"42","trace":"trace-123"},"attempt":{{attempt}}}""";
             var response = $"HTTP/1.1 {statusCode} {reasonPhrase}\r\nContent-Type: application/json\r\nContent-Length: {Encoding.UTF8.GetByteCount(responseBody)}\r\nConnection: close\r\n\r\n{responseBody}";
             var responseBytes = Encoding.UTF8.GetBytes(response);
             await stream.WriteAsync(responseBytes, cancellationToken);
@@ -394,6 +746,17 @@ public sealed class ForRestScriptExecutionServiceTests
         }
 
         return requests;
+    }
+
+    private static async Task<List<CapturedRequest>> WaitForRequestsAsync(Task<List<CapturedRequest>> requestCaptureTask, int timeoutMilliseconds = 5000)
+    {
+        Task completedTask = await Task.WhenAny(requestCaptureTask, Task.Delay(timeoutMilliseconds));
+        if (!ReferenceEquals(completedTask, requestCaptureTask))
+        {
+            Assert.Fail($"Timed out waiting for captured requests after {timeoutMilliseconds} ms.");
+        }
+
+        return await requestCaptureTask;
     }
 
     private sealed record CapturedRequest(

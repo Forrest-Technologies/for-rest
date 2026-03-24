@@ -1,4 +1,6 @@
 using ForRest.Maui.ViewModels;
+using ForRest.Maui.Services;
+using Microsoft.Maui.Controls.Shapes;
 
 namespace ForRest.Maui.Controls;
 
@@ -7,16 +9,15 @@ public partial class WorkbenchCenterPane : ContentView
 	public WorkbenchCenterPane()
 	{
 		InitializeComponent();
+		Loaded += (_, _) => EnsureEditorSurface();
 	}
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
 
-	private void OnTabClicked(object? sender, EventArgs e)
+	protected override void OnBindingContextChanged()
 	{
-		if (sender is Button { CommandParameter: PaneTabViewModel tab })
-		{
-			ViewModel.SelectCenterTab(tab);
-		}
+		base.OnBindingContextChanged();
+		EnsureEditorSurface();
 	}
 
 	private async void OnEditorSendRequested(object? sender, EventArgs e)
@@ -27,5 +28,91 @@ public partial class WorkbenchCenterPane : ContentView
 	private async void OnSendClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.SendAsync();
+	}
+
+	private void EnsureEditorSurface()
+	{
+		if (EditorHost.Content is not null)
+		{
+			return;
+		}
+
+		try
+		{
+			EditorHost.Content = AppLaunchGuard.IsSafeModeEnabled
+				? BuildFallbackEditor()
+				: BuildMonacoEditor();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Failed to construct the workbench editor surface.", exception);
+			EditorHost.Content = BuildFallbackEditor();
+		}
+	}
+
+	private View BuildMonacoEditor()
+	{
+		MonacoEditorSurface editor = new();
+		editor.SetBinding(MonacoEditorSurface.LanguageProperty, nameof(MainPageViewModel.ActiveEditorLanguage));
+		editor.SetBinding(MonacoEditorSurface.DiagnosticsJsonProperty, nameof(MainPageViewModel.ActiveEditorDiagnosticsJson));
+		editor.SetBinding(MonacoEditorSurface.EditableRangesJsonProperty, nameof(MainPageViewModel.ActiveEditorEditableRangesJson));
+		editor.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
+		editor.SendRequested += OnEditorSendRequested;
+		return editor;
+	}
+
+	private View BuildFallbackEditor()
+	{
+		string recoveryMessage = AppLaunchGuard.IsSafeModeEnabled
+			? $"{AppLaunchGuard.SafeModeReason}{Environment.NewLine}Diagnostics: {AppLaunchGuard.StartupLogPath}"
+			: $"ForRest switched to the fallback editor because the Monaco surface failed to initialize.{Environment.NewLine}Diagnostics: {AppLaunchGuard.StartupLogPath}";
+
+		Border banner = new()
+		{
+			Margin = new Thickness(10, 10, 10, 0),
+			Padding = new Thickness(10, 8),
+			BackgroundColor = Color.FromArgb("#FFF6E6"),
+			Stroke = Color.FromArgb("#D8B46E"),
+			StrokeThickness = 1,
+			StrokeShape = new RoundRectangle
+			{
+				CornerRadius = new CornerRadius(8)
+			},
+			Content = new Label
+			{
+				Text = recoveryMessage,
+				LineBreakMode = LineBreakMode.WordWrap,
+				FontSize = 12,
+				TextColor = Color.FromArgb("#6A5034")
+			}
+		};
+
+		Editor editor = new()
+		{
+			AutoSize = EditorAutoSizeOption.Disabled,
+			FontFamily = "OpenSansRegular",
+			TextColor = Color.FromArgb("#16202A"),
+			BackgroundColor = Colors.Transparent,
+			Margin = new Thickness(8, 8, 8, 8)
+		};
+		editor.SetBinding(Editor.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
+
+		Grid grid = new()
+		{
+			RowDefinitions =
+			{
+				new RowDefinition(GridLength.Auto),
+				new RowDefinition(GridLength.Star)
+			},
+			Children =
+			{
+				banner,
+				editor
+			}
+		};
+		Grid.SetRow(banner, 0);
+		Grid.SetRow(editor, 1);
+		return grid;
 	}
 }

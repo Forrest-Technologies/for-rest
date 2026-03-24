@@ -55,6 +55,13 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             }
         }
 
+        var flowVariableNames = requestVariables
+            .Select(static item => item.Key)
+            .Concat(runtimeSeeds.Select(static item => item.Key))
+            .ToList();
+
+        var flowScript = ForRestFlowScriptCompiler.Compile(document.Flow, flowVariableNames, diagnostics);
+
         if (!TryReadRequiredIdentifier(document.Request, "method", out var methodText, diagnostics, "request")
             || !Enum.TryParse<HttpMethodKind>(methodText, true, out var method))
         {
@@ -102,6 +109,7 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             Body = body,
             Variables = requestVariables,
             Extractions = BuildExtractions(document.Extractions),
+            PreRequestScript = flowScript,
             TestsScript = BuildTestsScript(document.Tests, diagnostics),
             Schedule = BuildSchedule(document.Repeat),
             Retry = BuildRetry(document.Retry),

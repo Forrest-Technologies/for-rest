@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using ForRest.Maui.Theming;
+using ForRest.Maui.Services;
 
 namespace ForRest.Maui;
 
@@ -19,7 +20,20 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		MainPage mainPage = _services.GetRequiredService<MainPage>();
+		MainPage mainPage;
+		try
+		{
+			mainPage = _services.GetRequiredService<MainPage>();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Failed to resolve MainPage during window creation.", exception);
+			ContentPage fallbackPage = BuildFallbackPage(exception);
+			return new Window(fallbackPage)
+			{
+				Title = "For-Rest"
+			};
+		}
 
 		Window window = new(mainPage)
 		{
@@ -46,5 +60,42 @@ public partial class App : Application
 		{
 			WindowChromeStyler.Apply(window, e.Theme);
 		}
+	}
+
+	private static ContentPage BuildFallbackPage(Exception exception)
+	{
+		return new ContentPage
+		{
+			Content = new ScrollView
+			{
+				Content = new VerticalStackLayout
+				{
+					Padding = new Thickness(24),
+					Spacing = 12,
+					Children =
+					{
+						new Label
+						{
+							Text = "ForRest started in recovery mode.",
+							FontAttributes = FontAttributes.Bold,
+							FontSize = 20
+						},
+						new Label
+						{
+							Text = "The main workbench could not be created. Startup details were written to the diagnostics log."
+						},
+						new Label
+						{
+							Text = AppLaunchGuard.StartupLogPath
+						},
+						new Label
+						{
+							Text = exception.ToString(),
+							FontFamily = "OpenSansRegular"
+						}
+					}
+				}
+			}
+		};
 	}
 }

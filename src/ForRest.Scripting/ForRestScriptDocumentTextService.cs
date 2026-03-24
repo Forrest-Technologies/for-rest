@@ -4,246 +4,194 @@ namespace ForRest.Scripting;
 
 public sealed class ForRestScriptDocumentTextService
 {
-    private static readonly Regex MetaSectionPattern = CreateSectionPattern("meta");
-    private static readonly Regex VarsSectionPattern = CreateSectionPattern("vars");
-    private static readonly Regex HeadersSectionPattern = CreateSectionPattern("headers");
-    private static readonly Regex TestsSectionPattern = CreateSectionPattern("tests");
-    private static readonly Regex BodySectionPattern = new(
-        "(?ms)^[ \\t]*body[ \\t]+(?<mode>[A-Za-z_][\\w]*)[ \\t]+\"\"\"\\s*\\r?\\n(?<body>.*?)\\r?\\n\"\"\"[ \\t]*(?:\\r?\\n|$)",
+    private static readonly Regex NamePattern = new(
+        "(?m)^[ \\t]*name(?:[ \\t]*=[ \\t]*|[ \\t]+)\"(?<name>(?:[^\"\\\\]|\\\\.)*)\"[ \\t]*$",
         RegexOptions.Compiled);
-    private static readonly Regex MetaNamePattern = new(
-        "(?m)^[ \\t]*name[ \\t]*=[ \\t]*\"(?<name>(?:[^\"\\\\]|\\\\.)*)\"[ \\t]*$",
-        RegexOptions.Compiled);
+
+    private readonly ForRestScriptParser _parser = new();
 
     public ForRestScriptEditableSections Extract(string source)
     {
-        var normalized = Normalize(source);
+        string normalized = Normalize(source);
+        ForRestScriptParseResult parseResult = _parser.Parse(normalized);
+        if (parseResult.Document is not null)
+        {
+            return new()
+            {
+                Name = ReadName(parseResult.Document) ?? ExtractNameFallback(normalized),
+                Variables = string.Join('\n', parseResult.Document.Variables.Select(RenderVariable)),
+                Headers = string.Join('\n', parseResult.Document.Headers.Select(RenderHeader)),
+                BodyMode = parseResult.Document.Body?.Mode ?? RequestBodyMode.Json,
+                Body = parseResult.Document.Body?.Content ?? string.Empty,
+                Tests = string.Join('\n', parseResult.Document.Tests.Select(RenderAssertionWithoutExpect)),
+            };
+        }
+
         return new()
         {
-            Name = ExtractName(normalized),
-            Variables = ExtractSectionBody(normalized, VarsSectionPattern),
-            Headers = ExtractSectionBody(normalized, HeadersSectionPattern),
-            Tests = ExtractSectionBody(normalized, TestsSectionPattern),
-            BodyMode = ExtractBodyMode(normalized),
-            Body = ExtractBody(normalized),
+            Name = ExtractNameFallback(normalized),
         };
     }
 
     public string UpsertMetaName(string source, string name)
     {
-        var normalized = Normalize(source);
-        var metaBody = ExtractSectionBody(normalized, MetaSectionPattern);
-
-        if (string.IsNullOrWhiteSpace(metaBody))
-        {
-            return InsertAtStart(normalized, BuildSection("meta", BuildMetaNameLine(name)));
-        }
-
-        var updatedBody = MetaNamePattern.IsMatch(metaBody)
-            ? MetaNamePattern.Replace(metaBody, _ => BuildMetaNameLine(name), 1)
-            : string.Join('\n', TrimBlankLines(metaBody).Append(BuildMetaNameLine(name)));
-
-        return UpsertStandardSection(normalized, "meta", updatedBody, MetaSectionPattern);
+        ForRestScriptDocument document = ParseOrCreate(source);
+        document.Meta["name"] = new ForRestScriptStringExpression(name);
+        return ForRestScriptDocumentRenderer.Render(document);
     }
 
     public string UpsertVariables(string source, string body)
     {
-        return UpsertStandardSection(Normalize(source), "vars", body, VarsSectionPattern);
+        ForRestScriptDocument document = ParseOrCreate(source);
+        IReadOnlyList<ForRestScriptVariableDeclaration> variables = ParseOrCreate(Normalize(body)).Variables;
+        return ForRestScriptDocumentRenderer.Render(document with
+        {
+            Variables = [.. variables]
+        });
     }
 
     public string UpsertHeaders(string source, string body)
     {
-        return UpsertStandardSection(Normalize(source), "headers", body, HeadersSectionPattern);
+        ForRestScriptDocument document = ParseOrCreate(source);
+        IReadOnlyList<ForRestScriptNamedValue> headers = ParseOrCreate(EnsureDirectivePrefix(body, "header")).Headers;
+        return ForRestScriptDocumentRenderer.Render(document with
+        {
+            Headers = [.. headers]
+        });
     }
 
     public string UpsertTests(string source, string body)
     {
-        return UpsertStandardSection(Normalize(source), "tests", body, TestsSectionPattern);
+        ForRestScriptDocument document = ParseOrCreate(source);
+        IReadOnlyList<ForRestScriptAssertion> tests = ParseOrCreate(EnsureDirectivePrefix(body, "expect")).Tests;
+        return ForRestScriptDocumentRenderer.Render(document with
+        {
+            Tests = [.. tests]
+        });
     }
 
     public string UpsertBody(string source, RequestBodyMode mode, string body)
     {
-        var normalized = Normalize(source);
-        var replacement = BuildBodySection(mode, body);
-        var match = BodySectionPattern.Match(normalized);
-        if (match.Success)
+        ForRestScriptDocument document = ParseOrCreate(source);
+        return ForRestScriptDocumentRenderer.Render(document with
         {
-            return ReplaceMatch(normalized, match, replacement);
-        }
-
-        return AppendSection(normalized, replacement);
+            Body = new(mode, Normalize(body).Trim('\n'))
+        });
     }
 
-    private static string ExtractName(string source)
+    private ForRestScriptDocument ParseOrCreate(string source)
     {
-        var metaBody = ExtractSectionBody(source, MetaSectionPattern);
-        if (string.IsNullOrWhiteSpace(metaBody))
+        return _parser.Parse(source).Document ?? new();
+    }
+
+    private static string EnsureDirectivePrefix(string body, string directive)
+    {
+        List<string> lines = [];
+        foreach (string rawLine in Normalize(body).Split('\n'))
         {
-            return string.Empty;
+            string trimmed = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                continue;
+            }
+
+            lines.Add(trimmed.StartsWith(directive + " ", StringComparison.OrdinalIgnoreCase)
+                ? trimmed
+                : $"{directive} {trimmed}");
         }
 
-        var match = MetaNamePattern.Match(metaBody);
+        return string.Join('\n', lines);
+    }
+
+    private static string RenderVariable(ForRestScriptVariableDeclaration variable)
+    {
+        string scope = variable.Scope == ForRestScriptVariableScope.Request ? "request" : "runtime";
+        return $"{scope} {variable.Key} = {RenderExpression(variable.Expression)}";
+    }
+
+    private static string RenderHeader(ForRestScriptNamedValue value)
+    {
+        return $"header \"{Escape(value.Key)}\" = {RenderExpression(value.Value)}";
+    }
+
+    private static string RenderAssertionWithoutExpect(ForRestScriptAssertion assertion)
+    {
+        return assertion.Target switch
+        {
+            ForRestScriptAssertionTarget.Status => $"status {RenderComparison(assertion)}",
+            ForRestScriptAssertionTarget.Body => $"body {RenderComparison(assertion)}",
+            ForRestScriptAssertionTarget.Header => $"header \"{Escape(assertion.HeaderName ?? string.Empty)}\" {RenderComparison(assertion)}",
+            ForRestScriptAssertionTarget.Json => $"json \"{Escape(assertion.Selector ?? string.Empty)}\" {RenderComparison(assertion)}",
+            _ => string.Empty
+        };
+    }
+
+    private static string RenderComparison(ForRestScriptAssertion assertion)
+    {
+        if (assertion.Operator == ForRestScriptComparisonOperator.Exists)
+        {
+            return $"exists \"{Escape(assertion.Message)}\"";
+        }
+
+        return $"{RenderOperator(assertion.Operator)} {RenderExpression(assertion.Value ?? new ForRestScriptStringExpression(string.Empty))} \"{Escape(assertion.Message)}\"";
+    }
+
+    private static string RenderOperator(ForRestScriptComparisonOperator comparisonOperator)
+    {
+        return comparisonOperator switch
+        {
+            ForRestScriptComparisonOperator.Equal => "==",
+            ForRestScriptComparisonOperator.NotEqual => "!=",
+            ForRestScriptComparisonOperator.Contains => "contains",
+            ForRestScriptComparisonOperator.GreaterThan => ">",
+            ForRestScriptComparisonOperator.GreaterThanOrEqual => ">=",
+            ForRestScriptComparisonOperator.LessThan => "<",
+            ForRestScriptComparisonOperator.LessThanOrEqual => "<=",
+            _ => "=="
+        };
+    }
+
+    private static string RenderExpression(ForRestScriptValueExpression expression)
+    {
+        return expression switch
+        {
+            ForRestScriptStringExpression stringExpression => $"\"{Escape(stringExpression.Value)}\"",
+            ForRestScriptNumberExpression numberExpression => numberExpression.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ForRestScriptBooleanExpression booleanExpression => booleanExpression.Value ? "true" : "false",
+            ForRestScriptIdentifierExpression identifierExpression => identifierExpression.Value,
+            ForRestScriptFunctionCallExpression functionCallExpression => $"{functionCallExpression.Name}({string.Join(", ", functionCallExpression.Arguments.Select(RenderExpression))})",
+            _ => expression.AsInvariantString()
+        };
+    }
+
+    private static string? ReadName(ForRestScriptDocument document)
+    {
+        if (!document.Meta.TryGetValue("name", out ForRestScriptValueExpression? expression))
+        {
+            return null;
+        }
+
+        return expression is ForRestScriptStringExpression stringExpression
+            ? stringExpression.Value
+            : expression.AsInvariantString();
+    }
+
+    private static string ExtractNameFallback(string source)
+    {
+        Match match = NamePattern.Match(source);
         return match.Success ? Regex.Unescape(match.Groups["name"].Value) : string.Empty;
     }
 
-    private static RequestBodyMode ExtractBodyMode(string source)
+    private static string Escape(string value)
     {
-        var match = BodySectionPattern.Match(source);
-        if (!match.Success)
-        {
-            return RequestBodyMode.Json;
-        }
-
-        return match.Groups["mode"].Value.Trim().ToLowerInvariant() switch
-        {
-            "json" => RequestBodyMode.Json,
-            "raw" => RequestBodyMode.RawText,
-            "text" => RequestBodyMode.RawText,
-            _ => RequestBodyMode.Json
-        };
-    }
-
-    private static string ExtractBody(string source)
-    {
-        var match = BodySectionPattern.Match(source);
-        if (!match.Success)
-        {
-            return string.Empty;
-        }
-
-        return TrimSharedIndent(match.Groups["body"].Value).Trim('\n');
-    }
-
-    private static string ExtractSectionBody(string source, Regex pattern)
-    {
-        var match = pattern.Match(source);
-        if (!match.Success)
-        {
-            return string.Empty;
-        }
-
-        return TrimSharedIndent(match.Groups["body"].Value).Trim('\n');
-    }
-
-    private static string UpsertStandardSection(string source, string sectionName, string body, Regex pattern)
-    {
-        var replacement = BuildSection(sectionName, body);
-        var match = pattern.Match(source);
-        if (match.Success)
-        {
-            return ReplaceMatch(source, match, replacement);
-        }
-
-        return AppendSection(source, replacement);
-    }
-
-    private static string ReplaceMatch(string source, Match match, string replacement)
-    {
-        return Normalize(source[..match.Index] + replacement + source[(match.Index + match.Length)..]).Trim('\n');
-    }
-
-    private static string AppendSection(string source, string section)
-    {
-        var normalized = Normalize(source).Trim('\n');
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return section;
-        }
-
-        return $"{normalized}\n\n{section}";
-    }
-
-    private static string InsertAtStart(string source, string section)
-    {
-        var normalized = Normalize(source).Trim('\n');
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return section;
-        }
-
-        return $"{section}\n\n{normalized}";
-    }
-
-    private static string BuildSection(string sectionName, string body)
-    {
-        var lines = TrimBlankLines(body);
-        if (lines.Length == 0)
-        {
-            return $"{sectionName} {{\n}}";
-        }
-
-        return $"{sectionName} {{\n{string.Join('\n', lines.Select(static line => $"  {line}"))}\n}}";
-    }
-
-    private static string BuildBodySection(RequestBodyMode mode, string body)
-    {
-        var bodyMode = mode switch
-        {
-            RequestBodyMode.RawText => "raw",
-            RequestBodyMode.Json => "json",
-            _ => "text",
-        };
-
-        var lines = Normalize(body).Trim('\n').Split('\n');
-        var indentedBody = lines.Length == 1 && string.IsNullOrEmpty(lines[0])
-            ? string.Empty
-            : string.Join('\n', lines.Select(static line => $"  {line}"));
-
-        return string.IsNullOrEmpty(indentedBody)
-            ? $"body {bodyMode} \"\"\"\n\"\"\""
-            : $"body {bodyMode} \"\"\"\n{indentedBody}\n\"\"\"";
+        return (value ?? string.Empty)
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
     private static string Normalize(string source)
     {
         return (source ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
-    }
-
-    private static string TrimSharedIndent(string source)
-    {
-        var lines = Normalize(source).Split('\n');
-        var nonEmptyLines = lines.Where(static line => !string.IsNullOrWhiteSpace(line)).ToList();
-        if (nonEmptyLines.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var trimWidth = nonEmptyLines.Min(
-            static line => line.TakeWhile(static character => character is ' ' or '\t').Count());
-
-        return string.Join(
-            '\n',
-            lines.Select(line => line.Length >= trimWidth ? line[trimWidth..] : line));
-    }
-
-    private static string[] TrimBlankLines(string source)
-    {
-        return Normalize(source)
-            .Split('\n')
-            .SkipWhile(static line => string.IsNullOrWhiteSpace(line))
-            .Reverse()
-            .SkipWhile(static line => string.IsNullOrWhiteSpace(line))
-            .Reverse()
-            .ToArray();
-    }
-
-    private static string EscapeString(string value)
-    {
-        return value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
-    }
-
-    private static string BuildMetaNameLine(string name)
-    {
-        return $"name = \"{EscapeString(name)}\"";
-    }
-
-    private static Regex CreateSectionPattern(string sectionName)
-    {
-        return new Regex(
-            "(?ms)^[ \\t]*"
-            + Regex.Escape(sectionName)
-            + "[ \\t]*\\{\\s*\\r?\\n(?<body>.*?)\\r?\\n\\}[ \\t]*(?:\\r?\\n|$)",
-            RegexOptions.Compiled);
     }
 }
 
