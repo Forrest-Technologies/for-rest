@@ -47,9 +47,13 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ForRestScriptDocumentTextService>();
 		builder.Services.AddSingleton<IForRestScriptCompiler, ForRestScriptCompiler>();
 		builder.Services.AddSingleton<ForRestRuntimeVariableSeedEvaluator>();
-		builder.Services.AddSingleton<IScriptEngine, RoslynScriptEngine>();
 		builder.Services.AddSingleton<IRepeatRunnerService, RepeatRunnerService>();
+#if ANDROID
+		builder.Services.AddSingleton<IRequestExecutionService, MobileRequestExecutionService>();
+#else
+		builder.Services.AddSingleton<IScriptEngine, RoslynScriptEngine>();
 		builder.Services.AddSingleton<IRequestExecutionService, RequestExecutionService>();
+#endif
 		builder.Services.AddSingleton<IForRestScriptExecutionService, ForRestScriptExecutionService>();
 		builder.Services.AddSingleton<MainPageViewModel>();
 		builder.Services.AddSingleton<MainPage>();

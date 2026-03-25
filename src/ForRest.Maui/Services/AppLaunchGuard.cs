@@ -1,10 +1,12 @@
 using System.Text;
+using Microsoft.Maui.Storage;
 namespace ForRest.Maui.Services;
 
 public static class AppLaunchGuard
 {
 	private static readonly object SyncRoot = new();
 	private static bool _initialized;
+	private static bool _storageAvailable;
 	private static string _appDataDirectory = string.Empty;
 	private static string _markerFilePath = string.Empty;
 	private static string _logFilePath = string.Empty;
@@ -24,26 +26,9 @@ public static class AppLaunchGuard
 				return;
 			}
 
-			_appDataDirectory = Path.Combine(
-				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-				"ForRest",
-				"diagnostics");
-			_markerFilePath = Path.Combine(_appDataDirectory, "launch.pending");
-			_logFilePath = Path.Combine(_appDataDirectory, "startup.log");
-			Directory.CreateDirectory(_appDataDirectory);
-
-			if (File.Exists(_markerFilePath))
-			{
-				IsSafeModeEnabled = true;
-				SafeModeReason = "ForRest detected an unclean previous launch and started in safe mode.";
-				AppendLog("Detected previous unfinished launch marker. Safe mode enabled.");
-			}
-
-			File.WriteAllText(
-				_markerFilePath,
-				$"Started: {DateTimeOffset.Now:O}{Environment.NewLine}SafeMode: {IsSafeModeEnabled}{Environment.NewLine}",
-				Encoding.UTF8);
-
+			IsSafeModeEnabled = false;
+			SafeModeReason = string.Empty;
+			_storageAvailable = TryInitializeStorage();
 			_initialized = true;
 		}
 	}
@@ -82,7 +67,7 @@ public static class AppLaunchGuard
 				Initialize();
 			}
 
-			File.AppendAllText(_logFilePath, builder.ToString() + Environment.NewLine, Encoding.UTF8);
+			TryAppendToLog(builder.ToString() + Environment.NewLine);
 		}
 	}
 
@@ -95,19 +80,104 @@ public static class AppLaunchGuard
 				Initialize();
 			}
 
-			File.AppendAllText(
-				_logFilePath,
-				$"[{DateTimeOffset.Now:O}] {context}{Environment.NewLine}{message}{Environment.NewLine}{Environment.NewLine}",
-				Encoding.UTF8);
+			TryAppendToLog(
+				$"[{DateTimeOffset.Now:O}] {context}{Environment.NewLine}{message}{Environment.NewLine}{Environment.NewLine}");
 		}
 	}
 
 	private static void AppendLog(string message)
 	{
-		File.AppendAllText(
-			_logFilePath,
-			$"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}",
-			Encoding.UTF8);
+		TryAppendToLog($"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}");
+	}
+
+	private static bool TryInitializeStorage()
+	{
+		foreach (string candidate in GetDiagnosticsDirectoryCandidates())
+		{
+			if (string.IsNullOrWhiteSpace(candidate))
+			{
+				continue;
+			}
+
+			try
+			{
+				_appDataDirectory = candidate;
+				_markerFilePath = Path.Combine(_appDataDirectory, "launch.pending");
+				_logFilePath = Path.Combine(_appDataDirectory, "startup.log");
+				Directory.CreateDirectory(_appDataDirectory);
+
+				if (File.Exists(_markerFilePath))
+				{
+					IsSafeModeEnabled = true;
+					SafeModeReason = "ForRest detected an unclean previous launch and started in safe mode.";
+					AppendLog("Detected previous unfinished launch marker. Safe mode enabled.");
+				}
+
+				File.WriteAllText(
+					_markerFilePath,
+					$"Started: {DateTimeOffset.Now:O}{Environment.NewLine}SafeMode: {IsSafeModeEnabled}{Environment.NewLine}",
+					Encoding.UTF8);
+				return true;
+			}
+			catch
+			{
+				_appDataDirectory = string.Empty;
+				_markerFilePath = string.Empty;
+				_logFilePath = string.Empty;
+			}
+		}
+
+		return false;
+	}
+
+	private static IEnumerable<string> GetDiagnosticsDirectoryCandidates()
+	{
+		string? appDataDirectory = null;
+		try
+		{
+			appDataDirectory = FileSystem.Current.AppDataDirectory;
+		}
+		catch
+		{
+		}
+
+		if (!string.IsNullOrWhiteSpace(appDataDirectory))
+		{
+			yield return Path.Combine(appDataDirectory, "diagnostics");
+		}
+
+		string? localAppData = null;
+		try
+		{
+			localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+		}
+		catch
+		{
+		}
+
+		if (!string.IsNullOrWhiteSpace(localAppData))
+		{
+			yield return Path.Combine(localAppData, "ForRest", "diagnostics");
+		}
+
+		yield return Path.Combine(Path.GetTempPath(), "ForRest", "diagnostics");
+	}
+
+	private static void TryAppendToLog(string content)
+	{
+		if (!_storageAvailable || string.IsNullOrWhiteSpace(_logFilePath))
+		{
+			return;
+		}
+
+		try
+		{
+			File.AppendAllText(_logFilePath, content, Encoding.UTF8);
+		}
+		catch
+		{
+			_storageAvailable = false;
+		}
 	}
 
 	private static void TryDelete(string path)
