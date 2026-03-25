@@ -66,12 +66,15 @@ jobs:
           - arch: win-x64
             runner: windows-latest
             platform: x64
+            runtime_identifier: win-x64
           - arch: win-arm64
             runner: windows-latest
             platform: ARM64
+            runtime_identifier: win-arm64
     runs-on: ${{ matrix.runner }}
     env:
       WINDOWS_TFM: net10.0-windows10.0.19041.0
+      WINDOWS_ONLY_BUILD: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,11 +94,7 @@ jobs:
 
       - name: Restore workloads
         shell: pwsh
-        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:TargetFrameworks=$env:WINDOWS_TFM
-
-      - name: Restore
-        shell: pwsh
-        run: dotnet restore src/ForRest.Maui/ForRest.Maui.csproj -p:TargetFrameworks=$env:WINDOWS_TFM
+        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:ForRestWindowsOnly=$env:WINDOWS_ONLY_BUILD
 
       - name: Build Windows app
         shell: pwsh
@@ -104,10 +103,11 @@ jobs:
           dotnet build src/ForRest.Maui/ForRest.Maui.csproj `
             -c "${{ needs.prepare.outputs.build_configuration }}" `
             -f $env:WINDOWS_TFM `
-            --no-restore `
-            -p:TargetFrameworks=$env:WINDOWS_TFM `
+            -r ${{ matrix.runtime_identifier }} `
+            -p:ForRestWindowsOnly=$env:WINDOWS_ONLY_BUILD `
             -p:ContinuousIntegrationBuild=true `
             -p:Platform=${{ matrix.platform }} `
+            -p:RuntimeIdentifier=${{ matrix.runtime_identifier }} `
             -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} `
             -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} `
             -p:Version="${{ needs.prepare.outputs.version_label }}" `

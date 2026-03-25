@@ -2,7 +2,11 @@
 
 	<PropertyGroup>
 		<DefaultTargetFrameworks>net10.0-android;net10.0-windows10.0.19041.0</DefaultTargetFrameworks>
-		<TargetFrameworks Condition="'$(TargetFrameworks)' == ''">$(DefaultTargetFrameworks)</TargetFrameworks>
+		<WindowsOnlyTargetFrameworks>net10.0-windows10.0.19041.0</WindowsOnlyTargetFrameworks>
+		<ForRestWindowsRuntimeIdentifiers>win-x64;win-arm64</ForRestWindowsRuntimeIdentifiers>
+		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and '$(ForRestWindowsOnly)' == 'true'">$(WindowsOnlyTargetFrameworks)</TargetFrameworks>
+		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and '$(ForRestWindowsOnly)' != 'true'">$(DefaultTargetFrameworks)</TargetFrameworks>
+		<RuntimeIdentifiers Condition="'$(ForRestWindowsOnly)' == 'true' and '$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == ''">$(ForRestWindowsRuntimeIdentifiers)</RuntimeIdentifiers>
 		<OutputType>Exe</OutputType>
 		<RootNamespace>ForRest.Maui</RootNamespace>
 		<UseMaui>true</UseMaui>
