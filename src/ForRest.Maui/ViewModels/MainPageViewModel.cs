@@ -536,6 +536,8 @@ public sealed class MainPageViewModel : ObservableObject
 				OnPropertyChanged(nameof(IsLanguageHelpAvailable));
 				OnPropertyChanged(nameof(ShowLanguageHelpToggle));
 				OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
+				OnPropertyChanged(nameof(ShowInlineLanguageHelpDrawer));
+				OnPropertyChanged(nameof(ShowCompactLanguageHelpDrawer));
 			}
 		}
 	}
@@ -563,6 +565,8 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				OnPropertyChanged(nameof(LanguageHelpToggleText));
 				OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
+				OnPropertyChanged(nameof(ShowInlineLanguageHelpDrawer));
+				OnPropertyChanged(nameof(ShowCompactLanguageHelpDrawer));
 			}
 		}
 	}
@@ -572,6 +576,10 @@ public sealed class MainPageViewModel : ObservableObject
 	public bool ShowLanguageHelpToggle => IsLanguageHelpAvailable;
 
 	public bool ShowLanguageHelpDrawer => IsLanguageHelpAvailable && IsLanguageHelpOpen;
+
+	public bool ShowInlineLanguageHelpDrawer => ShowLanguageHelpDrawer && IsDesktopLayout;
+
+	public bool ShowCompactLanguageHelpDrawer => ShowLanguageHelpDrawer && IsCompactLayout;
 
 	public string LanguageHelpToggleText => IsLanguageHelpOpen ? "Docs -" : "Docs +";
 
@@ -701,10 +709,25 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		get
 		{
-			double available = Math.Max(CompactPaneMinWidth, _workbenchWidth - 24d);
+			double available = Math.Max(0d, _workbenchWidth - 24d);
+			if (available <= 0d)
+			{
+				return CompactPaneMinWidth;
+			}
+
 			return Math.Min(CompactPaneMaxWidth, available);
 		}
 	}
+
+	public bool ShowCompactActionBar => _isCompactLayout;
+
+	public bool ShowDesktopStatusBar => !_isCompactLayout;
+
+	public bool ShowCompactStatusBar => _isCompactLayout;
+
+	public string CompactLeftPaneButtonText => IsExplorerOverlayVisible ? "Close Explorer" : "Explorer";
+
+	public string CompactRightPaneButtonText => IsInspectorOverlayVisible ? "Close Inspect" : "Inspect";
 
 	public GridLength LeftPaneWidth => new(IsLeftPaneVisible ? _leftPanePixels : 0d, GridUnitType.Absolute);
 
@@ -961,7 +984,12 @@ public sealed class MainPageViewModel : ObservableObject
 			OnPropertyChanged(nameof(ResponseTimeStatus));
 			OnPropertyChanged(nameof(ResponseSizeStatus));
 
-			if (outcome.Execution?.State == ExecutionState.Failed)
+			if (_isCompactLayout)
+			{
+				FocusRightPaneTab(outcome.Execution?.State == ExecutionState.Failed ? "debug" : "response");
+				RevealInspectorOnCompactLayout();
+			}
+			else if (outcome.Execution?.State == ExecutionState.Failed)
 			{
 				FocusRightPaneTab("debug");
 			}
@@ -987,6 +1015,7 @@ public sealed class MainPageViewModel : ObservableObject
 			OnPropertyChanged(nameof(ResponseTimeStatus));
 			OnPropertyChanged(nameof(ResponseSizeStatus));
 			FocusRightPaneTab("debug");
+			RevealInspectorOnCompactLayout();
 		}
 		finally
 		{
@@ -1100,6 +1129,11 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsCompactLayout));
 		OnPropertyChanged(nameof(IsDesktopLayout));
 		OnPropertyChanged(nameof(CompactPaneWidth));
+		OnPropertyChanged(nameof(ShowCompactActionBar));
+		OnPropertyChanged(nameof(ShowDesktopStatusBar));
+		OnPropertyChanged(nameof(ShowCompactStatusBar));
+		OnPropertyChanged(nameof(ShowInlineLanguageHelpDrawer));
+		OnPropertyChanged(nameof(ShowCompactLanguageHelpDrawer));
 		OnPropertyChanged(nameof(TimingStatus));
 
 		if (!_isCompactLayout)
@@ -1289,6 +1323,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ApplyRequestSelection(document.Title, document.Method, document.Summary, document.Location);
 		SelectExplorerItemByContext(document.Location);
 		ActivateRequestEditor();
+		CloseExplorerOverlayOnCompactLayout();
 	}
 
 	public void SelectHistoryEntry(HistoryEntryViewModel? entry)
@@ -1304,6 +1339,7 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		ApplyHistoryRunToInspector(entry.Run, entry.Method);
+		RevealInspectorOnCompactLayout();
 	}
 
 	public void SelectExplorerItem(NavigationItemViewModel? item)
@@ -1323,12 +1359,14 @@ public sealed class MainPageViewModel : ObservableObject
 		if (string.Equals(item.DocumentKind, SettingsDocumentKind, StringComparison.Ordinal))
 		{
 			ActivateSettingsEditor(item);
+			CloseExplorerOverlayOnCompactLayout();
 			return;
 		}
 
 		string method = item.Method ?? SelectedMethod;
 		ApplyRequestSelection(item.Title, method, item.Detail, item.Context);
 		SelectDocumentByLocation(item.Context);
+		CloseExplorerOverlayOnCompactLayout();
 	}
 
 	public async Task CopyActiveEditorAsync()
@@ -1965,6 +2003,8 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
 		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
 		OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
+		OnPropertyChanged(nameof(ShowInlineLanguageHelpDrawer));
+		OnPropertyChanged(nameof(ShowCompactLanguageHelpDrawer));
 		OnPropertyChanged(nameof(CanMoveRequestUp));
 		OnPropertyChanged(nameof(CanMoveRequestDown));
 	}
@@ -1985,6 +2025,8 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
 		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
 		OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
+		OnPropertyChanged(nameof(ShowInlineLanguageHelpDrawer));
+		OnPropertyChanged(nameof(ShowCompactLanguageHelpDrawer));
 		OnPropertyChanged(nameof(CanSend));
 		OnPropertyChanged(nameof(CanMoveRequestUp));
 		OnPropertyChanged(nameof(CanMoveRequestDown));
@@ -2542,6 +2584,35 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(IsExplorerOverlayVisible));
 		OnPropertyChanged(nameof(IsInspectorOverlayVisible));
 		OnPropertyChanged(nameof(IsOverlayBackdropVisible));
+		OnPropertyChanged(nameof(CompactLeftPaneButtonText));
+		OnPropertyChanged(nameof(CompactRightPaneButtonText));
+	}
+
+	private void CloseExplorerOverlayOnCompactLayout()
+	{
+		if (!_isCompactLayout || !_isExplorerOverlayOpen)
+		{
+			return;
+		}
+
+		_isExplorerOverlayOpen = false;
+		NotifyOverlayChanged();
+	}
+
+	private void RevealInspectorOnCompactLayout()
+	{
+		if (!_isCompactLayout)
+		{
+			return;
+		}
+
+		bool changed = _isExplorerOverlayOpen || !_isInspectorOverlayOpen;
+		_isExplorerOverlayOpen = false;
+		_isInspectorOverlayOpen = true;
+		if (changed)
+		{
+			NotifyOverlayChanged();
+		}
 	}
 
 	private void RefreshResponsePresentation()

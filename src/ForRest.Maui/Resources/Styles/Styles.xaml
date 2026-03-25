@@ -172,6 +172,18 @@
         <Setter Property="TextColor" Value="{DynamicResource ThemeAccentTextColor}" />
     </Style>
 
+    <Style x:Key="MobileToolbarButtonStyle" TargetType="Button">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Padding" Value="12,6" />
+        <Setter Property="MinimumHeightRequest" Value="36" />
+        <Setter Property="BorderWidth" Value="1" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSurfaceMutedColor}" />
+        <Setter Property="BorderColor" Value="{DynamicResource ThemeBorderColor}" />
+        <Setter Property="TextColor" Value="{DynamicResource ThemeTextPrimaryColor}" />
+    </Style>
+
     <Style x:Key="FloatingActionButtonStyle" TargetType="Button">
         <Setter Property="FontFamily" Value="OpenSansSemibold" />
         <Setter Property="FontSize" Value="12" />

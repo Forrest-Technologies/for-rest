@@ -84,11 +84,122 @@
                 </Grid>
 
                 <Border Grid.Column="1"
-                        IsVisible="{Binding ShowLanguageHelpDrawer}"
+                        IsVisible="{Binding ShowInlineLanguageHelpDrawer}"
                         WidthRequest="332"
                         BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
                         Stroke="{DynamicResource ThemeDividerColor}"
                         StrokeThickness="1">
+                    <Grid Padding="10,8"
+                          RowDefinitions="Auto,Auto,*,Auto"
+                          RowSpacing="8">
+                        <Grid ColumnDefinitions="*,Auto"
+                              ColumnSpacing="8">
+                            <VerticalStackLayout Spacing="1">
+                                <Label Text="ForRest Language"
+                                       Style="{StaticResource SectionTitleStyle}" />
+                                <Label Text="Search supported syntax, helpers, and examples"
+                                       Style="{StaticResource PaneMetaStyle}" />
+                            </VerticalStackLayout>
+                            <Button Grid.Column="1"
+                                    Text="Copy"
+                                    Style="{StaticResource DenseTabButtonStyle}"
+                                    IsEnabled="{Binding CanCopyLanguageHelpExample}"
+                                    Clicked="OnCopyLanguageHelpExampleClicked"
+                                    SemanticProperties.Description="Copy the selected ForRest example" />
+                        </Grid>
+
+                        <Entry Grid.Row="1"
+                               Text="{Binding LanguageHelpSearchText}"
+                               Placeholder="Search ForRest"
+                               ClearButtonVisibility="WhileEditing"
+                               FontSize="13" />
+
+                        <Grid Grid.Row="2"
+                              RowDefinitions="Auto,*"
+                              RowSpacing="8">
+                            <CollectionView ItemsSource="{Binding LanguageHelpEntries}"
+                                            SelectionMode="Single"
+                                            SelectionChanged="OnLanguageHelpSelectionChanged"
+                                            HeightRequest="192">
+                                <CollectionView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource NavigationRowBorderStyle}"
+                                                Margin="0">
+                                            <VerticalStackLayout Spacing="2">
+                                                <Grid ColumnDefinitions="Auto,*"
+                                                      ColumnSpacing="8">
+                                                    <Label Text="{Binding Category}"
+                                                           Style="{StaticResource MonoMetaStyle}"
+                                                           VerticalTextAlignment="Start" />
+                                                    <VerticalStackLayout Grid.Column="1"
+                                                                         Spacing="1">
+                                                        <Label Text="{Binding Title}"
+                                                               FontFamily="OpenSansSemibold"
+                                                               FontSize="12"
+                                                               LineBreakMode="TailTruncation" />
+                                                        <Label Text="{Binding Summary}"
+                                                               Style="{StaticResource PaneMetaStyle}"
+                                                               LineBreakMode="TailTruncation"
+                                                               MaxLines="2" />
+                                                    </VerticalStackLayout>
+                                                </Grid>
+                                            </VerticalStackLayout>
+                                        </Border>
+                                    </DataTemplate>
+                                </CollectionView.ItemTemplate>
+                            </CollectionView>
+
+                            <ScrollView Grid.Row="1">
+                                <VerticalStackLayout Spacing="8">
+                                    <Label Text="{Binding LanguageHelpEmptyStateText}"
+                                           IsVisible="{Binding ShowLanguageHelpEmptyState}"
+                                           Style="{StaticResource PaneMetaStyle}" />
+
+                                    <VerticalStackLayout IsVisible="{Binding HasSelectedLanguageHelpEntry}"
+                                                         Spacing="8">
+                                        <VerticalStackLayout Spacing="1">
+                                            <Label Text="{Binding SelectedLanguageHelpTitle}"
+                                                   Style="{StaticResource SectionTitleStyle}" />
+                                            <Label Text="{Binding SelectedLanguageHelpCategory}"
+                                                   Style="{StaticResource MonoMetaStyle}" />
+                                        </VerticalStackLayout>
+
+                                        <Label Text="{Binding SelectedLanguageHelpSummary}"
+                                               Style="{StaticResource PaneMetaStyle}" />
+
+                                        <Label Text="{Binding SelectedLanguageHelpDocumentation}"
+                                               LineBreakMode="WordWrap"
+                                               Style="{StaticResource PaneMetaStyle}" />
+
+                                        <Label Text="Example"
+                                               Style="{StaticResource MonoMetaStyle}" />
+
+                                        <Editor Text="{Binding SelectedLanguageHelpExample}"
+                                                IsReadOnly="True"
+                                                AutoSize="TextChanges"
+                                                FontFamily="OpenSansRegular"
+                                                FontSize="12"
+                                                BackgroundColor="Transparent" />
+                                    </VerticalStackLayout>
+                                </VerticalStackLayout>
+                            </ScrollView>
+                        </Grid>
+
+                        <Label Grid.Row="3"
+                               Text="Reference is limited to syntax the compiler and runtime currently support."
+                               Style="{StaticResource MonoMetaStyle}" />
+                    </Grid>
+                </Border>
+
+                <Border Grid.ColumnSpan="2"
+                        IsVisible="{Binding ShowCompactLanguageHelpDrawer}"
+                        WidthRequest="{Binding CompactPaneWidth}"
+                        HorizontalOptions="End"
+                        VerticalOptions="Fill"
+                        BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                        Stroke="{DynamicResource ThemeDividerColor}"
+                        StrokeThickness="1"
+                        ZIndex="15">
                     <Grid Padding="10,8"
                           RowDefinitions="Auto,Auto,*,Auto"
                           RowSpacing="8">

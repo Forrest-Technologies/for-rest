@@ -1,0 +1,206 @@
+name: Android MAUI Build
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-maui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: windows-latest
+    outputs:
+      build_configuration: ${{ steps.version.outputs.build_configuration }}
+      version_label: ${{ steps.version.outputs.version_label }}
+      app_display_version: ${{ steps.version.outputs.app_display_version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      file_version: ${{ steps.version.outputs.file_version }}
+      build_timestamp_utc: ${{ steps.version.outputs.build_timestamp_utc }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      release_title: ${{ steps.version.outputs.release_title }}
+    steps:
+      - name: Compute branch version metadata
+        id: version
+        shell: pwsh
+        run: |
+          $timeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById('Eastern Standard Time')
+          $now = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $timeZone)
+          $dateLabel = $now.ToString('yyyy-MM-dd')
+          $appDisplayVersion = $now.ToString('yyyy.M.d')
+          $appVersion = $now.ToString('yyyyMMdd')
+          $fileVersion = $now.ToString('yyyy.M.d') + '.0'
+          $buildTimestampUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+          if ('${{ github.ref_name }}' -eq 'master') {
+            $buildConfiguration = 'Release'
+            $versionLabel = $dateLabel
+          }
+          else {
+            $buildConfiguration = 'Debug'
+            $versionLabel = "$dateLabel-beta"
+          }
+
+          "build_configuration=$buildConfiguration" >> $env:GITHUB_OUTPUT
+          "version_label=$versionLabel" >> $env:GITHUB_OUTPUT
+          "app_display_version=$appDisplayVersion" >> $env:GITHUB_OUTPUT
+          "app_version=$appVersion" >> $env:GITHUB_OUTPUT
+          "file_version=$fileVersion" >> $env:GITHUB_OUTPUT
+          "build_timestamp_utc=$buildTimestampUtc" >> $env:GITHUB_OUTPUT
+          "release_tag=v$versionLabel" >> $env:GITHUB_OUTPUT
+          "release_title=ForRest $versionLabel" >> $env:GITHUB_OUTPUT
+
+  build:
+    needs: prepare
+    runs-on: windows-latest
+    env:
+      ANDROID_TFM: net10.0-android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java SDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: preview
+          global-json-file: global.json
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          dotnet --info
+          java -version
+
+      - name: Restore MAUI workloads
+        shell: pwsh
+        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj
+
+      - name: Run MAUI unit tests
+        shell: pwsh
+        run: dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj -c Debug
+
+      - name: Prepare Android signing
+        id: signing
+        shell: pwsh
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ANDROID_KEYSTORE_BASE64)) {
+            "has_keystore=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $keystorePath = Join-Path $env:RUNNER_TEMP 'for-rest.keystore'
+          [System.IO.File]::WriteAllBytes($keystorePath, [System.Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64))
+          "has_keystore=true" >> $env:GITHUB_OUTPUT
+          "keystore_path=$keystorePath" >> $env:GITHUB_OUTPUT
+
+      - name: Publish Android packages
+        shell: pwsh
+        env:
+          ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          $publishArgs = @(
+            'publish',
+            'src/ForRest.Maui/ForRest.Maui.csproj',
+            '-c', '${{ needs.prepare.outputs.build_configuration }}',
+            '-f', $env:ANDROID_TFM,
+            '-p:ContinuousIntegrationBuild=true',
+            '-p:AndroidPackageFormats=apk%3Baab',
+            '-p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }}',
+            '-p:ApplicationVersion=${{ needs.prepare.outputs.app_version }}',
+            '-p:Version=${{ needs.prepare.outputs.version_label }}',
+            '-p:InformationalVersion=${{ needs.prepare.outputs.version_label }}',
+            '-p:FileVersion=${{ needs.prepare.outputs.file_version }}',
+            '-p:AssemblyVersion=${{ needs.prepare.outputs.file_version }}',
+            '-p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }}'
+          )
+
+          if ('${{ steps.signing.outputs.has_keystore }}' -eq 'true') {
+            $publishArgs += @(
+              '-p:AndroidKeyStore=true',
+              '-p:AndroidSigningKeyStore=${{ steps.signing.outputs.keystore_path }}',
+              '-p:AndroidSigningKeyAlias=' + $env:ANDROID_SIGNING_KEY_ALIAS,
+              '-p:AndroidSigningKeyPass=' + $env:ANDROID_SIGNING_KEY_PASSWORD,
+              '-p:AndroidSigningStorePass=' + $env:ANDROID_SIGNING_STORE_PASSWORD
+            )
+          }
+
+          & dotnet @publishArgs
+
+      - name: Package Android outputs
+        shell: pwsh
+        run: |
+          $artifactBase = 'for-rest-${{ needs.prepare.outputs.version_label }}-android'
+          $buildDirectory = Join-Path $env:GITHUB_WORKSPACE 'src\ForRest.Maui\bin\${{ needs.prepare.outputs.build_configuration }}\net10.0-android'
+          $releaseDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts\release\android'
+          New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
+
+          $packageFiles = Get-ChildItem -Path $buildDirectory -File -Recurse | Where-Object { $_.Extension -in '.apk', '.aab' }
+          if (-not $packageFiles) {
+            throw 'No Android packages were produced.'
+          }
+
+          foreach ($package in $packageFiles) {
+            $packageKind = if ($package.Extension -eq '.aab') { 'bundle' } else { 'apk' }
+            $signingSuffix = if ($package.BaseName -like '*-Signed') { 'signed' } else { 'unsigned' }
+            $destination = Join-Path $releaseDirectory "$artifactBase-$packageKind-$signingSuffix$($package.Extension)"
+            Copy-Item $package.FullName $destination -Force
+          }
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-android
+          path: artifacts/release/android/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.ref_name == 'master'
+    needs:
+      - prepare
+      - build
+    runs-on: windows-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/downloaded
+
+      - name: Create or update GitHub release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ needs.prepare.outputs.release_tag }}'
+          $title = '${{ needs.prepare.outputs.release_title }}'
+          $assets = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'artifacts\downloaded') -File -Recurse | Select-Object -ExpandProperty FullName
+          if (-not $assets) {
+            throw 'No release assets were downloaded.'
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            & gh release upload $tag @assets --clobber
+            & gh release edit $tag --title $title
+          }
+          else {
+            & gh release create $tag @assets --title $title --generate-notes
+          }

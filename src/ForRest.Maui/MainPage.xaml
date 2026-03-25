@@ -5,7 +5,7 @@
              x:Class="ForRest.Maui.MainPage">
 
     <Grid Padding="0"
-          RowDefinitions="*,Auto"
+          RowDefinitions="*,Auto,Auto"
           RowSpacing="0">
         <Grid
               x:Name="WorkbenchHost"
@@ -99,23 +99,69 @@
         </Grid>
 
         <Border Grid.Row="1"
+                IsVisible="{Binding ShowCompactActionBar}"
                 Style="{StaticResource StatusBarBorderStyle}">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="10">
-                <Label Text="{Binding ExecutionStatus}"
-                       Style="{StaticResource StatusBarTextStyle}" />
-                <Label Grid.Column="1"
-                       Text="{Binding ActivationStatus}"
-                       Style="{StaticResource StatusBarTextStyle}" />
+            <Grid ColumnDefinitions="Auto,Auto,*"
+                  ColumnSpacing="8">
+                <Button Text="{Binding CompactLeftPaneButtonText}"
+                        Clicked="OnToggleLeftPaneClicked"
+                        Style="{StaticResource MobileToolbarButtonStyle}" />
+                <Button Grid.Column="1"
+                        Text="{Binding CompactRightPaneButtonText}"
+                        Clicked="OnToggleRightPaneClicked"
+                        Style="{StaticResource MobileToolbarButtonStyle}" />
                 <Label Grid.Column="2"
-                       Text="{Binding ResponseState}"
+                       Text="{Binding RequestStateStatus}"
+                       LineBreakMode="TailTruncation"
+                       VerticalTextAlignment="Center"
                        Style="{StaticResource StatusBarTextStyle}" />
-                <Label Grid.Column="3"
-                       Text="{Binding ResponseTimeStatus}"
-                       Style="{StaticResource StatusBarTextStyle}" />
-                <Label Grid.Column="4"
-                       Text="{Binding ResponseSizeStatus}"
-                       Style="{StaticResource StatusBarTextStyle}" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2"
+                Style="{StaticResource StatusBarBorderStyle}">
+            <Grid>
+                <Grid IsVisible="{Binding ShowDesktopStatusBar}"
+                      ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+                      ColumnSpacing="10">
+                    <Label Text="{Binding ExecutionStatus}"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                    <Label Grid.Column="1"
+                           Text="{Binding ActivationStatus}"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                    <Label Grid.Column="2"
+                           Text="{Binding ResponseState}"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                    <Label Grid.Column="3"
+                           Text="{Binding ResponseTimeStatus}"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                    <Label Grid.Column="4"
+                           Text="{Binding ResponseSizeStatus}"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                </Grid>
+
+                <Grid IsVisible="{Binding ShowCompactStatusBar}"
+                      RowDefinitions="Auto,Auto"
+                      ColumnDefinitions="*,Auto,Auto"
+                      RowSpacing="2"
+                      ColumnSpacing="10">
+                    <Label Grid.ColumnSpan="3"
+                           Text="{Binding ExecutionStatus}"
+                           LineBreakMode="TailTruncation"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                    <Label Grid.Row="1"
+                           Text="{Binding ResponseState}"
+                           LineBreakMode="TailTruncation"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                    <Label Grid.Row="1"
+                           Grid.Column="1"
+                           Text="{Binding ResponseTimeStatus}"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                    <Label Grid.Row="1"
+                           Grid.Column="2"
+                           Text="{Binding ResponseSizeStatus}"
+                           Style="{StaticResource StatusBarTextStyle}" />
+                </Grid>
             </Grid>
         </Border>
     </Grid>
