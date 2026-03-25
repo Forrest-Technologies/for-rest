@@ -38,6 +38,7 @@
     <Compile Include="..\..\src\ForRest.Maui\Services\AppLaunchGuard.cs" Link="Services\AppLaunchGuard.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ForRestEditorDebugSnapshotFactory.cs" Link="Services\ForRestEditorDebugSnapshotFactory.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\InMemoryExecutionHistoryRepository.cs" Link="Services\InMemoryExecutionHistoryRepository.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Services\PlatformExperience.cs" Link="Services\PlatformExperience.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchDocumentFactory.cs" Link="Services\RequestWorkbenchDocumentFactory.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchDocumentNormalizer.cs" Link="Services\RequestWorkbenchDocumentNormalizer.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ResponsePresentationFormatter.cs" Link="Services\ResponsePresentationFormatter.cs" />

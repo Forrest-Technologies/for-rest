@@ -63,14 +63,9 @@
                             Clicked="OnTogglePrettyPrintClicked" />
                 </Grid>
 
-                <controls:MonacoEditorSurface x:Name="ResponseBodyViewer"
-                                              Grid.Row="1"
-                                              IsVisible="{Binding IsInspectorResponseVisible}"
-                                              Language="json"
-                                              ThemeKey="{Binding EditorThemeKey}"
-                                              IsReadOnly="True"
-                                              EnableResponseActions="True"
-                                              Text="{Binding ResponseBodyText}" />
+                <ContentView x:Name="ResponseBodyViewerHost"
+                             Grid.Row="1"
+                             IsVisible="{Binding IsInspectorResponseVisible}" />
 
                 <ScrollView Grid.RowSpan="2"
                             IsVisible="{Binding IsInspectorHeadersVisible}">

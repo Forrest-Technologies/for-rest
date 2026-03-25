@@ -60,15 +60,25 @@ public partial class WorkbenchCenterPane : ContentView
 
 		try
 		{
-			EditorHost.Content = AppLaunchGuard.IsSafeModeEnabled
-				? BuildFallbackEditor()
-				: BuildMonacoEditor();
+			EditorHost.Content = BuildPreferredEditor();
 		}
 		catch (Exception exception)
 		{
 			AppLaunchGuard.RecordException("Failed to construct the workbench editor surface.", exception);
 			EditorHost.Content = BuildFallbackEditor();
 		}
+	}
+
+	private View BuildPreferredEditor()
+	{
+		if (AppLaunchGuard.IsSafeModeEnabled)
+		{
+			return BuildFallbackEditor();
+		}
+
+		return PlatformExperience.UseWebCodeEditors()
+			? BuildMonacoEditor()
+			: BuildNativeEditor();
 	}
 
 	private View BuildMonacoEditor()
@@ -81,6 +91,18 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 		editor.SetBinding(MonacoEditorSurface.LanguageHelpJsonProperty, nameof(MainPageViewModel.LanguageHelpCatalogJson));
 		editor.SendRequested += OnEditorSendRequested;
+		return editor;
+	}
+
+	private View BuildNativeEditor()
+	{
+		EditorSurface editor = new()
+		{
+			ShowHeader = false,
+			ShowFooter = false
+		};
+		editor.SetBinding(EditorSurface.LanguageProperty, nameof(MainPageViewModel.ActiveEditorLanguage));
+		editor.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 		return editor;
 	}
 

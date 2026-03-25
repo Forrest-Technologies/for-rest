@@ -41,8 +41,9 @@ public sealed class BuildMetadataProvider : IBuildMetadataProvider
 
 		try
 		{
-			return File.Exists(_assembly.Location)
-				? File.GetLastWriteTimeUtc(_assembly.Location)
+			string assemblyPath = Path.Combine(AppContext.BaseDirectory, $"{_assembly.GetName().Name}.dll");
+			return File.Exists(assemblyPath)
+				? File.GetLastWriteTimeUtc(assemblyPath)
 				: DateTimeOffset.UtcNow;
 		}
 		catch

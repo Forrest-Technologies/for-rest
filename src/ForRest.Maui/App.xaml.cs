@@ -11,11 +11,19 @@ public partial class App : Application
 
 	public App(IServiceProvider services, IThemeService themeService)
 	{
+		AppLaunchGuard.Initialize();
 		InitializeComponent();
 		_services = services;
 		_themeService = themeService;
 		_themeService.ThemeChanged += OnThemeChanged;
-		_themeService.Start();
+		try
+		{
+			_themeService.Start();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Theme service startup failed.", exception);
+		}
 	}
 
 	protected override Window CreateWindow(IActivationState? activationState)

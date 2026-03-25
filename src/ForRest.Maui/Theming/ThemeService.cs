@@ -1,4 +1,5 @@
 using Microsoft.Maui.ApplicationModel;
+using ForRest.Maui.Services;
 
 namespace ForRest.Maui.Theming;
 
@@ -50,7 +51,10 @@ public sealed class ThemeService : IThemeService, IDisposable
 
 		_themeConfigStore.EnsureConfigFile(initialConfig);
 		ProcessConfigCore("startup");
-		StartWatcher();
+		if (PlatformExperience.SupportsThemeConfigWatcher())
+		{
+			TryStartWatcher();
+		}
 	}
 
 	public void Dispose()
@@ -72,6 +76,21 @@ public sealed class ThemeService : IThemeService, IDisposable
 		_watcher.Changed += OnConfigFileChanged;
 		_watcher.Created += OnConfigFileChanged;
 		_watcher.Renamed += OnConfigFileChanged;
+	}
+
+	private void TryStartWatcher()
+	{
+		try
+		{
+			StartWatcher();
+		}
+		catch (Exception exception)
+		{
+			CurrentStatusMessage = string.IsNullOrWhiteSpace(CurrentStatusMessage)
+				? "ready  config watch unavailable"
+				: $"{CurrentStatusMessage}  config watch unavailable";
+			AppLaunchGuard.RecordException("Theme config watcher startup failed.", exception);
+		}
 	}
 
 	private void OnConfigFileChanged(object sender, FileSystemEventArgs e)

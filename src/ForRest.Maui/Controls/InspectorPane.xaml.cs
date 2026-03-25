@@ -1,3 +1,4 @@
+using ForRest.Maui.Services;
 using ForRest.Maui.ViewModels;
 
 namespace ForRest.Maui.Controls;
@@ -7,10 +8,16 @@ public partial class InspectorPane : ContentView
 	public InspectorPane()
 	{
 		InitializeComponent();
-		ResponseBodyViewer.ResponseVarCopyRequested += OnResponseVarCopyRequested;
+		Loaded += (_, _) => EnsureResponseBodyViewer();
 	}
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
+
+	protected override void OnBindingContextChanged()
+	{
+		base.OnBindingContextChanged();
+		EnsureResponseBodyViewer();
+	}
 
 	private void OnHideClicked(object? sender, EventArgs e)
 	{
@@ -43,5 +50,44 @@ public partial class InspectorPane : ContentView
 	private async void OnResponseVarCopyRequested(object? sender, MonacoResponseVarRequestEventArgs e)
 	{
 		await ViewModel.CopyResponseVariableAsync(e.LineNumber, e.Column);
+	}
+
+	private void EnsureResponseBodyViewer()
+	{
+		if (ResponseBodyViewerHost.Content is not null)
+		{
+			return;
+		}
+
+		ResponseBodyViewerHost.Content = PlatformExperience.UseWebCodeEditors() && !AppLaunchGuard.IsSafeModeEnabled
+			? BuildMonacoResponseViewer()
+			: BuildNativeResponseViewer();
+	}
+
+	private View BuildMonacoResponseViewer()
+	{
+		MonacoEditorSurface viewer = new()
+		{
+			Language = "json",
+			IsReadOnly = true,
+			EnableResponseActions = true
+		};
+		viewer.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		viewer.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ResponseBodyText));
+		viewer.ResponseVarCopyRequested += OnResponseVarCopyRequested;
+		return viewer;
+	}
+
+	private View BuildNativeResponseViewer()
+	{
+		EditorSurface viewer = new()
+		{
+			Language = "json",
+			IsReadOnly = true,
+			ShowHeader = false,
+			ShowFooter = false
+		};
+		viewer.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.ResponseBodyText));
+		return viewer;
 	}
 }
