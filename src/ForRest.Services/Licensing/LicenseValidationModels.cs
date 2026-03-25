@@ -18,6 +18,10 @@ public sealed record LicenseValidationResult(
 	DateTimeOffset BuildDateUtc,
 	DateTimeOffset GraceExpiresUtc,
 	int GraceDaysRemaining,
+	bool IsGraceActive,
+	string? RegisteredTo,
+	string? RegisteredEmail,
+	DateTimeOffset? LicenseExpirationUtc,
 	string Summary,
 	string Detail);
 

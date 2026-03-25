@@ -1,3 +1,6 @@
+using ForRest.Maui.Services;
+using ForRest.Services.Licensing;
+
 namespace ForRest.Maui.Theming;
 
 public sealed class SettingsTomlDocumentService
@@ -6,17 +9,23 @@ public sealed class SettingsTomlDocumentService
 	private readonly ThemeConfigParser _themeConfigParser;
 	private readonly ThemeConfigNormalizer _themeConfigNormalizer;
 	private readonly SettingsTomlTemplate _settingsTomlTemplate;
+	private readonly ILicenseValidationService _licenseValidationService;
+	private readonly IBuildMetadataProvider _buildMetadataProvider;
 
 	public SettingsTomlDocumentService(
 		ThemeConfigStore themeConfigStore,
 		ThemeConfigParser themeConfigParser,
 		ThemeConfigNormalizer themeConfigNormalizer,
-		SettingsTomlTemplate settingsTomlTemplate)
+		SettingsTomlTemplate settingsTomlTemplate,
+		ILicenseValidationService licenseValidationService,
+		IBuildMetadataProvider buildMetadataProvider)
 	{
 		_themeConfigStore = themeConfigStore;
 		_themeConfigParser = themeConfigParser;
 		_themeConfigNormalizer = themeConfigNormalizer;
 		_settingsTomlTemplate = settingsTomlTemplate;
+		_licenseValidationService = licenseValidationService;
+		_buildMetadataProvider = buildMetadataProvider;
 	}
 
 	public string ConfigFilePath => _themeConfigStore.ConfigFilePath;
@@ -50,10 +59,11 @@ public sealed class SettingsTomlDocumentService
 
 	public void SaveRawText(string text)
 	{
+		string sanitizedText = _settingsTomlTemplate.RemoveGeneratedLicenseInfoBlock(text);
 		string currentRawText = _themeConfigStore.ReadAllText();
 		ThemeConfigDocument currentDocument = _themeConfigParser.Parse(currentRawText);
 		ThemeNormalizationResult currentNormalized = _themeConfigNormalizer.Normalize(currentDocument);
-		ThemeNormalizationResult editorNormalized = _themeConfigNormalizer.Normalize(_themeConfigParser.Parse(text));
+		ThemeNormalizationResult editorNormalized = _themeConfigNormalizer.Normalize(_themeConfigParser.Parse(sanitizedText));
 
 		string editedLicense = editorNormalized.Settings.LicenseKey;
 		string resolvedLicense = string.Equals(editedLicense, SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal)
@@ -76,6 +86,17 @@ public sealed class SettingsTomlDocumentService
 		{
 			LicenseKey = string.IsNullOrWhiteSpace(licenseKey) ? string.Empty : SettingsTomlTemplate.MaskedLicenseValue
 		};
-		return _themeConfigNormalizer.Render(parsedDocument, projectedSettings);
+		string editorText = _themeConfigNormalizer.Render(parsedDocument, projectedSettings);
+		LicenseValidationResult validation = _licenseValidationService.Evaluate(
+			normalizedSettings.LicenseKey,
+			_buildMetadataProvider.GetBuildDateUtc(),
+			DateTimeOffset.UtcNow);
+		return string.Join(
+			Environment.NewLine,
+			[
+				editorText,
+				string.Empty,
+				_settingsTomlTemplate.BuildLicenseInfoBlock(validation)
+			]);
 	}
 }

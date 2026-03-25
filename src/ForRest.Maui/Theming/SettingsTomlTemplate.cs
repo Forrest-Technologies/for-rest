@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ForRest.Services.Licensing;
 
 namespace ForRest.Maui.Theming;
 
@@ -6,6 +7,7 @@ public sealed class SettingsTomlTemplate
 {
 	public const string LicenseKeyName = "license";
 	public const string MaskedLicenseValue = "********";
+	public const string GeneratedLicenseInfoSectionHeader = "[license.info]";
 	private const string ThemeSectionHeader = "[appearance.theme]";
 	private static readonly Regex ThemeLinePattern = new(
 		@"^(?<indent>\s*)(?<key>[A-Za-z][\w-]*)\s*=\s*(?<value>[^\r\n#]*?)(?<suffix>\s*(#.*)?)$",
@@ -36,6 +38,97 @@ public sealed class SettingsTomlTemplate
 		return (value ?? string.Empty)
 			.Replace("\\", "\\\\", StringComparison.Ordinal)
 			.Replace("\"", "\\\"", StringComparison.Ordinal);
+	}
+
+	public string BuildLicenseInfoBlock(LicenseValidationResult validation)
+	{
+		return string.Join(
+			Environment.NewLine,
+			[
+				"# Read-only activation details. Changes here are ignored.",
+				GeneratedLicenseInfoSectionHeader,
+				$"state = \"{EscapeTomlString(validation.Status.ToString())}\"",
+				$"summary = \"{EscapeTomlString(validation.Summary)}\"",
+				$"detail = \"{EscapeTomlString(validation.Detail)}\"",
+				$"registered_to = \"{EscapeTomlString(validation.RegisteredTo)}\"",
+				$"registered_email = \"{EscapeTomlString(validation.RegisteredEmail)}\"",
+				$"license_expires_utc = \"{EscapeTomlString(FormatDate(validation.LicenseExpirationUtc))}\"",
+				$"beta_trial_active = {(validation.IsGraceActive ? "true" : "false")}",
+				$"build_started_utc = \"{EscapeTomlString(FormatDate(validation.BuildDateUtc))}\"",
+				$"beta_trial_ends_utc = \"{EscapeTomlString(FormatDate(validation.GraceExpiresUtc))}\"",
+				$"grace_days_remaining = {validation.GraceDaysRemaining}",
+				$"can_execute_requests = {(validation.IsExecutionAllowed ? "true" : "false")}"
+			]);
+	}
+
+	public string RemoveGeneratedLicenseInfoBlock(string text)
+	{
+		string[] lines = text.Replace("\r\n", "\n").Split('\n');
+		List<string> output = [];
+		bool skippingSection = false;
+		bool skipNextBlankLine = false;
+
+		for (int index = 0; index < lines.Length; index++)
+		{
+			string line = lines[index];
+			string trimmed = line.Trim();
+			if (string.Equals(trimmed, "# Read-only activation details. Changes here are ignored.", StringComparison.Ordinal))
+			{
+				int lookahead = index + 1;
+				while (lookahead < lines.Length && string.IsNullOrWhiteSpace(lines[lookahead]))
+				{
+					lookahead++;
+				}
+
+				if (lookahead < lines.Length &&
+				    string.Equals(lines[lookahead].Trim(), GeneratedLicenseInfoSectionHeader, StringComparison.OrdinalIgnoreCase))
+				{
+					skipNextBlankLine = true;
+					continue;
+				}
+			}
+
+			if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+			{
+				if (string.Equals(trimmed, GeneratedLicenseInfoSectionHeader, StringComparison.OrdinalIgnoreCase))
+				{
+					skippingSection = true;
+					continue;
+				}
+
+				skippingSection = false;
+			}
+
+			if (skippingSection)
+			{
+				continue;
+			}
+
+			if (skipNextBlankLine && string.IsNullOrWhiteSpace(trimmed))
+			{
+				continue;
+			}
+
+			skipNextBlankLine = false;
+			output.Add(line);
+		}
+
+		while (output.Count > 0 && string.IsNullOrWhiteSpace(output[^1]))
+		{
+			output.RemoveAt(output.Count - 1);
+		}
+
+		return string.Join(Environment.NewLine, output);
+	}
+
+	private static string FormatDate(DateTimeOffset? value)
+	{
+		return value?.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ") ?? string.Empty;
+	}
+
+	private static string FormatDate(DateTimeOffset value)
+	{
+		return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
 	}
 
 	public IReadOnlyList<EditorEditableRange> GetEditableRanges(string text)

@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
+using ForRest.Services.Licensing;
 
 namespace ForRest.Maui.Tests;
 
@@ -29,6 +31,8 @@ public sealed class SettingsTomlDocumentServiceTests
 
 		Assert.IsFalse(editorText.Contains("super-secret-license", StringComparison.Ordinal));
 		StringAssert.Contains(editorText, $"license = \"{SettingsTomlTemplate.MaskedLicenseValue}\"");
+		StringAssert.Contains(editorText, "[license.info]");
+		StringAssert.Contains(editorText, "build_started_utc = ");
 	}
 
 	[TestMethod]
@@ -83,13 +87,56 @@ public sealed class SettingsTomlDocumentServiceTests
 		Assert.IsFalse(rawText.Contains(SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal));
 	}
 
+	[TestMethod]
+	public void SaveRawText_ignores_edits_to_generated_license_info_block()
+	{
+		using TestConfigScope scope = new();
+		SettingsTomlDocumentService service = CreateService();
+		File.WriteAllText(
+			scope.ConfigFilePath,
+			"""
+			license = ""
+
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = false
+			amber = false
+			""");
+
+		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
+		string edited = editorText
+			.Replace("summary = ", "summary = \"hacked\" # ", StringComparison.Ordinal)
+			.Replace("grace_days_remaining = ", "grace_days_remaining = 999 # ", StringComparison.Ordinal);
+		service.SaveRawText(edited);
+
+		string rawText = File.ReadAllText(scope.ConfigFilePath);
+		Assert.IsFalse(rawText.Contains("[license.info]", StringComparison.Ordinal));
+		Assert.IsFalse(rawText.Contains("hacked", StringComparison.Ordinal));
+		Assert.IsFalse(rawText.Contains("999", StringComparison.Ordinal));
+	}
+
 	private static SettingsTomlDocumentService CreateService()
 	{
 		SettingsTomlTemplate template = new();
 		ThemeConfigParser parser = new();
 		ThemeConfigNormalizer normalizer = new(template);
 		ThemeConfigStore store = new();
-		return new SettingsTomlDocumentService(store, parser, normalizer, template);
+		ILicenseValidationService licenseValidationService = new StandardLicenseValidationService(
+			new LicenseValidationOptions("unused-public-key", GracePeriodDays: 30));
+		return new SettingsTomlDocumentService(
+			store,
+			parser,
+			normalizer,
+			template,
+			licenseValidationService,
+			new TestBuildMetadataProvider(DateTimeOffset.Parse("2026-03-24T00:00:00Z", null, System.Globalization.DateTimeStyles.AssumeUniversal)));
+	}
+
+	private sealed class TestBuildMetadataProvider(DateTimeOffset buildDateUtc) : IBuildMetadataProvider
+	{
+		public DateTimeOffset GetBuildDateUtc() => buildDateUtc;
 	}
 
 	private sealed class TestConfigScope : IDisposable

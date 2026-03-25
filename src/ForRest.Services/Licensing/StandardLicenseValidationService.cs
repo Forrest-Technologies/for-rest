@@ -29,6 +29,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 					normalizedBuildDate,
 					graceExpiresUtc,
 					graceDaysRemaining,
+					graceActive,
+					null,
+					null,
+					null,
 					$"Grace: {graceDaysRemaining} day{(graceDaysRemaining == 1 ? string.Empty : "s")} left",
 					$"No license is required until {graceExpiresUtc:yyyy-MM-dd}.")
 				: CreateResult(
@@ -37,6 +41,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 					normalizedBuildDate,
 					graceExpiresUtc,
 					0,
+					false,
+					null,
+					null,
+					null,
 					"License required",
 					$"The 30-day build grace expired on {graceExpiresUtc:yyyy-MM-dd}.");
 		}
@@ -66,6 +74,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 					normalizedBuildDate,
 					graceExpiresUtc,
 					graceDaysRemaining,
+					graceActive,
+					license.Customer?.Name,
+					license.Customer?.Email,
+					license.Expiration,
 					summary,
 					detail);
 			}
@@ -78,6 +90,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 					normalizedBuildDate,
 					graceExpiresUtc,
 					graceDaysRemaining,
+					graceActive,
+					license.Customer?.Name,
+					license.Customer?.Email,
+					license.Expiration,
 					$"Grace: {graceDaysRemaining} day{(graceDaysRemaining == 1 ? string.Empty : "s")} left",
 					$"The configured license is not valid yet, but this build is still inside grace. {message}".Trim())
 				: CreateResult(
@@ -86,6 +102,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 					normalizedBuildDate,
 					graceExpiresUtc,
 					0,
+					false,
+					license.Customer?.Name,
+					license.Customer?.Email,
+					license.Expiration,
 					"License invalid",
 					string.IsNullOrWhiteSpace(message) ? "The configured license could not be validated." : message);
 		}
@@ -98,6 +118,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 					normalizedBuildDate,
 					graceExpiresUtc,
 					graceDaysRemaining,
+					graceActive,
+					null,
+					null,
+					null,
 					$"Grace: {graceDaysRemaining} day{(graceDaysRemaining == 1 ? string.Empty : "s")} left",
 					$"The configured license could not be read, but this build is still inside grace. {exception.Message}")
 				: CreateResult(
@@ -106,6 +130,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 					normalizedBuildDate,
 					graceExpiresUtc,
 					0,
+					false,
+					null,
+					null,
+					null,
 					"License invalid",
 					exception.Message);
 		}
@@ -137,6 +165,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 		DateTimeOffset buildDateUtc,
 		DateTimeOffset graceExpiresUtc,
 		int graceDaysRemaining,
+		bool isGraceActive,
+		string? registeredTo,
+		string? registeredEmail,
+		DateTimeOffset? licenseExpirationUtc,
 		string summary,
 		string detail)
 	{
@@ -146,6 +178,10 @@ public sealed class StandardLicenseValidationService : ILicenseValidationService
 			buildDateUtc,
 			graceExpiresUtc,
 			graceDaysRemaining,
+			isGraceActive,
+			registeredTo,
+			registeredEmail,
+			licenseExpirationUtc,
 			summary,
 			detail);
 	}
