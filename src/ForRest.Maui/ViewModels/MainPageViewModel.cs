@@ -40,6 +40,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private readonly IForRestScriptExecutionService _scriptExecutionService;
 	private readonly IExecutionHistoryRepository _executionHistoryRepository;
 	private readonly ForRestScriptDocumentTextService _documentTextService;
+	private readonly IAppActivationService _appActivationService;
 	private readonly Dictionary<Guid, RequestWorkbenchWorkspaceState> _workspaceStates = [];
 	private static readonly Guid HttpBinWorkspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 	private static readonly Guid JsonPlaceholderWorkspaceId = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -76,6 +77,9 @@ public sealed class MainPageViewModel : ObservableObject
 	private bool _isResponsePrettyPrintEnabled = true;
 	private string _debugOutputText;
 	private string _executionStatus;
+	private string _activationStatus;
+	private string _activationDetail;
+	private bool _canExecuteRequests = true;
 	private string _editorThemeKey;
 	private ShellThemeName _currentThemeName;
 	private string _themeConfigText;
@@ -118,13 +122,15 @@ public sealed class MainPageViewModel : ObservableObject
 		RequestWorkbenchStateStore requestWorkbenchStateStore,
 		IForRestScriptExecutionService scriptExecutionService,
 		IExecutionHistoryRepository executionHistoryRepository,
-		ForRestScriptDocumentTextService documentTextService)
+		ForRestScriptDocumentTextService documentTextService,
+		IAppActivationService appActivationService)
 	{
 		_settingsTomlDocumentService = settingsTomlDocumentService;
 		_requestWorkbenchStateStore = requestWorkbenchStateStore;
 		_scriptExecutionService = scriptExecutionService;
 		_executionHistoryRepository = executionHistoryRepository;
 		_documentTextService = documentTextService;
+		_appActivationService = appActivationService;
 		_languageHelpSourceEntries =
 		[
 			.. ForRestLanguageCatalog.GetEntries().Select(
@@ -161,6 +167,8 @@ public sealed class MainPageViewModel : ObservableObject
 		_responseSizeStatus = "--";
 		_debugOutputText = "Debug output, compile diagnostics, console entries, and exceptions appear here.";
 		_executionStatus = themeService.CurrentStatusMessage;
+		_activationStatus = "Activation pending";
+		_activationDetail = "License state has not been evaluated yet.";
 		_currentThemeName = themeService.CurrentTheme.Name;
 		_editorThemeKey = themeService.CurrentTheme.MonacoThemeKey;
 		_themeConfigText = ReadSettingsText(_currentThemeName);
@@ -257,6 +265,7 @@ public sealed class MainPageViewModel : ObservableObject
 		RebuildWorkspaceCollections(starterWorkspace);
 		themeService.ThemeChanged += OnThemeChanged;
 		ApplyThemePalette(themeService.CurrentTheme);
+		RefreshActivationStatus();
 		RefreshLanguageHelpEntries();
 		ActivateRequestEditor();
 		SyncSupportEditorsFromRequestSource();
@@ -727,6 +736,18 @@ public sealed class MainPageViewModel : ObservableObject
 		set => SetProperty(ref _executionStatus, value);
 	}
 
+	public string ActivationStatus
+	{
+		get => _activationStatus;
+		set => SetProperty(ref _activationStatus, value);
+	}
+
+	public string ActivationDetail
+	{
+		get => _activationDetail;
+		set => SetProperty(ref _activationDetail, value);
+	}
+
 	public string ResponseSizeStatus => _responseSizeStatus;
 
 	public string ResponseTimeStatus => _responseTimeStatus;
@@ -735,7 +756,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool ShowRightPaneRestoreButton => !_isCompactLayout && _rightPaneCollapsed;
 
-	public bool CanSend => !_isSending && IsActiveRequestEditor;
+	public bool CanSend => !_isSending && IsActiveRequestEditor && _canExecuteRequests;
 
 	public bool CanMoveWorkspaceLeft => GetSelectedWorkspaceIndex() > 0;
 
@@ -850,13 +871,21 @@ public sealed class MainPageViewModel : ObservableObject
 
 		ApplyWorkspaceSelection(selectedWorkspaceId);
 		await ReloadHistoryAsync();
+		RefreshActivationStatus();
 		_isInitialized = true;
 	}
 
 	public async Task SendAsync()
 	{
-		if (!CanSend)
+		if (!IsActiveRequestEditor || _isSending)
 		{
+			return;
+		}
+
+		RefreshActivationStatus();
+		if (!_canExecuteRequests)
+		{
+			ApplyActivationBlock();
 			return;
 		}
 
@@ -1697,6 +1726,56 @@ public sealed class MainPageViewModel : ObservableObject
 		ExecutionStatus = e.StatusMessage;
 		ApplyThemePalette(e.Theme);
 		UpdateSettingsTextFromDisk(_currentThemeName);
+		RefreshActivationStatus();
+	}
+
+	private void RefreshActivationStatus()
+	{
+		try
+		{
+			ActivationSnapshot snapshot = _appActivationService.EvaluateNow();
+			ActivationStatus = snapshot.StatusText;
+			ActivationDetail = snapshot.DetailText;
+			_canExecuteRequests = snapshot.CanExecuteRequests;
+		}
+		catch (Exception exception)
+		{
+			ActivationStatus = "Activation unavailable";
+			ActivationDetail = exception.Message;
+			_canExecuteRequests = true;
+			AppLaunchGuard.RecordException("Activation status refresh failed.", exception);
+		}
+
+		OnPropertyChanged(nameof(CanSend));
+	}
+
+	private void ApplyActivationBlock()
+	{
+		ResponseState = "Blocked";
+		ExecutionStatus = ActivationStatus;
+		DebugOutputText = string.Join(
+			Environment.NewLine,
+			[
+				"Execution was blocked by activation policy.",
+				$"Status: {ActivationStatus}",
+				$"Detail: {ActivationDetail}"
+			]);
+		_responseTimeStatus = "--";
+		_responseSizeStatus = "--";
+		_latestResponseSnapshot = null;
+		ResponseBodyText = string.Empty;
+		ResponseRawText = string.Empty;
+		ResponseHeaderRows.Clear();
+		OutputMetrics.Clear();
+		OutputMetrics.Add(new OutputMetricViewModel("Status", "Blocked", _dangerColor));
+		OutputMetrics.Add(new OutputMetricViewModel("Time", "--", _methodNeutral));
+		OutputMetrics.Add(new OutputMetricViewModel("Size", "--", _methodNeutral));
+		OutputMetrics.Add(new OutputMetricViewModel("Type", "n/a", _methodNeutral));
+		TraceEntries.Clear();
+		TraceEntries.Add(new TraceEntryViewModel("license", ActivationStatus, DateTime.Now.ToString("T"), _dangerColor));
+		OnPropertyChanged(nameof(ResponseTimeStatus));
+		OnPropertyChanged(nameof(ResponseSizeStatus));
+		FocusRightPaneTab("debug");
 	}
 
 	private void ApplyThemePalette(ShellThemeDefinition theme, bool updateCollections = true)

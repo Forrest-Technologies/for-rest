@@ -4,6 +4,7 @@ using ForRest.Maui.Services;
 using ForRest.Maui.ViewModels;
 using ForRest.Repositories;
 using ForRest.Services;
+using ForRest.Services.Licensing;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +30,13 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ThemeConfigStore>();
 		builder.Services.AddSingleton<SettingsTomlDocumentService>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
+		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
+		builder.Services.AddSingleton(
+			new LicenseValidationOptions(
+				ForRestLicenseProfile.PublicKey,
+				GracePeriodDays: 30));
+		builder.Services.AddSingleton<ILicenseValidationService, StandardLicenseValidationService>();
+		builder.Services.AddSingleton<IAppActivationService, AppActivationService>();
 		builder.Services.AddSingleton<RequestWorkbenchStateStore>();
 		builder.Services.AddSingleton<IExecutionHistoryRepository, InMemoryExecutionHistoryRepository>();
 		builder.Services.AddSingleton<VariableResolver>();

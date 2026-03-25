@@ -11,18 +11,42 @@ public enum ShellThemeName
 	Amber
 }
 
-public sealed record ForRestSettings(ShellThemeName Theme);
+public sealed record ForRestSettings(
+	ShellThemeName Theme,
+	string LicenseKey = "");
 
-public sealed record ThemeConfigEntry(string RawName, bool? SelectedValue, bool IsKnown);
+public sealed record SettingsTomlLine(
+	int LineNumber,
+	string RawText,
+	string? SectionName,
+	bool IsBlank,
+	bool IsComment,
+	bool IsSectionHeader,
+	bool IsKeyValue,
+	string? Key,
+	string? Value);
+
+public sealed record ThemeConfigEntry(
+	int LineNumber,
+	string RawName,
+	bool? SelectedValue,
+	bool IsKnown);
 
 public sealed record ThemeConfigDocument(
+	IReadOnlyList<SettingsTomlLine> Lines,
 	IReadOnlyList<ThemeConfigEntry> Entries,
+	string LicenseKey,
 	IReadOnlyList<string> Messages);
 
 public sealed record ThemeNormalizationResult(
 	ForRestSettings Settings,
 	string NormalizedText,
 	IReadOnlyList<string> Messages);
+
+public sealed record ActivationSnapshot(
+	string StatusText,
+	string DetailText,
+	bool CanExecuteRequests);
 
 public sealed record EditorEditableRange(
 	int StartLineNumber,

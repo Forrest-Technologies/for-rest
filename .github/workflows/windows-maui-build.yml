@@ -23,6 +23,7 @@ jobs:
       app_display_version: ${{ steps.version.outputs.app_display_version }}
       app_version: ${{ steps.version.outputs.app_version }}
       file_version: ${{ steps.version.outputs.file_version }}
+      build_timestamp_utc: ${{ steps.version.outputs.build_timestamp_utc }}
       release_tag: ${{ steps.version.outputs.release_tag }}
       release_title: ${{ steps.version.outputs.release_title }}
     steps:
@@ -36,6 +37,7 @@ jobs:
           $appDisplayVersion = $now.ToString('yyyy.M.d')
           $appVersion = $now.ToString('yyyyMMdd')
           $fileVersion = $now.ToString('yyyy.M.d') + '.0'
+          $buildTimestampUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
           if ('${{ github.ref_name }}' -eq 'master') {
             $buildConfiguration = 'Release'
@@ -51,6 +53,7 @@ jobs:
           "app_display_version=$appDisplayVersion" >> $env:GITHUB_OUTPUT
           "app_version=$appVersion" >> $env:GITHUB_OUTPUT
           "file_version=$fileVersion" >> $env:GITHUB_OUTPUT
+          "build_timestamp_utc=$buildTimestampUtc" >> $env:GITHUB_OUTPUT
           "release_tag=v$versionLabel" >> $env:GITHUB_OUTPUT
           "release_title=ForRest $versionLabel" >> $env:GITHUB_OUTPUT
 
@@ -64,9 +67,11 @@ jobs:
             runner: windows-latest
             platform: x64
           - arch: win-arm64
-            runner: windows-11-arm
+            runner: windows-latest
             platform: ARM64
     runs-on: ${{ matrix.runner }}
+    env:
+      WINDOWS_TFM: net10.0-windows10.0.19041.0
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,9 +81,13 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Restore workloads
+        shell: pwsh
+        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:TargetFrameworks=$env:WINDOWS_TFM
+
       - name: Restore
         shell: pwsh
-        run: dotnet restore src/ForRest.Maui/ForRest.Maui.csproj
+        run: dotnet restore src/ForRest.Maui/ForRest.Maui.csproj -p:TargetFrameworks=$env:WINDOWS_TFM
 
       - name: Build Windows app
         shell: pwsh
@@ -86,7 +95,9 @@ jobs:
           $outputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
           dotnet build src/ForRest.Maui/ForRest.Maui.csproj `
             -c "${{ needs.prepare.outputs.build_configuration }}" `
-            -f net10.0-windows10.0.19041.0 `
+            -f $env:WINDOWS_TFM `
+            --no-restore `
+            -p:TargetFrameworks=$env:WINDOWS_TFM `
             -p:ContinuousIntegrationBuild=true `
             -p:Platform=${{ matrix.platform }} `
             -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} `
@@ -95,6 +106,7 @@ jobs:
             -p:InformationalVersion="${{ needs.prepare.outputs.version_label }}" `
             -p:FileVersion=${{ needs.prepare.outputs.file_version }} `
             -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} `
+            -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} `
             -o $outputDirectory
 
       - name: Package build output

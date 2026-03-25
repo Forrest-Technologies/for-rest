@@ -6,6 +6,7 @@ public sealed class ThemeConfigStore
 {
 	private const string FileName = "settings.toml";
 	private const string WorkspaceMarkerFile = "ForRest.slnx";
+	private const string ConfigFileOverrideEnvironmentVariable = "FORREST_CONFIG_FILE";
 	private readonly Lazy<string> _configFilePath;
 
 	public ThemeConfigStore()
@@ -45,6 +46,12 @@ public sealed class ThemeConfigStore
 
 	private static string ResolveConfigFilePath()
 	{
+		string? explicitPath = Environment.GetEnvironmentVariable(ConfigFileOverrideEnvironmentVariable);
+		if (!string.IsNullOrWhiteSpace(explicitPath))
+		{
+			return Path.GetFullPath(explicitPath);
+		}
+
 		string? workspaceRoot =
 			TryFindWorkspaceRoot(AppContext.BaseDirectory) ??
 			TryFindWorkspaceRoot(Environment.CurrentDirectory);

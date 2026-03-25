@@ -18,15 +18,24 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ForRest.Scripting\ForRest.Scripting.csproj" />
+    <ProjectReference Include="..\..\src\ForRest.Services\ForRest.Services.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\ForRest.Maui\Theming\ThemeModels.cs" Link="Theming\ThemeModels.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Theming\SettingsTomlTemplate.cs" Link="Theming\SettingsTomlTemplate.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Theming\ThemeConfigParser.cs" Link="Theming\ThemeConfigParser.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Theming\ThemeConfigNormalizer.cs" Link="Theming\ThemeConfigNormalizer.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Theming\ThemeConfigStore.cs" Link="Theming\ThemeConfigStore.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Theming\SettingsTomlDocumentService.cs" Link="Theming\SettingsTomlDocumentService.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ForRestEditorDebugSnapshotFactory.cs" Link="Services\ForRestEditorDebugSnapshotFactory.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchDocumentFactory.cs" Link="Services\RequestWorkbenchDocumentFactory.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchDocumentNormalizer.cs" Link="Services\RequestWorkbenchDocumentNormalizer.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ResponsePresentationFormatter.cs" Link="Services\ResponsePresentationFormatter.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ResponseVariableExpressionService.cs" Link="Services\ResponseVariableExpressionService.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchStateStore.cs" Link="Services\RequestWorkbenchStateStore.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Services\BuildMetadataProvider.cs" Link="Services\BuildMetadataProvider.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Services\AppActivationService.cs" Link="Services\AppActivationService.cs" />
   </ItemGroup>
 
 </Project>

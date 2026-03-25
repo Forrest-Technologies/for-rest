@@ -4,6 +4,8 @@ namespace ForRest.Maui.Theming;
 
 public sealed class SettingsTomlTemplate
 {
+	public const string LicenseKeyName = "license";
+	public const string MaskedLicenseValue = "********";
 	private const string ThemeSectionHeader = "[appearance.theme]";
 	private static readonly Regex ThemeLinePattern = new(
 		@"^(?<indent>\s*)(?<key>[A-Za-z][\w-]*)\s*=\s*(?<value>[^\r\n#]*?)(?<suffix>\s*(#.*)?)$",
@@ -17,9 +19,23 @@ public sealed class SettingsTomlTemplate
 				"# For-Rest settings are generated from the current settings model.",
 				"# Edit only value fields. Structure is enforced and normalized automatically.",
 				string.Empty,
+				BuildLicenseLine(settings.LicenseKey),
+				string.Empty,
 				ThemeSectionHeader,
 				.. ThemeSupport.OrderedThemes.Select(theme => $"{theme.ToConfigName()} = {(theme == settings.Theme ? "true" : "false")}")
 			]);
+	}
+
+	public static string BuildLicenseLine(string licenseKey)
+	{
+		return $"{LicenseKeyName} = \"{EscapeTomlString(licenseKey)}\"";
+	}
+
+	public static string EscapeTomlString(string? value)
+	{
+		return (value ?? string.Empty)
+			.Replace("\\", "\\\\", StringComparison.Ordinal)
+			.Replace("\"", "\\\"", StringComparison.Ordinal);
 	}
 
 	public IReadOnlyList<EditorEditableRange> GetEditableRanges(string text)
@@ -41,6 +57,16 @@ public sealed class SettingsTomlTemplate
 
 			if (!inThemeSection)
 			{
+				Match topLevelMatch = ThemeLinePattern.Match(line);
+				if (topLevelMatch.Success &&
+				    string.Equals(topLevelMatch.Groups["key"].Value, LicenseKeyName, StringComparison.OrdinalIgnoreCase))
+				{
+					Group licenseValueGroup = topLevelMatch.Groups["value"];
+					int licenseStartColumn = licenseValueGroup.Index + 1;
+					int licenseEndColumn = Math.Max(licenseStartColumn + licenseValueGroup.Length, licenseStartColumn + 1);
+					ranges.Add(new EditorEditableRange(index + 1, licenseStartColumn, index + 1, licenseEndColumn));
+				}
+
 				continue;
 			}
 
@@ -89,6 +115,13 @@ public sealed class SettingsTomlTemplate
 
 			if (!inThemeSection)
 			{
+				Match topLevelMatch = ThemeLinePattern.Match(line);
+				if (topLevelMatch.Success &&
+				    string.Equals(topLevelMatch.Groups["key"].Value, LicenseKeyName, StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
+
 				continue;
 			}
 

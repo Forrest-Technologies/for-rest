@@ -100,17 +100,20 @@
 
         <Border Grid.Row="1"
                 Style="{StaticResource StatusBarBorderStyle}">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto"
                   ColumnSpacing="10">
                 <Label Text="{Binding ExecutionStatus}"
                        Style="{StaticResource StatusBarTextStyle}" />
                 <Label Grid.Column="1"
-                       Text="{Binding ResponseState}"
+                       Text="{Binding ActivationStatus}"
                        Style="{StaticResource StatusBarTextStyle}" />
                 <Label Grid.Column="2"
-                       Text="{Binding ResponseTimeStatus}"
+                       Text="{Binding ResponseState}"
                        Style="{StaticResource StatusBarTextStyle}" />
                 <Label Grid.Column="3"
+                       Text="{Binding ResponseTimeStatus}"
+                       Style="{StaticResource StatusBarTextStyle}" />
+                <Label Grid.Column="4"
                        Text="{Binding ResponseSizeStatus}"
                        Style="{StaticResource StatusBarTextStyle}" />
             </Grid>

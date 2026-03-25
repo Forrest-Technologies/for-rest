@@ -1,6 +1,8 @@
 # For-Rest settings are generated from the current settings model.
 # Edit only value fields. Structure is enforced and normalized automatically.
 
+license = ""
+
 [appearance.theme]
 light = false
 azure = false
