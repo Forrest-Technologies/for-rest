@@ -21,6 +21,24 @@ The For-Rest script language is the request-document language for `.frs` work. I
 
 The language is intentionally declarative for the request shape, with code-first flow layered on top. It compiles into an execution payload that the current HTTP runtime can execute immediately.
 
+## Current Flow Capabilities
+
+The language already supports more flow/runtime behavior than the original request-shape overview implies.
+
+Today you can:
+
+- write top-level flow directly in the `.frs` document or place it inside an explicit `flow { ... }` block
+- call `request.send()` multiple times in a single document, bounded by `max_send_iterations`
+- capture each send into a variable such as `let sent = request.send()`
+- mutate the request between sends by updating `request.Url`, `request.Method`, `request.Body`, `request.ContentType`, and `request.headers[...]`
+- read the latest response from the global `response`
+- read a specific send result from the captured variable returned by `request.send()`
+- access JSON response members dynamically, including arrays and top-level collections
+- pass data between sends with `runtime` variables and direct local variables
+- use built-in `regex`, `encoding`, `crypto`, `json`, `random`, `time`, `tests`, and `console` helpers in flow code
+
+This makes ForRest workable today for chained request automation, response probing, token scraping, request replay, and bounded iterative workflows without introducing a separate workflow graph format.
+
 ## Document Shape
 
 Every document is a sequence of top-level sections or editor-first directives. Supported sections:
@@ -94,6 +112,52 @@ expect json "$.payload.trace" exists "trace exists"
 retry count = 2
 retry interval = 500
 ```
+
+## Flow Example
+
+The request document can also act like a bounded script:
+
+```frs
+name "Replay Session"
+method GET
+url "https://target.example.test/login"
+max_send_iterations 3
+
+request.headers["User-Agent"] = "ForRest-Probe"
+
+let login = request.send()
+if login.status != 200 {
+  error $"login page returned {login.status}"
+}
+
+let csrf = regex.Match(login.body, "\"csrf\":\"([^\"]+)\"", 1)
+runtime csrf_token = csrf
+
+request.Method = "POST"
+request.Url = "https://target.example.test/session"
+request.ContentType = "application/json"
+request.Body = json.stringify(json.parse("""
+{
+  "username": "demo",
+  "password": "demo",
+  "csrf": "{{csrf_token}}"
+}
+"""))
+
+let session = request.send()
+if session.status == 200 {
+  runtime session_cookie = regex.Match(session.body, "\"session\":\"([^\"]+)\"", 1)
+  log $"session established: {session.status}"
+} else {
+  warn $"session create failed: {session.status}"
+}
+```
+
+Notes:
+
+- each call to `request.send()` updates the global `response`
+- the returned value from `request.send()` remains independently usable as `login`, `session`, or any other chosen variable name
+- runtime variables written with `runtime key = value` are available to later template interpolation in URL, headers, auth, and body content
 
 ## Section Rules
 
@@ -419,6 +483,109 @@ The execution pipeline resolves variables in this order:
 
 Templated values use `{{name}}`.
 
+## Response Access
+
+The runtime exposes response data in two related ways:
+
+- `response`
+  - always points at the latest response snapshot
+- `let sent = request.send()`
+  - keeps a specific send result available even if later sends replace the global `response`
+
+Supported response access patterns include:
+
+```frs
+let sent = request.send()
+log sent.status
+log sent.body
+log sent.headers["Content-Type"]
+log sent.user.name
+log sent.items[0].id
+
+if response.status == 200 {
+  log response.payload.traceId
+}
+```
+
+For explicit JSON parsing you can also call:
+
+```frs
+let payload = response.json()
+let id = json.select(payload, "$.items[0].id")
+```
+
+The global `response` is the correct fallback root for copied response expressions. `request` remains the mutable outbound request API, not the response API.
+
+## Built-In Helpers
+
+The flow runtime currently includes these helper surfaces:
+
+- `regex`
+  - `regex.IsMatch(input, pattern, ignoreCase = false)`
+  - `regex.Match(input, pattern, group = 0, ignoreCase = false)`
+  - `regex.Matches(input, pattern, group = 0, ignoreCase = false)`
+- `encoding`
+  - base64 encode/decode
+  - URL encode/decode
+- `crypto`
+  - `Md5`
+  - `Sha1`
+  - `Sha256`
+- `json`
+  - parse, stringify, selector lookup
+- `random`
+  - GUID and numeric generation
+- `time`
+  - local and UTC timestamps
+- `tests`
+  - script-driven assertions
+- `console`
+  - info, warning, and error log capture
+
+These helpers are already enough for a large class of security-oriented workflows such as:
+
+- token scraping from HTML or JSON fragments
+- replaying server-issued values into later requests
+- chained login / probe / follow-up sends
+- HMAC or digest-like preprocessing using built-in hash helpers
+- base64 or URL-encoded payload shaping
+
+## Security Workflow Patterns
+
+For cybersecurity specialists, the current language/runtime is already suitable for:
+
+- exploit payload staging where the request body, content type, headers, and URL are mutated between sends
+- chained reconnaissance or validation requests with bounded iteration
+- extracting anti-CSRF tokens, opaque IDs, or session markers with regex or JSON access
+- carrying values between requests through locals or runtime variables
+- instrumenting scripted checks with `tests` and `console`
+
+Example pattern:
+
+```frs
+name "Probe Chain"
+method GET
+url "https://target.example.test/bootstrap"
+max_send_iterations 4
+
+let bootstrap = request.send()
+let csrf = regex.Match(bootstrap.body, "csrf=([A-Za-z0-9_-]+)", 1)
+runtime csrf_token = csrf
+
+request.Method = "POST"
+request.Url = "https://target.example.test/api/probe"
+request.ContentType = "application/json"
+request.headers["X-CSRF"] = "{{csrf_token}}"
+request.Body = """
+{
+  "payload": "test"
+}
+"""
+
+let probe = request.send()
+expect status == 200 "probe returned 200"
+```
+
 ## Compiler Output
 
 The parser produces a structured document model.
@@ -442,6 +609,35 @@ The current runtime then:
 6. extracts variables from the response
 7. runs generated assertions
 8. returns execution runs, response snapshots, console output, tests, and runtime variables
+
+## Response Stash Roadmap
+
+The next major response-analysis feature is a first-class stash model.
+
+Planned direction:
+
+- flow code will be able to stash dynamically chosen columns and values during execution
+- the response pane will expose a dedicated `stash` tab
+- stash data will render as a horizontally scrollable table regardless of the current inspector pane width
+- users will be able to export the realized stash table to CSV
+
+This is intentionally planned as a model-backed feature, not a UI-only table:
+
+- execution results need a structured stash payload
+- history replay needs to preserve stash rows per run
+- the UI needs a stable column/value model instead of scraping console output
+
+## Regex Extraction And Assertion Roadmap
+
+The next language/runtime expansion for response analysis is first-class regex selectors in declarative extraction and expectation syntax.
+
+Planned additions:
+
+- `extract runtime token = regex body "pattern" 1`
+- `extract runtime cookie = regex header "Set-Cookie" "pattern" 1`
+- regex-backed expectations against body, headers, and eventually named response variables
+
+This will complement, not replace, the current flow-level `regex.*` helper surface.
 
 ## Power-User Patterns Driving The Next Expansion
 
@@ -467,11 +663,16 @@ Those items reflect the request patterns that advanced API users repeatedly rely
 Included now:
 
 - single-request document compilation
+- code-first flow inside the request document
+- bounded chained sends via `request.send()`
+- request mutation between sends
+- dynamic response member access and array indexing
 - runtime variable seeding
 - request/body/header/query/auth authoring
 - challenge-based Windows auth (`digest`, `ntlm`, `negotiate`)
 - OAuth token acquisition (`oauth_client_credentials`, `oauth_device_code`, `oauth_integrated_windows`)
 - JSON extraction
+- regex, encoding, crypto, time, random, console, and tests helper APIs
 - repeat scheduling
 - retry metadata
 - structured post-response assertions
@@ -480,6 +681,8 @@ Included now:
 Not yet included:
 
 - browser-based authorization code + PKCE helpers
+- first-class declarative regex extraction/assertion syntax
+- structured response stash data and stash-panel export
 - nested multi-request workflow graphs in a single document
 - user-defined functions
 - persistent writes back into global/workspace/environment variable stores

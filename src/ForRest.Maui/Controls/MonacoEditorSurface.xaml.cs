@@ -11,6 +11,7 @@ public partial class MonacoEditorSurface : ContentView
 {
 	public event EventHandler? SendRequested;
 	public event EventHandler<MonacoResponseVarRequestEventArgs>? ResponseVarCopyRequested;
+	public event EventHandler<MonacoCursorPositionChangedEventArgs>? CursorPositionChanged;
 
 	private const string MonacoHostHtml = """
 <!DOCTYPE html>
@@ -600,6 +601,21 @@ public partial class MonacoEditorSurface : ContentView
             this.lastContextPosition = event.target && event.target.position
               ? event.target.position
               : this.editor.getPosition();
+          });
+          this.editor.onDidBlurEditorText(() => {
+            if (this.pendingReadOnly) {
+              return;
+            }
+
+            const position = this.editor.getPosition();
+            if (!position) {
+              return;
+            }
+
+            requestHostCommand("cursor-position", {
+              line: position.lineNumber,
+              column: position.column
+            });
           });
 
           this.lastKnownValue = this.editor.getValue();
@@ -1259,6 +1275,15 @@ public partial class MonacoEditorSurface : ContentView
 		    TryGetQueryValue(uri, "column", out int column))
 		{
 			ResponseVarCopyRequested?.Invoke(this, new MonacoResponseVarRequestEventArgs(lineNumber, column));
+			return;
+		}
+
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "cursor-position", StringComparison.OrdinalIgnoreCase) &&
+		    TryGetQueryValue(uri, "line", out int cursorLineNumber) &&
+		    TryGetQueryValue(uri, "column", out int cursorColumn))
+		{
+			CursorPositionChanged?.Invoke(this, new MonacoCursorPositionChangedEventArgs(cursorLineNumber, cursorColumn));
 		}
 	}
 
@@ -1641,6 +1666,13 @@ public partial class MonacoEditorSurface : ContentView
 }
 
 public sealed class MonacoResponseVarRequestEventArgs(int lineNumber, int column) : EventArgs
+{
+	public int LineNumber { get; } = lineNumber;
+
+	public int Column { get; } = column;
+}
+
+public sealed class MonacoCursorPositionChangedEventArgs(int lineNumber, int column) : EventArgs
 {
 	public int LineNumber { get; } = lineNumber;
 

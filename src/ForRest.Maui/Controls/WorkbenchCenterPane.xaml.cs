@@ -31,6 +31,11 @@ public partial class WorkbenchCenterPane : ContentView
 		await ViewModel.SendAsync();
 	}
 
+	private void OnEditorCursorPositionChanged(object? sender, MonacoCursorPositionChangedEventArgs e)
+	{
+		ViewModel.UpdateActiveEditorCursor(e.LineNumber, e.Column);
+	}
+
 	private async void OnSendClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.SendAsync();
@@ -114,6 +119,7 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 		editor.SetBinding(MonacoEditorSurface.LanguageHelpJsonProperty, nameof(MainPageViewModel.LanguageHelpCatalogJson));
 		editor.SendRequested += OnEditorSendRequested;
+		editor.CursorPositionChanged += OnEditorCursorPositionChanged;
 		return editor;
 	}
 

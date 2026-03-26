@@ -115,6 +115,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _selectedLanguageHelpSummary;
 	private string _selectedLanguageHelpDocumentation;
 	private string _selectedLanguageHelpExample;
+	private int _activeEditorLineNumber = 1;
 
 	public MainPageViewModel(
 		IThemeService themeService,
@@ -809,6 +810,10 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public bool CanDeleteWorkspace => GetSelectedWorkspaceState() is not null;
+
+	public bool CanDeleteRequest => IsActiveRequestEditor && GetSelectedRequestIndex() >= 0;
+
 	public Color SelectedMethodColor => SelectedMethod switch
 	{
 		"GET" => _methodGet,
@@ -1324,6 +1329,93 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public void DeleteSelectedWorkspace()
+	{
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return;
+		}
+
+		int currentIndex = GetSelectedWorkspaceIndex();
+		_workspaceStates.Remove(workspace.Id);
+
+		WorkspaceItemViewModel? workspaceItem = Workspaces.FirstOrDefault(item => item.Id == workspace.Id);
+		if (workspaceItem is not null)
+		{
+			Workspaces.Remove(workspaceItem);
+		}
+
+		if (Workspaces.Count == 0)
+		{
+			RequestWorkbenchWorkspaceState replacementWorkspace = BuildUserWorkspace(BuildNextWorkspaceName());
+			_workspaceStates[replacementWorkspace.Id] = replacementWorkspace;
+			Workspaces.Add(
+				new WorkspaceItemViewModel(
+					replacementWorkspace.Id,
+					replacementWorkspace.Name,
+					replacementWorkspace.Documents.Count == 1 ? "1 request" : $"{replacementWorkspace.Documents.Count} requests",
+					false));
+			currentIndex = 0;
+		}
+
+		int nextIndex = Math.Clamp(currentIndex, 0, Workspaces.Count - 1);
+		ApplyWorkspaceSelection(Workspaces[nextIndex].Id);
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+			_ = ReloadHistoryAsync();
+		}
+	}
+
+	public void DeleteSelectedRequest()
+	{
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return;
+		}
+
+		int currentIndex = GetSelectedRequestIndex();
+		if (currentIndex < 0 || currentIndex >= workspace.Documents.Count)
+		{
+			return;
+		}
+
+		List<RequestWorkbenchDocumentState> remainingDocuments = [.. workspace.Documents];
+		remainingDocuments.RemoveAt(currentIndex);
+
+		if (remainingDocuments.Count == 0)
+		{
+			RequestWorkbenchWorkspaceState emptyWorkspace = workspace with
+			{
+				Documents = []
+			};
+			RequestWorkbenchDocumentState replacementDocument = RequestWorkbenchDocumentFactory.CreateNewRequest(
+				emptyWorkspace,
+				location => BuildNewRequestTarget(workspace, location));
+			remainingDocuments.Add(replacementDocument);
+			currentIndex = 0;
+		}
+
+		int nextIndex = Math.Clamp(currentIndex, 0, remainingDocuments.Count - 1);
+		string nextLocation = remainingDocuments[nextIndex].Location;
+		UpdateSelectedWorkspaceState(
+			currentWorkspace => currentWorkspace with
+			{
+				SelectedEnvironment = SelectedEnvironment,
+				SelectedDocumentLocation = nextLocation,
+				Documents = remainingDocuments
+			});
+
+		ApplyWorkspaceSelection(workspace.Id);
+		SelectCenterTab(CenterTabs.FirstOrDefault(static tab => string.Equals(tab.Key, "request", StringComparison.Ordinal)));
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+		}
+	}
+
 	public void MoveSelectedRequestUp()
 	{
 		MoveSelectedRequest(-1);
@@ -1463,7 +1555,8 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public async Task CopyResponseVariableAsync(int lineNumber, int column)
 	{
-		if (!ResponseVariableExpressionService.TryBuildExpression(ResponseBodyText, lineNumber, column, out string expression))
+		string rootExpression = ResolveResponseVariableRoot();
+		if (!ResponseVariableExpressionService.TryBuildExpression(ResponseBodyText, lineNumber, column, rootExpression, out string expression))
 		{
 			ExecutionStatus = "No response property was detected at that location.";
 			return;
@@ -1471,6 +1564,11 @@ public sealed class MainPageViewModel : ObservableObject
 
 		await Clipboard.Default.SetTextAsync(expression);
 		ExecutionStatus = $"Copied response variable: {expression}";
+	}
+
+	public void UpdateActiveEditorCursor(int lineNumber, int column)
+	{
+		_activeEditorLineNumber = Math.Max(1, lineNumber);
 	}
 
 	private void ApplyWorkspaceSelection(Guid workspaceId)
@@ -1557,6 +1655,8 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(CanMoveWorkspaceRight));
 		OnPropertyChanged(nameof(CanMoveRequestUp));
 		OnPropertyChanged(nameof(CanMoveRequestDown));
+		OnPropertyChanged(nameof(CanDeleteWorkspace));
+		OnPropertyChanged(nameof(CanDeleteRequest));
 	}
 
 	private IReadOnlyList<NavigationSectionViewModel> BuildExplorerSections(RequestWorkbenchWorkspaceState workspace)
@@ -2068,6 +2168,7 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(ShowCompactLanguageHelpDrawer));
 		OnPropertyChanged(nameof(CanMoveRequestUp));
 		OnPropertyChanged(nameof(CanMoveRequestDown));
+		OnPropertyChanged(nameof(CanDeleteRequest));
 	}
 
 	private void ActivateSettingsEditor(NavigationItemViewModel item)
@@ -2113,6 +2214,7 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
 		OnPropertyChanged(nameof(ShowLanguageHelpDrawer));
 		OnPropertyChanged(nameof(CanSend));
+		OnPropertyChanged(nameof(CanDeleteRequest));
 	}
 
 	private string GetSelectedCenterTabKey()
@@ -2917,6 +3019,13 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			SelectRightPaneTab(tab);
 		}
+	}
+
+	private string ResolveResponseVariableRoot()
+	{
+		return IsActiveRequestEditor
+			? ResponseVariableRootResolver.Resolve(RequestEditorText, _activeEditorLineNumber)
+			: "response";
 	}
 
 	private static string BuildBaseUrl(string target)

@@ -43,6 +43,7 @@
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchDocumentNormalizer.cs" Link="Services\RequestWorkbenchDocumentNormalizer.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ResponsePresentationFormatter.cs" Link="Services\ResponsePresentationFormatter.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ResponseVariableExpressionService.cs" Link="Services\ResponseVariableExpressionService.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Services\ResponseVariableRootResolver.cs" Link="Services\ResponseVariableRootResolver.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchStateStore.cs" Link="Services\RequestWorkbenchStateStore.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\BuildMetadataProvider.cs" Link="Services\BuildMetadataProvider.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\AppActivationService.cs" Link="Services\AppActivationService.cs" />

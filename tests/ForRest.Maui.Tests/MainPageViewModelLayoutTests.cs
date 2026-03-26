@@ -71,6 +71,68 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.IsTrue(viewModel.ExplorerSections.SelectMany(section => section.Items).Any(item => item.Context.Contains("/ops-lab/", StringComparison.OrdinalIgnoreCase)));
 	}
 
+	[TestMethod]
+	public void DeleteSelectedRequest_removes_current_request_and_selects_another_request()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		string deletedRequestName = viewModel.RequestName;
+
+		viewModel.DeleteSelectedRequest();
+
+		Assert.AreEqual(2, viewModel.OpenDocuments.Count);
+		Assert.AreNotEqual(deletedRequestName, viewModel.RequestName);
+		Assert.IsTrue(viewModel.CanDeleteRequest);
+	}
+
+	[TestMethod]
+	public void DeleteSelectedRequest_replaces_last_request_with_new_request()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+
+		while (viewModel.OpenDocuments.Count > 1)
+		{
+			viewModel.DeleteSelectedRequest();
+		}
+
+		viewModel.DeleteSelectedRequest();
+
+		Assert.AreEqual(1, viewModel.OpenDocuments.Count);
+		Assert.AreEqual("New Request", viewModel.RequestName);
+		Assert.IsTrue(viewModel.OpenDocuments.Single().Location.Contains("/requests/", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[TestMethod]
+	public void DeleteSelectedWorkspace_removes_selected_workspace_and_selects_neighbor()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		viewModel.AddWorkspace();
+		viewModel.AddWorkspace();
+		string deletedWorkspaceName = viewModel.SelectedWorkspace;
+
+		viewModel.DeleteSelectedWorkspace();
+
+		Assert.AreEqual(2, viewModel.Workspaces.Count);
+		Assert.AreNotEqual(deletedWorkspaceName, viewModel.SelectedWorkspace);
+		Assert.IsTrue(viewModel.CanDeleteWorkspace);
+	}
+
+	[TestMethod]
+	public void DeleteSelectedWorkspace_replaces_last_workspace_with_new_workspace()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+
+		viewModel.DeleteSelectedWorkspace();
+		viewModel.DeleteSelectedWorkspace();
+
+		Assert.AreEqual(1, viewModel.Workspaces.Count);
+		Assert.AreEqual("Workspace 1", viewModel.SelectedWorkspace);
+		Assert.AreEqual("Workspace 1", viewModel.Workspaces.Single().Title);
+	}
+
 	private sealed class TestHarness : IDisposable
 	{
 		private readonly string _previousConfigFile;

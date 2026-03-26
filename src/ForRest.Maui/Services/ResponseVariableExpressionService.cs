@@ -19,6 +19,11 @@ public static class ResponseVariableExpressionService
 
 	public static bool TryBuildExpression(string? jsonText, int lineNumber, int column, out string expression)
 	{
+		return TryBuildExpression(jsonText, lineNumber, column, "response", out expression);
+	}
+
+	public static bool TryBuildExpression(string? jsonText, int lineNumber, int column, string? rootExpression, out string expression)
+	{
 		expression = string.Empty;
 		if (string.IsNullOrWhiteSpace(jsonText))
 		{
@@ -39,7 +44,7 @@ public static class ResponseVariableExpressionService
 				return false;
 			}
 
-			expression = BuildExpression(path);
+			expression = BuildExpression(path, rootExpression);
 			return true;
 		}
 		catch
@@ -91,9 +96,12 @@ public static class ResponseVariableExpressionService
 		return Math.Clamp(requestedIndex, lineStart, lineEnd - 1);
 	}
 
-	private static string BuildExpression(IReadOnlyList<PathSegment> path)
+	private static string BuildExpression(IReadOnlyList<PathSegment> path, string? rootExpression)
 	{
-		StringBuilder builder = new("response");
+		string normalizedRootExpression = string.IsNullOrWhiteSpace(rootExpression)
+			? "response"
+			: rootExpression.Trim().TrimEnd('.');
+		StringBuilder builder = new(normalizedRootExpression);
 		for (int index = 0; index < path.Count; index++)
 		{
 			PathSegment segment = path[index];
@@ -184,20 +192,32 @@ public static class ResponseVariableExpressionService
 			{
 				'{' => TryParseObject(currentPath, out path),
 				'[' => TryParseArray(currentPath, out path),
-				'"' => ConsumeStringValue(),
-				_ => ParseScalar()
+				'"' => TryParseStringValue(currentPath, out path),
+				_ => TryParseScalar(currentPath, out path)
 			};
 		}
 
-		private bool ConsumeStringValue()
+		private bool TryParseStringValue(IReadOnlyList<PathSegment> currentPath, out IReadOnlyList<PathSegment>? path)
 		{
-			TryParseString(out _, out _, out _);
+			path = null;
+			if (TryParseString(out int tokenStart, out int tokenEndExclusive, out _, out _, out _) is null)
+			{
+				return false;
+			}
+
+			if (currentPath.Count > 0 && IsTargetWithin(tokenStart, tokenEndExclusive))
+			{
+				path = currentPath;
+				return true;
+			}
+
 			return false;
 		}
 
 		private bool TryParseObject(IReadOnlyList<PathSegment> currentPath, out IReadOnlyList<PathSegment>? path)
 		{
 			path = null;
+			int objectStart = _position;
 			_position++;
 			SkipWhitespace();
 			if (TryConsume('}'))
@@ -208,14 +228,14 @@ public static class ResponseVariableExpressionService
 			while (_position < _text.Length)
 			{
 				SkipWhitespace();
-				string? propertyName = TryParseString(out int rawStart, out int rawEndExclusive, out _);
+				string? propertyName = TryParseString(out int tokenStart, out int tokenEndExclusive, out _, out _, out _);
 				if (propertyName is null)
 				{
 					return false;
 				}
 
 				List<PathSegment> propertyPath = [.. currentPath, PathSegment.Property(propertyName)];
-				if (_targetIndex >= rawStart && _targetIndex < rawEndExclusive)
+				if (IsTargetWithin(tokenStart, tokenEndExclusive))
 				{
 					path = propertyPath;
 					return true;
@@ -239,7 +259,18 @@ public static class ResponseVariableExpressionService
 					continue;
 				}
 
-				return TryConsume('}');
+				if (!TryConsume('}'))
+				{
+					return false;
+				}
+
+				if (currentPath.Count > 0 && IsTargetWithin(objectStart, _position))
+				{
+					path = currentPath;
+					return true;
+				}
+
+				return false;
 			}
 
 			return false;
@@ -248,6 +279,7 @@ public static class ResponseVariableExpressionService
 		private bool TryParseArray(IReadOnlyList<PathSegment> currentPath, out IReadOnlyList<PathSegment>? path)
 		{
 			path = null;
+			int arrayStart = _position;
 			_position++;
 			SkipWhitespace();
 			if (TryConsume(']'))
@@ -271,17 +303,31 @@ public static class ResponseVariableExpressionService
 					continue;
 				}
 
-				return TryConsume(']');
+				if (!TryConsume(']'))
+				{
+					return false;
+				}
+
+				if (currentPath.Count > 0 && IsTargetWithin(arrayStart, _position))
+				{
+					path = currentPath;
+					return true;
+				}
+
+				return false;
 			}
 
 			return false;
 		}
 
-		private string? TryParseString(out int rawStart, out int rawEndExclusive, out int closingQuoteIndex)
+		private string? TryParseString(out int tokenStart, out int tokenEndExclusive, out int rawStart, out int rawEndExclusive, out int closingQuoteIndex)
 		{
+			tokenStart = -1;
+			tokenEndExclusive = -1;
 			rawStart = -1;
 			rawEndExclusive = -1;
 			closingQuoteIndex = -1;
+			tokenStart = _position;
 			if (!TryConsume('"'))
 			{
 				return null;
@@ -296,6 +342,7 @@ public static class ResponseVariableExpressionService
 				{
 					rawEndExclusive = _position - 1;
 					closingQuoteIndex = _position - 1;
+					tokenEndExclusive = _position;
 					return builder.ToString();
 				}
 
@@ -348,8 +395,10 @@ public static class ResponseVariableExpressionService
 			return true;
 		}
 
-		private bool ParseScalar()
+		private bool TryParseScalar(IReadOnlyList<PathSegment> currentPath, out IReadOnlyList<PathSegment>? path)
 		{
+			path = null;
+			int start = _position;
 			while (_position < _text.Length)
 			{
 				char current = _text[_position];
@@ -359,6 +408,12 @@ public static class ResponseVariableExpressionService
 				}
 
 				_position++;
+			}
+
+			if (currentPath.Count > 0 && IsTargetWithin(start, _position))
+			{
+				path = currentPath;
+				return true;
 			}
 
 			return false;
@@ -381,6 +436,14 @@ public static class ResponseVariableExpressionService
 
 			_position++;
 			return true;
+		}
+
+		private bool IsTargetWithin(int startInclusive, int endExclusive)
+		{
+			return startInclusive >= 0
+				&& endExclusive > startInclusive
+				&& _targetIndex >= startInclusive
+				&& _targetIndex < endExclusive;
 		}
 	}
 }

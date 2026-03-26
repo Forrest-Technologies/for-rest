@@ -69,6 +69,11 @@
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnAddWorkspaceClicked"
                                 SemanticProperties.Description="Add workspace" />
+                        <Button Text="-"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnDeleteWorkspaceClicked"
+                                SemanticProperties.Description="Delete selected workspace"
+                                IsEnabled="{Binding CanDeleteWorkspace}" />
                     </HorizontalStackLayout>
                 </Grid>
 
@@ -148,6 +153,11 @@
                                                     Style="{StaticResource DenseTabButtonStyle}"
                                                     Clicked="OnAddRequestClicked"
                                                     SemanticProperties.Description="Add request or script file" />
+                                            <Button Text="-"
+                                                    Style="{StaticResource DenseTabButtonStyle}"
+                                                    Clicked="OnDeleteRequestClicked"
+                                                    SemanticProperties.Description="Delete selected request"
+                                                    IsEnabled="{Binding BindingContext.CanDeleteRequest, Source={x:Reference ExplorerRoot}}" />
                                         </HorizontalStackLayout>
                                     </Grid>
                                     <VerticalStackLayout Spacing="0"

@@ -29,6 +29,29 @@ public sealed class ResponseVariableExpressionServiceTests
 	}
 
 	[TestMethod]
+	public void TryBuildExpression_returns_nested_path_when_cursor_is_on_scalar_value()
+	{
+		string json =
+			"""
+			{
+			  "items": [
+			    {
+			      "id": 42,
+			      "profile": {
+			        "displayName": "Ada"
+			      }
+			    }
+			  ]
+			}
+			""";
+
+		bool succeeded = ResponseVariableExpressionService.TryBuildExpression(json, 6, 25, out string expression);
+
+		Assert.IsTrue(succeeded);
+		Assert.AreEqual("response.items[0].profile.displayName", expression);
+	}
+
+	[TestMethod]
 	public void TryBuildExpression_uses_bracket_notation_for_reserved_root_members()
 	{
 		string json =
@@ -83,7 +106,7 @@ public sealed class ResponseVariableExpressionServiceTests
 	}
 
 	[TestMethod]
-	public void TryBuildExpression_returns_false_when_cursor_is_not_on_property_name()
+	public void TryBuildExpression_supports_custom_root_expression()
 	{
 		string json =
 			"""
@@ -92,7 +115,23 @@ public sealed class ResponseVariableExpressionServiceTests
 			}
 			""";
 
-		bool succeeded = ResponseVariableExpressionService.TryBuildExpression(json, 2, 18, out string expression);
+		bool succeeded = ResponseVariableExpressionService.TryBuildExpression(json, 2, 15, "sent", out string expression);
+
+		Assert.IsTrue(succeeded);
+		Assert.AreEqual("sent.message", expression);
+	}
+
+	[TestMethod]
+	public void TryBuildExpression_returns_false_when_cursor_is_on_root_container()
+	{
+		string json =
+			"""
+			{
+			  "message": "ok"
+			}
+			""";
+
+		bool succeeded = ResponseVariableExpressionService.TryBuildExpression(json, 1, 1, out string expression);
 
 		Assert.IsFalse(succeeded);
 		Assert.AreEqual(string.Empty, expression);

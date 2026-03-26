@@ -45,6 +45,19 @@ public partial class ExplorerPane : ContentView
 		ViewModel.AddWorkspace();
 	}
 
+	private async void OnDeleteWorkspaceClicked(object? sender, EventArgs e)
+	{
+		if (!await ConfirmDeletionAsync(
+			    "Delete Workspace",
+			    $"Delete workspace '{ViewModel.SelectedWorkspace}'? This cannot be undone.",
+			    "Delete"))
+		{
+			return;
+		}
+
+		ViewModel.DeleteSelectedWorkspace();
+	}
+
 	private void OnMoveWorkspaceLeftClicked(object? sender, EventArgs e)
 	{
 		ViewModel.MoveSelectedWorkspaceLeft();
@@ -58,6 +71,19 @@ public partial class ExplorerPane : ContentView
 	private void OnAddRequestClicked(object? sender, EventArgs e)
 	{
 		ViewModel.AddRequest();
+	}
+
+	private async void OnDeleteRequestClicked(object? sender, EventArgs e)
+	{
+		if (!await ConfirmDeletionAsync(
+			    "Delete Request",
+			    $"Delete request '{ViewModel.RequestName}'? This cannot be undone.",
+			    "Delete"))
+		{
+			return;
+		}
+
+		ViewModel.DeleteSelectedRequest();
 	}
 
 	private void OnWorkspaceTapped(object? sender, TappedEventArgs e)
@@ -100,5 +126,32 @@ public partial class ExplorerPane : ContentView
 		{
 			ViewModel.RenameSelectedWorkspace(entry.Text);
 		}
+	}
+
+	private async Task<bool> ConfirmDeletionAsync(string title, string message, string acceptText)
+	{
+		Page? page = FindParentPage();
+		if (page is null)
+		{
+			return false;
+		}
+
+		return await page.DisplayAlert(title, message, acceptText, "Cancel");
+	}
+
+	private Page? FindParentPage()
+	{
+		Element? current = this;
+		while (current is not null)
+		{
+			if (current is Page page)
+			{
+				return page;
+			}
+
+			current = current.Parent;
+		}
+
+		return null;
 	}
 }
