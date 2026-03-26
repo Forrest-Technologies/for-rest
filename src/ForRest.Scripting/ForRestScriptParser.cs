@@ -110,6 +110,7 @@ public sealed class ForRestScriptParser
             if (TryParseTopLevelMeta(trimmed, index + 1, line, meta, diagnostics)
                 || TryParseTopLevelRequest(trimmed, index + 1, line, request, diagnostics)
                 || TryParseTopLevelVariable(trimmed, index + 1, line, variables, diagnostics)
+                || TryParseTopLevelKeyValue(trimmed, index + 1, line, "auth", auth, diagnostics)
                 || TryParseTopLevelNamedValue(trimmed, index + 1, line, "header", headers, diagnostics)
                 || TryParseTopLevelNamedValue(trimmed, index + 1, line, "query", query, diagnostics)
                 || TryParseTopLevelNamedValue(trimmed, index + 1, line, "form", formValues, diagnostics)

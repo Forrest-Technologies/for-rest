@@ -1255,6 +1255,34 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public void RenameSelectedWorkspace(string? nextName)
+	{
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return;
+		}
+
+		string normalizedName = string.IsNullOrWhiteSpace(nextName)
+			? workspace.Name
+			: nextName.Trim();
+		if (string.Equals(normalizedName, workspace.Name, StringComparison.Ordinal))
+		{
+			SelectedWorkspace = workspace.Name;
+			return;
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchWorkspaceState currentWorkspace = GetSelectedWorkspaceState() ?? workspace;
+		RequestWorkbenchWorkspaceState renamedWorkspace = RenameWorkspace(currentWorkspace, normalizedName);
+		_workspaceStates[renamedWorkspace.Id] = renamedWorkspace;
+		ApplyWorkspaceSelection(renamedWorkspace.Id);
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+		}
+	}
+
 	public void MoveSelectedWorkspaceLeft()
 	{
 		MoveSelectedWorkspace(-1);
@@ -1637,6 +1665,39 @@ public sealed class MainPageViewModel : ObservableObject
 			workspaceItem.Title = updatedWorkspace.Name;
 			workspaceItem.Subtitle = updatedWorkspace.Documents.Count == 1 ? "1 request" : $"{updatedWorkspace.Documents.Count} requests";
 		}
+	}
+
+	private static RequestWorkbenchWorkspaceState RenameWorkspace(RequestWorkbenchWorkspaceState workspace, string nextName)
+	{
+		string oldSlug = BuildSlug(workspace.Name, "workspace");
+		string newSlug = BuildSlug(nextName, "workspace");
+		List<RequestWorkbenchDocumentState> renamedDocuments =
+		[
+			.. workspace.Documents.Select(document => document with
+			{
+				Location = RebaseWorkspaceLocation(document.Location, oldSlug, newSlug)
+			})
+		];
+
+		return workspace with
+		{
+			Name = nextName,
+			SelectedDocumentLocation = RebaseWorkspaceLocation(workspace.SelectedDocumentLocation, oldSlug, newSlug),
+			Documents = renamedDocuments
+		};
+	}
+
+	private static string RebaseWorkspaceLocation(string location, string oldSlug, string newSlug)
+	{
+		string[] segments = NormalizeExplorerLocation(location)
+			.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		if (segments.Length < 2 || !string.Equals(segments[1], oldSlug, StringComparison.OrdinalIgnoreCase))
+		{
+			return location;
+		}
+
+		segments[1] = newSlug;
+		return "/" + string.Join('/', segments);
 	}
 
 	private RequestWorkbenchState BuildWorkbenchState()

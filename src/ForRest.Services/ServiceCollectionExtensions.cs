@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IScriptEngine, RoslynScriptEngine>();
         services.AddSingleton<IWorkspaceService, WorkspaceService>();
         services.AddSingleton<IRepeatRunnerService, RepeatRunnerService>();
+        services.AddSingleton<IRequestAuthenticationService, RequestAuthenticationService>();
         services.AddSingleton<IRequestExecutionService, RequestExecutionService>();
         services.AddSingleton<IForRestScriptExecutionService, ForRestScriptExecutionService>();
 

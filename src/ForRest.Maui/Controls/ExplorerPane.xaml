@@ -46,7 +46,7 @@
 
             <Grid Grid.Row="2"
                   Padding="10,0,10,8"
-                  RowDefinitions="Auto,Auto"
+                  RowDefinitions="Auto,Auto,Auto"
                   RowSpacing="6">
                 <Grid ColumnDefinitions="*,Auto"
                       ColumnSpacing="8">
@@ -72,7 +72,14 @@
                     </HorizontalStackLayout>
                 </Grid>
 
-                <ScrollView Grid.Row="1"
+                <Entry Grid.Row="1"
+                       Text="{Binding SelectedWorkspace}"
+                       Placeholder="Selected workspace name"
+                       ClearButtonVisibility="WhileEditing"
+                       Completed="OnWorkspaceNameCompleted"
+                       Unfocused="OnWorkspaceNameUnfocused" />
+
+                <ScrollView Grid.Row="2"
                             MaximumHeightRequest="168">
                     <VerticalStackLayout Spacing="2"
                                          BindableLayout.ItemsSource="{Binding Workspaces}">

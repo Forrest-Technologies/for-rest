@@ -56,6 +56,21 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual("200 OK", viewModel.ResponseState);
 	}
 
+	[TestMethod]
+	public void RenameSelectedWorkspace_updates_workspace_label_and_rebases_request_locations()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		viewModel.AddWorkspace();
+
+		viewModel.RenameSelectedWorkspace("Ops Lab");
+
+		Assert.AreEqual("Ops Lab", viewModel.SelectedWorkspace);
+		Assert.AreEqual("Ops Lab", viewModel.Workspaces.Single(item => item.IsSelected).Title);
+		Assert.IsTrue(viewModel.OpenDocuments.All(item => item.Location.Contains("/ops-lab/", StringComparison.OrdinalIgnoreCase)));
+		Assert.IsTrue(viewModel.ExplorerSections.SelectMany(section => section.Items).Any(item => item.Context.Contains("/ops-lab/", StringComparison.OrdinalIgnoreCase)));
+	}
+
 	private sealed class TestHarness : IDisposable
 	{
 		private readonly string _previousConfigFile;

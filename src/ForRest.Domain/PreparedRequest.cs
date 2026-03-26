@@ -12,6 +12,8 @@ public sealed record PreparedRequest
 
     public RequestBodyDefinition Body { get; init; } = new();
 
+    public RequestAuthDefinition Auth { get; init; } = new();
+
     public int TimeoutMilliseconds { get; init; }
 
     public bool FollowRedirects { get; init; } = true;

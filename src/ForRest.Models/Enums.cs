@@ -26,6 +26,13 @@ public enum AuthMode
     BearerToken,
     Basic,
     ApiKey,
+    Header,
+    Digest,
+    Ntlm,
+    Negotiate,
+    OAuthClientCredentials,
+    OAuthDeviceCode,
+    OAuthIntegratedWindows,
 }
 
 public enum ApiKeyLocation

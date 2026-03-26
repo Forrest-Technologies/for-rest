@@ -46,6 +46,32 @@ public sealed record RequestAuthDefinition
 
     public string ApiKeyValue { get; init; } = string.Empty;
 
+    public string HeaderName { get; init; } = string.Empty;
+
+    public string HeaderValue { get; init; } = string.Empty;
+
+    public string QueryParameterName { get; init; } = string.Empty;
+
+    public string Scheme { get; init; } = string.Empty;
+
+    public bool UseDefaultCredentials { get; init; }
+
+    public string Domain { get; init; } = string.Empty;
+
+    public string Authority { get; init; } = string.Empty;
+
+    public string TokenUrl { get; init; } = string.Empty;
+
+    public string ClientId { get; init; } = string.Empty;
+
+    public string ClientSecret { get; init; } = string.Empty;
+
+    public string Scopes { get; init; } = string.Empty;
+
+    public string Resource { get; init; } = string.Empty;
+
+    public string Audience { get; init; } = string.Empty;
+
     [JsonConverter(typeof(JsonStringEnumConverter<ApiKeyLocation>))]
     public ApiKeyLocation ApiKeyLocation { get; init; }
 }

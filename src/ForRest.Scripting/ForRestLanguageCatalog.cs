@@ -85,6 +85,60 @@ public static class ForRestLanguageCatalog
             "header \"${1:Header-Name}\" = ${2:\"value\"}",
             true),
         new(
+            "auth",
+            "auth",
+            "Auth",
+            "Configure declarative request authentication.",
+            "Use either an `auth { ... }` block or top-level `auth key = value` directives for bearer tokens, API keys, custom headers, challenge-based Windows auth, and OAuth token acquisition.",
+            """
+            auth mode = oauth_client_credentials
+            auth token_url = "https://login.example.test/oauth2/v2.0/token"
+            auth client_id = "{{client_id}}"
+            auth client_secret = "{{client_secret}}"
+            auth scopes = "api://forrest/.default"
+            auth header_name = "Authorization"
+            """,
+            ["authorization", "oauth", "bearer", "ntlm", "negotiate", "token"],
+            ["auth"],
+            "Snippet",
+            "auth mode = ${1|bearer,api_key,header,digest,ntlm,negotiate,oauth_client_credentials,oauth_device_code,oauth_integrated_windows|}",
+            true),
+        new(
+            "auth-client-credentials",
+            "oauth_client_credentials",
+            "Auth",
+            "Acquire an app token from a token endpoint and inject it into the request.",
+            "Supports generic OAuth 2.0 client credentials against a `token_url`, or derives the v2 token endpoint from `authority` when you are targeting Microsoft identity endpoints.",
+            """
+            auth mode = oauth_client_credentials
+            auth token_url = "https://login.example.test/oauth2/v2.0/token"
+            auth client_id = "{{client_id}}"
+            auth client_secret = "{{client_secret}}"
+            auth scopes = "api://forrest/.default"
+            auth header_name = "X-Access-Token"
+            auth scheme = ""
+            """,
+            ["client credentials", "machine token", "service principal"],
+            ["oauth_client_credentials", "client_credentials"],
+            "Snippet",
+            "auth mode = oauth_client_credentials\nauth token_url = \"${1:https://login.example.test/oauth2/v2.0/token}\"\nauth client_id = \"${2:client-id}\"\nauth client_secret = \"${3:client-secret}\"\nauth scopes = \"${4:api://forrest/.default}\"",
+            true),
+        new(
+            "auth-negotiate",
+            "negotiate / ntlm / digest",
+            "Auth",
+            "Use challenge-based HTTP auth with default Windows credentials or an explicit account.",
+            "Use `auth mode = negotiate`, `ntlm`, or `digest`. Add `auth use_default_credentials = true` for pass-through, or provide `username`, `password`, and optional `domain`.",
+            """
+            auth mode = negotiate
+            auth use_default_credentials = true
+            """,
+            ["windows auth", "integrated auth", "ntlm", "digest"],
+            ["negotiate", "ntlm", "digest"],
+            "Snippet",
+            "auth mode = ${1|negotiate,ntlm,digest|}\nauth use_default_credentials = true",
+            true),
+        new(
             "body-json",
             "body json",
             "Request",

@@ -221,6 +221,44 @@ public sealed class ForRestScriptCompilerTests
     }
 
     [TestMethod]
+    public void Compile_supports_top_level_auth_directives_and_extended_auth_aliases()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Auth Probe"
+            method GET
+            url "https://api.example.test/items"
+
+            auth mode = oauth_client_credentials
+            auth token_url = "https://login.example.test/oauth2/v2.0/token"
+            auth client_id = "{{client_id}}"
+            auth client_secret = "{{client_secret}}"
+            auth scopes = "api://forrest/.default offline_access"
+            auth location = header
+            auth header_name = "X-Access-Token"
+            auth scheme = ""
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        Assert.AreEqual(AuthMode.OAuthClientCredentials, result.Payload.Request.Auth.Mode);
+        Assert.AreEqual("https://login.example.test/oauth2/v2.0/token", result.Payload.Request.Auth.TokenUrl);
+        Assert.AreEqual("{{client_id}}", result.Payload.Request.Auth.ClientId);
+        Assert.AreEqual("{{client_secret}}", result.Payload.Request.Auth.ClientSecret);
+        Assert.AreEqual("api://forrest/.default offline_access", result.Payload.Request.Auth.Scopes);
+        Assert.AreEqual("X-Access-Token", result.Payload.Request.Auth.HeaderName);
+        Assert.AreEqual(string.Empty, result.Payload.Request.Auth.Scheme);
+    }
+
+    [TestMethod]
     public void Compile_tolerates_semicolons_and_mixed_legacy_code_first_flow()
     {
         var compiler = new ForRestScriptCompiler(new ForRestScriptParser());

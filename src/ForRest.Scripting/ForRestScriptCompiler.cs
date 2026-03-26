@@ -196,7 +196,7 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
         }
 
         if (!TryRenderScalar(modeExpression, out var modeText)
-            || !Enum.TryParse<AuthMode>(modeText, true, out var mode))
+            || !TryParseAuthMode(modeText ?? string.Empty, out var mode))
         {
             diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The auth section declares an invalid auth mode.", 0, 0));
             return new();
@@ -210,6 +210,21 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             BearerToken = TryReadOptionalString(document.Auth, "token") ?? string.Empty,
             ApiKeyName = TryReadOptionalString(document.Auth, "name") ?? string.Empty,
             ApiKeyValue = TryReadOptionalString(document.Auth, "value") ?? string.Empty,
+            HeaderName = TryReadOptionalString(document.Auth, "header_name") ?? string.Empty,
+            HeaderValue = TryReadOptionalString(document.Auth, "header_value")
+                ?? TryReadOptionalString(document.Auth, "value")
+                ?? string.Empty,
+            QueryParameterName = TryReadOptionalString(document.Auth, "query_name") ?? string.Empty,
+            Scheme = TryReadOptionalString(document.Auth, "scheme") ?? string.Empty,
+            UseDefaultCredentials = TryReadOptionalBoolean(document.Auth, "use_default_credentials") ?? false,
+            Domain = TryReadOptionalString(document.Auth, "domain") ?? string.Empty,
+            Authority = TryReadOptionalString(document.Auth, "authority") ?? string.Empty,
+            TokenUrl = TryReadOptionalString(document.Auth, "token_url") ?? string.Empty,
+            ClientId = TryReadOptionalString(document.Auth, "client_id") ?? string.Empty,
+            ClientSecret = TryReadOptionalString(document.Auth, "client_secret") ?? string.Empty,
+            Scopes = TryReadOptionalString(document.Auth, "scopes") ?? string.Empty,
+            Resource = TryReadOptionalString(document.Auth, "resource") ?? string.Empty,
+            Audience = TryReadOptionalString(document.Auth, "audience") ?? string.Empty,
             ApiKeyLocation = Enum.TryParse<ApiKeyLocation>(TryReadOptionalString(document.Auth, "location"), true, out var apiKeyLocation)
                 ? apiKeyLocation
                 : ApiKeyLocation.Header,
@@ -503,6 +518,56 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                 return true;
             default:
                 value = null;
+                return false;
+        }
+    }
+
+    private static bool TryParseAuthMode(string rawValue, out AuthMode mode)
+    {
+        switch ((rawValue ?? string.Empty).Trim().Replace("-", "_", StringComparison.Ordinal).ToLowerInvariant())
+        {
+            case "none":
+                mode = AuthMode.None;
+                return true;
+            case "bearer":
+            case "bearer_token":
+                mode = AuthMode.BearerToken;
+                return true;
+            case "basic":
+                mode = AuthMode.Basic;
+                return true;
+            case "apikey":
+            case "api_key":
+                mode = AuthMode.ApiKey;
+                return true;
+            case "header":
+            case "custom_header":
+                mode = AuthMode.Header;
+                return true;
+            case "digest":
+                mode = AuthMode.Digest;
+                return true;
+            case "ntlm":
+                mode = AuthMode.Ntlm;
+                return true;
+            case "negotiate":
+                mode = AuthMode.Negotiate;
+                return true;
+            case "oauth_client_credentials":
+            case "client_credentials":
+                mode = AuthMode.OAuthClientCredentials;
+                return true;
+            case "oauth_device_code":
+            case "device_code":
+                mode = AuthMode.OAuthDeviceCode;
+                return true;
+            case "oauth_integrated_windows":
+            case "integrated_windows":
+            case "windows_iwa":
+                mode = AuthMode.OAuthIntegratedWindows;
+                return true;
+            default:
+                mode = AuthMode.None;
                 return false;
         }
     }

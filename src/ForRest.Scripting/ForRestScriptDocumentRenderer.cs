@@ -12,6 +12,7 @@ public static class ForRestScriptDocumentRenderer
 
         AppendMeta(lines, document.Meta);
         AppendRequest(lines, document.Request);
+        AppendAuth(lines, document.Auth);
         AppendVariables(lines, document.Variables);
         AppendNamedValues(lines, "query", document.QueryParameters);
         AppendNamedValues(lines, "header", document.Headers);
@@ -23,7 +24,6 @@ public static class ForRestScriptDocumentRenderer
         AppendTests(lines, document.Tests);
         AppendTopLevelKeyValues(lines, "repeat", document.Repeat);
         AppendTopLevelKeyValues(lines, "retry", document.Retry);
-        AppendAuth(lines, document.Auth);
 
         return string.Join('\n', TrimBlankLines(lines));
     }

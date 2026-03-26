@@ -85,4 +85,20 @@ public partial class ExplorerPane : ContentView
 	{
 		ViewModel.MoveSelectedRequestDown();
 	}
+
+	private void OnWorkspaceNameCompleted(object? sender, EventArgs e)
+	{
+		if (sender is Entry entry)
+		{
+			ViewModel.RenameSelectedWorkspace(entry.Text);
+		}
+	}
+
+	private void OnWorkspaceNameUnfocused(object? sender, FocusEventArgs e)
+	{
+		if (sender is Entry entry)
+		{
+			ViewModel.RenameSelectedWorkspace(entry.Text);
+		}
+	}
 }

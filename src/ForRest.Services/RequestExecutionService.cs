@@ -6,9 +6,14 @@ public sealed class RequestExecutionService(
     IExecutionHistoryRepository executionHistoryRepository,
     IRepeatRunnerService repeatRunnerService,
     IScriptEngine scriptEngine,
-    ILogger<RequestExecutionService> logger) : IRequestExecutionService
+    ILogger<RequestExecutionService> logger,
+    IRequestAuthenticationService? requestAuthenticationService = null) : IRequestExecutionService
 {
     private const string DefaultRequestFlowScript = "await request.send();";
+
+    private readonly IRequestAuthenticationService _requestAuthenticationService =
+        requestAuthenticationService
+        ?? new RequestAuthenticationService(Microsoft.Extensions.Logging.Abstractions.NullLogger<RequestAuthenticationService>.Instance);
 
     #region Public Methods
 
@@ -73,22 +78,17 @@ public sealed class RequestExecutionService(
 
             async Task<ResponseSnapshot?> ExecuteScriptSend(PreparedRequest scriptedRequest)
             {
-                lastSentPreparedRequest = scriptedRequest;
-                using var scriptedHandler = new HttpClientHandler
-                {
-                    AllowAutoRedirect = scriptedRequest.FollowRedirects,
-                    ServerCertificateCustomValidationCallback = scriptedRequest.ValidateSsl
-                        ? DefaultCertificateValidation
-                        : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
-                };
+                AuthenticatedPreparedRequest authenticatedScriptedRequest = await _requestAuthenticationService.PrepareAsync(scriptedRequest, iterationCancellationToken);
+                lastSentPreparedRequest = authenticatedScriptedRequest.Request;
+                using var scriptedHandler = CreateHandler(authenticatedScriptedRequest);
                 using var scriptedClient = new HttpClient(scriptedHandler)
                 {
-                    Timeout = TimeSpan.FromMilliseconds(Math.Max(1, scriptedRequest.TimeoutMilliseconds)),
+                    Timeout = TimeSpan.FromMilliseconds(Math.Max(1, authenticatedScriptedRequest.Request.TimeoutMilliseconds)),
                 };
 
                 var (scriptedResponse, scriptedDuration, scriptedError) = await SendWithRetry(
                     scriptedClient,
-                    scriptedRequest,
+                    authenticatedScriptedRequest.Request,
                     request,
                     iterationCancellationToken);
 
@@ -163,13 +163,9 @@ public sealed class RequestExecutionService(
 
             if (responseSnapshot is null)
             {
-                using var handler = new HttpClientHandler
-                {
-                    AllowAutoRedirect = preparedRequest.FollowRedirects,
-                    ServerCertificateCustomValidationCallback = preparedRequest.ValidateSsl
-                        ? DefaultCertificateValidation
-                        : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
-                };
+                AuthenticatedPreparedRequest authenticatedPreparedRequest = await _requestAuthenticationService.PrepareAsync(preparedRequest, iterationCancellationToken);
+                preparedRequest = authenticatedPreparedRequest.Request;
+                using var handler = CreateHandler(authenticatedPreparedRequest);
                 using var client = new HttpClient(handler)
                 {
                     Timeout = TimeSpan.FromMilliseconds(Math.Max(1, preparedRequest.TimeoutMilliseconds)),
@@ -282,6 +278,30 @@ public sealed class RequestExecutionService(
         SslPolicyErrors sslPolicyErrors)
     {
         return sslPolicyErrors == SslPolicyErrors.None;
+    }
+
+    private static HttpClientHandler CreateHandler(AuthenticatedPreparedRequest authenticatedPreparedRequest)
+    {
+        HttpClientHandler handler = new()
+        {
+            AllowAutoRedirect = authenticatedPreparedRequest.Request.FollowRedirects,
+            ServerCertificateCustomValidationCallback = authenticatedPreparedRequest.Request.ValidateSsl
+                ? DefaultCertificateValidation
+                : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+            PreAuthenticate = authenticatedPreparedRequest.Transport.PreAuthenticate,
+        };
+
+        if (authenticatedPreparedRequest.Transport.UseDefaultCredentials)
+        {
+            handler.UseDefaultCredentials = true;
+        }
+
+        if (authenticatedPreparedRequest.Transport.Credentials is not null)
+        {
+            handler.Credentials = authenticatedPreparedRequest.Transport.Credentials;
+        }
+
+        return handler;
     }
 
     private static HttpRequestMessage BuildHttpRequest(PreparedRequest preparedRequest)

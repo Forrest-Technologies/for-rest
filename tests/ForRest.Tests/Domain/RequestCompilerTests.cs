@@ -147,6 +147,47 @@ public sealed class RequestCompilerTests
         Assert.AreEqual($"Basic {Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("alice:p@ss"))}", header.Value);
     }
 
+    [TestMethod]
+    public void Prepare_applies_custom_header_auth_with_scheme_and_renders_extended_auth_fields()
+    {
+        var request = new RequestDefinition
+        {
+            UrlTemplate = "https://api.example.test",
+            Auth = new()
+            {
+                Mode = AuthMode.Header,
+                HeaderName = "X-Session-Token",
+                HeaderValue = "{{token}}",
+                Scheme = "Token",
+                TokenUrl = "https://login.example.test/{{tenant}}/token",
+                ClientId = "{{clientId}}",
+                ClientSecret = "{{clientSecret}}",
+                Scopes = "api://{{tenant}}/.default",
+            },
+        };
+
+        var result = requestCompiler.Prepare(
+            request,
+            [],
+            [],
+            [],
+            [],
+            [
+                CreateVariable("token", "abc123", VariableScope.Runtime),
+                CreateVariable("tenant", "forrest", VariableScope.Runtime),
+                CreateVariable("clientId", "desktop-client", VariableScope.Runtime),
+                CreateVariable("clientSecret", "super-secret", VariableScope.Runtime),
+            ]);
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.IsNotNull(result.Value);
+        Assert.AreEqual("Token abc123", result.Value!.Headers.Single(static item => item.Key == "X-Session-Token").Value);
+        Assert.AreEqual("https://login.example.test/forrest/token", result.Value.Auth.TokenUrl);
+        Assert.AreEqual("desktop-client", result.Value.Auth.ClientId);
+        Assert.AreEqual("super-secret", result.Value.Auth.ClientSecret);
+        Assert.AreEqual("api://forrest/.default", result.Value.Auth.Scopes);
+    }
+
     #endregion
 
     #region Private Methods
