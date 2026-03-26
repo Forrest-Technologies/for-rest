@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ForRest.Maui.AndroidMainPage">
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto,*"
+          RowSpacing="0">
+        <Border Style="{StaticResource ChromeBorderStyle}">
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="12">
+                <VerticalStackLayout Spacing="2">
+                    <Label Text="FOR-REST"
+                           Style="{StaticResource BrandLabelStyle}" />
+                    <Label Text="{Binding RequestStateStatus}"
+                           Style="{StaticResource PaneMetaStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Grid.Column="1"
+                                     HorizontalOptions="End"
+                                     Spacing="2">
+                    <Label Text="{Binding SelectedWorkspace}"
+                           HorizontalTextAlignment="End"
+                           Style="{StaticResource SectionTitleStyle}" />
+                    <Label Text="{Binding SelectedEnvironment}"
+                           HorizontalTextAlignment="End"
+                           Style="{StaticResource MonoMetaStyle}" />
+                </VerticalStackLayout>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Style="{StaticResource ToolbarBorderStyle}">
+            <Grid ColumnDefinitions="Auto,Auto,*"
+                  ColumnSpacing="6">
+                <Button Text="Run"
+                        Style="{StaticResource PrimaryToolbarButtonStyle}"
+                        Clicked="OnSendClicked"
+                        IsEnabled="{Binding CanSend}" />
+                <Button Grid.Column="1"
+                        Text="Copy"
+                        Style="{StaticResource SubtleToolbarButtonStyle}"
+                        Clicked="OnCopyRequestClicked" />
+                <Label Grid.Column="2"
+                       Text="{Binding ExecutionStatus}"
+                       VerticalTextAlignment="Center"
+                       LineBreakMode="TailTruncation"
+                       Style="{StaticResource StatusBarTextStyle}" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2"
+                Style="{StaticResource SectionBorderStyle}">
+            <Grid RowDefinitions="Auto,*">
+                <Grid Padding="12,8"
+                      ColumnDefinitions="*,Auto"
+                      ColumnSpacing="10">
+                    <Label Text="Request"
+                           Style="{StaticResource SectionTitleStyle}" />
+                    <Label Grid.Column="1"
+                           Text="{Binding ActiveEditorLanguage}"
+                           Style="{StaticResource MonoMetaStyle}" />
+                </Grid>
+
+                <Editor Grid.Row="1"
+                        Text="{Binding ActiveEditorText, Mode=TwoWay}"
+                        AutoSize="Disabled"
+                        Margin="0"
+                        FontFamily="OpenSansRegular"
+                        FontSize="13"
+                        TextColor="{DynamicResource ThemeTextPrimaryColor}"
+                        BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                        IsSpellCheckEnabled="False"
+                        IsTextPredictionEnabled="False"
+                        Keyboard="Text" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="3"
+                Style="{StaticResource StatusBarBorderStyle}">
+            <Grid RowDefinitions="Auto,Auto"
+                  ColumnDefinitions="Auto,Auto,Auto,*"
+                  RowSpacing="6"
+                  ColumnSpacing="6">
+                <Button x:Name="ResponseTabButton"
+                        Text="Response"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnShowResponseClicked" />
+                <Button x:Name="RawTabButton"
+                        Grid.Column="1"
+                        Text="Raw"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnShowRawClicked" />
+                <Button x:Name="DebugTabButton"
+                        Grid.Column="2"
+                        Text="Debug"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnShowDebugClicked" />
+                <Label Grid.Column="3"
+                       Text="{Binding ResponseState}"
+                       VerticalTextAlignment="Center"
+                       LineBreakMode="TailTruncation"
+                       Style="{StaticResource StatusBarTextStyle}" />
+
+                <Button Grid.Row="1"
+                        Text="Copy Output"
+                        Style="{StaticResource SubtleToolbarButtonStyle}"
+                        Clicked="OnCopyOutputClicked" />
+                <Button Grid.Row="1"
+                        Grid.Column="1"
+                        Grid.ColumnSpan="2"
+                        Text="{Binding ResponsePrettyPrintButtonText}"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnTogglePrettyPrintClicked" />
+                <Label Grid.Row="1"
+                       Grid.Column="3"
+                       Text="{Binding ExecutionStatus}"
+                       VerticalTextAlignment="Center"
+                       LineBreakMode="TailTruncation"
+                       Style="{StaticResource StatusBarTextStyle}" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="4"
+                Style="{StaticResource SectionBorderStyle}">
+            <Grid RowDefinitions="Auto,*">
+                <Grid Padding="12,8"
+                      ColumnDefinitions="*,Auto,Auto"
+                      ColumnSpacing="10">
+                    <Label x:Name="OutputTitleLabel"
+                           Text="Response"
+                           Style="{StaticResource SectionTitleStyle}" />
+                    <Label Grid.Column="1"
+                           Text="{Binding ResponseTimeStatus}"
+                           Style="{StaticResource MonoMetaStyle}" />
+                    <Label Grid.Column="2"
+                           Text="{Binding ResponseSizeStatus}"
+                           Style="{StaticResource MonoMetaStyle}" />
+                </Grid>
+
+                <Grid Grid.Row="1">
+                    <Editor x:Name="ResponseBodyEditor"
+                            Text="{Binding ResponseBodyText}"
+                            IsReadOnly="True"
+                            AutoSize="Disabled"
+                            Margin="0"
+                            FontFamily="OpenSansRegular"
+                            FontSize="13"
+                            TextColor="{DynamicResource ThemeTextPrimaryColor}"
+                            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                            IsSpellCheckEnabled="False"
+                            IsTextPredictionEnabled="False"
+                            Keyboard="Text" />
+
+                    <Editor x:Name="ResponseRawEditor"
+                            Text="{Binding ResponseRawText}"
+                            IsReadOnly="True"
+                            IsVisible="False"
+                            AutoSize="Disabled"
+                            Margin="0"
+                            FontFamily="OpenSansRegular"
+                            FontSize="13"
+                            TextColor="{DynamicResource ThemeTextPrimaryColor}"
+                            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                            IsSpellCheckEnabled="False"
+                            IsTextPredictionEnabled="False"
+                            Keyboard="Text" />
+
+                    <Editor x:Name="ResponseDebugEditor"
+                            Text="{Binding DebugOutputText}"
+                            IsReadOnly="True"
+                            IsVisible="False"
+                            AutoSize="Disabled"
+                            Margin="0"
+                            FontFamily="OpenSansRegular"
+                            FontSize="13"
+                            TextColor="{DynamicResource ThemeTextPrimaryColor}"
+                            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                            IsSpellCheckEnabled="False"
+                            IsTextPredictionEnabled="False"
+                            Keyboard="Text" />
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</ContentPage>

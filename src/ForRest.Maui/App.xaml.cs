@@ -28,14 +28,24 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		MainPage mainPage;
+		Page shellPage;
+		string shellPageName;
 		try
 		{
-			mainPage = _services.GetRequiredService<MainPage>();
+			if (DeviceInfo.Platform == DevicePlatform.Android)
+			{
+				shellPage = _services.GetRequiredService<AndroidMainPage>();
+				shellPageName = nameof(AndroidMainPage);
+			}
+			else
+			{
+				shellPage = _services.GetRequiredService<MainPage>();
+				shellPageName = nameof(MainPage);
+			}
 		}
 		catch (Exception exception)
 		{
-			AppLaunchGuard.RecordException("Failed to resolve MainPage during window creation.", exception);
+			AppLaunchGuard.RecordException("Failed to resolve the startup page during window creation.", exception);
 			ContentPage fallbackPage = BuildFallbackPage(exception);
 			return new Window(fallbackPage)
 			{
@@ -43,7 +53,9 @@ public partial class App : Application
 			};
 		}
 
-		Window window = new(mainPage)
+		AppLaunchGuard.RecordMessage("Startup page resolved.", shellPageName);
+
+		Window window = new(shellPage)
 		{
 			Title = "For-Rest"
 		};
