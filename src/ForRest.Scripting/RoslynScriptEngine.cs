@@ -40,6 +40,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
 
         var testsApi = new TestsApi();
         var consoleApi = new ConsoleApi();
+        var stashApi = new StashApi();
         ScriptRequestApi? requestApi = null;
         ScriptResponseApi? responseApi = null;
         VariablesApi? variablesApi = null;
@@ -76,6 +77,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 regex = new RegexApi(),
                 random = new RandomApi(),
                 workspace = new WorkspaceApi(request.Workspace),
+                stash = stashApi,
             };
 
             await CSharpScript.RunAsync(request.Script, ScriptOptions, globals, cancellationToken: cancellationToken);
@@ -85,16 +87,16 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             var message = string.Join(Environment.NewLine, exception.Diagnostics.Select(static item => item.ToString()));
             logger.LogWarning("Script compilation failed: {Message}", message);
             consoleApi.Error(message);
-            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, message);
+            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Script execution failed");
             consoleApi.Error(exception.Message);
-            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, exception.Message);
+            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, exception.Message);
         }
 
-        return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, string.Empty);
+        return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, string.Empty);
     }
 
     #endregion
@@ -108,6 +110,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         VariablesApi? variablesApi,
         TestsApi testsApi,
         ConsoleApi consoleApi,
+        StashApi stashApi,
         string errorMessage)
     {
         if (requestApi is null || variablesApi is null)
@@ -130,6 +133,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                     .. consoleApi.All(),
                 ],
                 ErrorMessage = errorMessage,
+                Stash = stashApi.BuildTable(),
             };
         }
 
@@ -151,6 +155,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 .. consoleApi.All(),
             ],
             ErrorMessage = errorMessage,
+            Stash = stashApi.BuildTable(),
         };
     }
 

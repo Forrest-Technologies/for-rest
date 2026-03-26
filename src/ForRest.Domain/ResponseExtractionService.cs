@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ForRest.Models;
 
 namespace ForRest.Domain;
@@ -14,7 +15,7 @@ public sealed class ResponseExtractionService
 
     public List<VariableDefinition> Extract(ResponseSnapshot? response, IEnumerable<ExtractionDefinition> extractions)
     {
-        if (response is null || string.IsNullOrWhiteSpace(response.Body))
+        if (response is null)
         {
             return [];
         }
@@ -27,26 +28,30 @@ public sealed class ResponseExtractionService
         }
         catch (JsonException)
         {
-            return [];
+            rootNode = null;
         }
 
         return
         [
             .. extractions
                 .Where(static extraction => extraction.IsEnabled && !string.IsNullOrWhiteSpace(extraction.TargetVariableName))
-                .Select(extraction => BuildVariable(rootNode, extraction))
+                .Select(extraction => BuildVariable(response, rootNode, extraction))
                 .Where(static item => item is not null)
                 .Select(static item => item!),
         ];
     }
 
-    #endregion
-
-    #region Private Methods
-
-    private VariableDefinition? BuildVariable(JsonNode? rootNode, ExtractionDefinition extraction)
+    private VariableDefinition? BuildVariable(ResponseSnapshot response, JsonNode? rootNode, ExtractionDefinition extraction)
     {
-        var value = jsonNodeSelector.Select(rootNode, extraction.Selector);
+        var value = extraction.Source switch
+        {
+            ExtractionSource.Body => ApplyRegex(response.Body, extraction.Pattern, extraction.Group),
+            ExtractionSource.Header => ApplyRegex(FindHeaderValue(response, extraction.Selector), extraction.Pattern, extraction.Group),
+            ExtractionSource.Json when string.IsNullOrWhiteSpace(extraction.Pattern) => jsonNodeSelector.Select(rootNode, extraction.Selector),
+            ExtractionSource.Json => ApplyRegex(jsonNodeSelector.Select(rootNode, extraction.Selector), extraction.Pattern, extraction.Group),
+            _ => null,
+        };
+
         if (value is null)
         {
             return null;
@@ -58,6 +63,42 @@ public sealed class ResponseExtractionService
             Value = value,
             Scope = extraction.TargetScope,
         };
+    }
+
+    private static string? FindHeaderValue(ResponseSnapshot response, string headerName)
+    {
+        foreach (var header in response.Headers)
+        {
+            if (string.Equals(header.Key, headerName, StringComparison.OrdinalIgnoreCase))
+            {
+                return header.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ApplyRegex(string? input, string pattern, int group)
+    {
+        if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(pattern))
+        {
+            return null;
+        }
+
+        try
+        {
+            var match = Regex.Match(input, pattern, RegexOptions.CultureInvariant);
+            if (!match.Success || group < 0 || group >= match.Groups.Count)
+            {
+                return null;
+            }
+
+            return match.Groups[group].Value;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     #endregion

@@ -20,6 +20,20 @@ public sealed record TestResult
     public string Message { get; init; } = string.Empty;
 }
 
+public sealed record StashRow
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+
+    public Dictionary<string, string> Values { get; init; } = [];
+}
+
+public sealed record StashTable
+{
+    public List<string> Columns { get; init; } = [];
+
+    public List<StashRow> Rows { get; init; } = [];
+}
+
 public sealed record ResponseSnapshot
 {
     public int StatusCode { get; init; }
@@ -75,6 +89,8 @@ public sealed record ExecutionRun
     public List<ConsoleEntry> ConsoleEntries { get; init; } = [];
 
     public List<VariableDefinition> RuntimeVariables { get; init; } = [];
+
+    public StashTable Stash { get; init; } = new();
 }
 
 public sealed record RequestExecutionResult
@@ -91,6 +107,8 @@ public sealed record RequestExecutionResult
     public List<ConsoleEntry> ConsoleEntries { get; init; } = [];
 
     public List<VariableDefinition> RuntimeVariables { get; init; } = [];
+
+    public StashTable Stash { get; init; } = new();
 }
 
 public sealed record ExecutionPreset

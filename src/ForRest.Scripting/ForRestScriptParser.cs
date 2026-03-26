@@ -778,20 +778,105 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        if (!right.StartsWith("json ", StringComparison.OrdinalIgnoreCase))
+        if (right.StartsWith("json ", StringComparison.OrdinalIgnoreCase))
         {
-            errorMessage = "Extraction selectors currently support only the 'json' selector type.";
+            string rawSelector = TrimOptionalTerminator(right[5..]);
+            if (!TryParseQuotedString(rawSelector, out var selector))
+            {
+                errorMessage = "Extraction selectors must be quoted JSON selector strings.";
+                return false;
+            }
+
+            extraction = new(targetScope, leftParts[1], ForRestScriptExtractionSource.Json, selector!);
+            return true;
+        }
+
+        if (!right.StartsWith("regex ", StringComparison.OrdinalIgnoreCase))
+        {
+            errorMessage = "Extraction selectors currently support 'json' and 'regex'.";
             return false;
         }
 
-        string rawSelector = TrimOptionalTerminator(right[5..]);
-        if (!TryParseQuotedString(rawSelector, out var selector))
+        var regexRemainder = right[6..].Trim();
+        if (regexRemainder.StartsWith("body ", StringComparison.OrdinalIgnoreCase))
         {
-            errorMessage = "Extraction selectors must be quoted JSON selector strings.";
+            return TryParseRegexExtraction(
+                targetScope,
+                leftParts[1],
+                ForRestScriptExtractionSource.Body,
+                string.Empty,
+                regexRemainder[5..].Trim(),
+                out extraction,
+                out errorMessage);
+        }
+
+        if (regexRemainder.StartsWith("header ", StringComparison.OrdinalIgnoreCase))
+        {
+            var headerRemainder = regexRemainder[7..].Trim();
+            if (!TryReadQuotedToken(headerRemainder, out var headerName, out var afterHeader))
+            {
+                errorMessage = "Regex header extractions must declare a quoted header name.";
+                return false;
+            }
+
+            return TryParseRegexExtraction(
+                targetScope,
+                leftParts[1],
+                ForRestScriptExtractionSource.Header,
+                headerName,
+                afterHeader.Trim(),
+                out extraction,
+                out errorMessage);
+        }
+
+        if (regexRemainder.StartsWith("json ", StringComparison.OrdinalIgnoreCase))
+        {
+            var jsonRemainder = regexRemainder[5..].Trim();
+            if (!TryReadQuotedToken(jsonRemainder, out var selector, out var afterSelector))
+            {
+                errorMessage = "Regex JSON extractions must declare a quoted JSON selector.";
+                return false;
+            }
+
+            return TryParseRegexExtraction(
+                targetScope,
+                leftParts[1],
+                ForRestScriptExtractionSource.Json,
+                selector,
+                afterSelector.Trim(),
+                out extraction,
+                out errorMessage);
+        }
+
+        errorMessage = "Regex extractions must target 'body', 'header', or 'json'.";
+        return false;
+    }
+
+    private static bool TryParseRegexExtraction(
+        VariableScope targetScope,
+        string targetVariableName,
+        ForRestScriptExtractionSource source,
+        string selector,
+        string regexText,
+        out ForRestScriptExtraction? extraction,
+        out string? errorMessage)
+    {
+        extraction = null;
+        errorMessage = null;
+
+        if (!TryReadQuotedToken(regexText, out var pattern, out var afterPattern))
+        {
+            errorMessage = "Regex extractions must declare a quoted pattern.";
             return false;
         }
 
-        extraction = new(targetScope, leftParts[1], selector!);
+        if (!TryReadOptionalInteger(afterPattern.Trim(), out var group))
+        {
+            errorMessage = "Regex extractions may only use an optional capture group number.";
+            return false;
+        }
+
+        extraction = new(targetScope, targetVariableName, source, selector, pattern!, group ?? 1);
         return true;
     }
 
@@ -907,7 +992,17 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        if (!TryReadMessageAssertion(trimmedLine[5..].Trim(), out var expressionText, out var message)
+        var remainder = trimmedLine[5..].Trim();
+        if (remainder.StartsWith("regex ", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryParseRegexAssertion(
+                ForRestScriptAssertionTarget.Body,
+                string.Empty,
+                remainder[6..].Trim(),
+                out assertion);
+        }
+
+        if (!TryReadMessageAssertion(remainder, out var expressionText, out var message)
             || !TryReadLeadingOperator(expressionText, out var comparisonOperator, out var right)
             || !TryParseExpression(right, out var value))
         {
@@ -930,6 +1025,15 @@ public sealed class ForRestScriptParser
         if (!TryReadQuotedToken(remainder, out var headerName, out var afterHeader))
         {
             return false;
+        }
+
+        if (afterHeader.TrimStart().StartsWith("regex ", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryParseRegexAssertion(
+                ForRestScriptAssertionTarget.Header,
+                headerName,
+                afterHeader.TrimStart()[6..].Trim(),
+                out assertion);
         }
 
         if (!TryReadMessageAssertion(afterHeader.Trim(), out var expressionText, out var message)
@@ -957,6 +1061,16 @@ public sealed class ForRestScriptParser
             return false;
         }
 
+        if (afterSelector.TrimStart().StartsWith("regex ", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryParseRegexAssertion(
+                ForRestScriptAssertionTarget.Json,
+                string.Empty,
+                afterSelector.TrimStart()[6..].Trim(),
+                out assertion,
+                selector);
+        }
+
         if (!TryReadMessageAssertion(afterSelector.Trim(), out var expressionText, out var message))
         {
             return false;
@@ -975,6 +1089,34 @@ public sealed class ForRestScriptParser
         }
 
         assertion = new(ForRestScriptAssertionTarget.Json, comparisonOperator, message!, Selector: selector, Value: value);
+        return true;
+    }
+
+    private static bool TryParseRegexAssertion(
+        ForRestScriptAssertionTarget target,
+        string headerName,
+        string regexText,
+        out ForRestScriptAssertion? assertion,
+        string? selector = null)
+    {
+        assertion = null;
+        if (!TryReadQuotedToken(regexText, out var pattern, out var afterPattern))
+        {
+            return false;
+        }
+
+        if (!TryReadQuotedToken(afterPattern.Trim(), out var message, out var remainder) || !string.IsNullOrWhiteSpace(remainder))
+        {
+            return false;
+        }
+
+        assertion = new(
+            target,
+            ForRestScriptComparisonOperator.RegexMatch,
+            message!,
+            HeaderName: string.IsNullOrWhiteSpace(headerName) ? null : headerName,
+            Selector: selector,
+            Value: new ForRestScriptStringExpression(pattern!));
         return true;
     }
 
@@ -1026,6 +1168,25 @@ public sealed class ForRestScriptParser
         remainder = endIndex + 1 < text.Length ? text[(endIndex + 1)..] : string.Empty;
         consumedLength = endIndex + 1;
         return true;
+    }
+
+    private static bool TryReadOptionalInteger(string text, out int? value)
+    {
+        text = TrimOptionalTerminator(text);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            value = null;
+            return true;
+        }
+
+        if (int.TryParse(text, out var parsed))
+        {
+            value = parsed;
+            return true;
+        }
+
+        value = null;
+        return false;
     }
 
     private static bool TrySplitOperator(

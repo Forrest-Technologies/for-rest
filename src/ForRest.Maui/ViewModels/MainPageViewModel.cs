@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
@@ -10,6 +12,7 @@ using ForRest.Scripting;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
+using Microsoft.Maui.Storage;
 
 namespace ForRest.Maui.ViewModels;
 
@@ -217,6 +220,7 @@ public sealed class MainPageViewModel : ObservableObject
 		RightPaneTabs =
 		[
 			new PaneTabViewModel("response", "Response", true),
+			new PaneTabViewModel("stash", "Stash"),
 			new PaneTabViewModel("headers", "Headers"),
 			new PaneTabViewModel("trace", "Trace"),
 			new PaneTabViewModel("raw", "Raw"),
@@ -238,6 +242,12 @@ public sealed class MainPageViewModel : ObservableObject
 			new OutputMetricViewModel("Size", "--", _methodNeutral),
 			new OutputMetricViewModel("Type", "n/a", _methodNeutral)
 		];
+
+		StashColumns =
+		[];
+
+		StashRows =
+		[];
 
 		TraceEntries =
 		[
@@ -292,6 +302,10 @@ public sealed class MainPageViewModel : ObservableObject
 	public ObservableCollection<OutputMetricViewModel> OutputMetrics { get; }
 
 	public ObservableCollection<TraceEntryViewModel> TraceEntries { get; }
+
+	public ObservableCollection<StashColumnViewModel> StashColumns { get; }
+
+	public ObservableCollection<StashRowViewModel> StashRows { get; }
 
 	public ObservableCollection<LanguageHelpEntryViewModel> LanguageHelpEntries { get; }
 
@@ -814,6 +828,14 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool CanDeleteRequest => IsActiveRequestEditor && GetSelectedRequestIndex() >= 0;
 
+	public bool HasStashData => StashColumns.Count > 0 && StashRows.Count > 0;
+
+	public bool ShowStashEmptyState => !HasStashData;
+
+	public bool CanExportStashCsv => HasStashData;
+
+	public string StashEmptyStateText => "No stash rows were captured for the current run. Flow code must execute stash writes before the run ends; lines skipped by break, continue, or return do not contribute rows.";
+
 	public Color SelectedMethodColor => SelectedMethod switch
 	{
 		"GET" => _methodGet,
@@ -828,6 +850,7 @@ public sealed class MainPageViewModel : ObservableObject
 	public string RightSurfaceStatus => RightPaneTabs.FirstOrDefault(tab => tab.IsSelected)?.Key switch
 	{
 		"response" => "Primary response viewer",
+		"stash" => "Structured stash table",
 		"headers" => "Response metadata and transport details",
 		"trace" => "Execution trace and feedback",
 		"raw" => "Raw transport output",
@@ -852,6 +875,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public bool IsVariablesTabVisible => IsTabSelected(CenterTabs, "variables");
 
 	public bool IsInspectorResponseVisible => IsTabSelected(RightPaneTabs, "response");
+
+	public bool IsInspectorStashVisible => IsTabSelected(RightPaneTabs, "stash");
 
 	public bool IsInspectorHeadersVisible => IsTabSelected(RightPaneTabs, "headers");
 
@@ -966,6 +991,8 @@ public sealed class MainPageViewModel : ObservableObject
 				ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
 			}
 
+			ApplyStashTable(latestRun?.Stash ?? outcome.Execution?.Stash ?? new());
+
 			await ReloadHistoryAsync(latestRun?.Id);
 
 			TraceEntries.Clear();
@@ -1010,6 +1037,7 @@ public sealed class MainPageViewModel : ObservableObject
 			ResponseRawText = string.Empty;
 			DebugOutputText = exception.ToString();
 			ResponseHeaderRows.Clear();
+			ClearStashTable();
 			OutputMetrics.Clear();
 			OutputMetrics.Add(new OutputMetricViewModel("Status", "Failed", _dangerColor));
 			OutputMetrics.Add(new OutputMetricViewModel("Time", "--", _methodNeutral));
@@ -1211,6 +1239,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		SetSelected(RightPaneTabs, tab);
 		OnPropertyChanged(nameof(IsInspectorResponseVisible));
+		OnPropertyChanged(nameof(IsInspectorStashVisible));
 		OnPropertyChanged(nameof(IsInspectorHeadersVisible));
 		OnPropertyChanged(nameof(IsInspectorTraceVisible));
 		OnPropertyChanged(nameof(IsInspectorRawVisible));
@@ -1551,6 +1580,119 @@ public sealed class MainPageViewModel : ObservableObject
 
 		await Clipboard.Default.SetTextAsync(ResponseRawText);
 		ExecutionStatus = "Copied raw exchange.";
+	}
+
+	public async Task ExportStashCsvAsync()
+	{
+		if (!HasStashData)
+		{
+			ExecutionStatus = "No stash data available to export.";
+			return;
+		}
+
+		string csv = BuildStashCsv();
+		string fileName = $"forrest-stash-{DateTime.Now:yyyyMMdd-HHmmss}.csv";
+		string filePath = Path.Combine(FileSystem.Current.CacheDirectory, fileName);
+		await File.WriteAllTextAsync(filePath, csv);
+		await Share.Default.RequestAsync(
+			new ShareFileRequest
+			{
+				Title = "Export stash CSV",
+				File = new ShareFile(filePath),
+			});
+		ExecutionStatus = $"Shared stash CSV: {fileName}";
+	}
+
+	private void ApplyStashTable(StashTable stash)
+	{
+		List<string> orderedColumns = [];
+		HashSet<string> seenColumns = new(StringComparer.OrdinalIgnoreCase);
+
+		foreach (string column in stash.Columns)
+		{
+			if (string.IsNullOrWhiteSpace(column) || !seenColumns.Add(column))
+			{
+				continue;
+			}
+
+			orderedColumns.Add(column);
+		}
+
+		foreach (StashRow row in stash.Rows)
+		{
+			foreach (string column in row.Values.Keys)
+			{
+				if (string.IsNullOrWhiteSpace(column) || !seenColumns.Add(column))
+				{
+					continue;
+				}
+
+				orderedColumns.Add(column);
+			}
+		}
+
+		StashColumns.Clear();
+		foreach (string column in orderedColumns)
+		{
+			StashColumns.Add(new StashColumnViewModel(column));
+		}
+
+		StashRows.Clear();
+		foreach (StashRow row in stash.Rows)
+		{
+			StashRows.Add(
+				new StashRowViewModel(
+					orderedColumns.Select(
+						column => new StashCellViewModel(
+							row.Values.TryGetValue(column, out string? value)
+								? value
+								: string.Empty))));
+		}
+
+		NotifyStashStateChanged();
+	}
+
+	private void ClearStashTable()
+	{
+		StashColumns.Clear();
+		StashRows.Clear();
+		NotifyStashStateChanged();
+	}
+
+	private string BuildStashCsv()
+	{
+		List<string> columns = StashColumns.Select(static column => column.Title).ToList();
+		if (columns.Count == 0)
+		{
+			return string.Empty;
+		}
+
+		StringBuilder builder = new();
+		builder.AppendLine(string.Join(",", columns.Select(EscapeCsv)));
+		foreach (StashRowViewModel row in StashRows)
+		{
+			builder.AppendLine(string.Join(",", row.Cells.Select(static cell => EscapeCsv(cell.Value))));
+		}
+
+		return builder.ToString();
+	}
+
+	private void NotifyStashStateChanged()
+	{
+		OnPropertyChanged(nameof(HasStashData));
+		OnPropertyChanged(nameof(ShowStashEmptyState));
+		OnPropertyChanged(nameof(CanExportStashCsv));
+	}
+
+	private static string EscapeCsv(string value)
+	{
+		string normalized = value ?? string.Empty;
+		if (normalized.IndexOfAny(new[] { ',', '"', '\r', '\n' }) < 0)
+		{
+			return normalized;
+		}
+
+		return $"\"{normalized.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 	}
 
 	public async Task CopyResponseVariableAsync(int lineNumber, int column)
@@ -1965,6 +2107,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ResponseBodyText = string.Empty;
 		ResponseRawText = string.Empty;
 		ResponseHeaderRows.Clear();
+		ClearStashTable();
 		OutputMetrics.Clear();
 		OutputMetrics.Add(new OutputMetricViewModel("Status", "Blocked", _dangerColor));
 		OutputMetrics.Add(new OutputMetricViewModel("Time", "--", _methodNeutral));
@@ -2442,6 +2585,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ResponseHeaderRows.Clear();
 		TraceEntries.Clear();
 		TraceEntries.Add(new TraceEntryViewModel("compile", ExecutionStatus, DateTime.Now.ToString("T"), _dangerColor));
+		ClearStashTable();
 		OutputMetrics.Clear();
 		OutputMetrics.Add(new OutputMetricViewModel("Status", "Compile error", _dangerColor));
 		OnPropertyChanged(nameof(ResponseTimeStatus));
@@ -2874,6 +3018,7 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
 		}
+		ApplyStashTable(run.Stash);
 
 		TraceEntries.Clear();
 		TraceEntries.Add(new TraceEntryViewModel("history", run.RequestName, run.StartedUtc.ToLocalTime().ToString("T"), _methodNeutral));
@@ -2944,6 +3089,11 @@ public sealed class MainPageViewModel : ObservableObject
 			lines.Add($"Error: {latestRun.ErrorMessage}");
 		}
 
+		if (outcome.Execution.Stash.Columns.Count > 0 || outcome.Execution.Stash.Rows.Count > 0)
+		{
+			lines.Add($"Stash: {outcome.Execution.Stash.Rows.Count} rows across {outcome.Execution.Stash.Columns.Count} columns");
+		}
+
 		if (outcome.Execution.ConsoleEntries.Count > 0)
 		{
 			lines.Add(string.Empty);
@@ -2983,6 +3133,11 @@ public sealed class MainPageViewModel : ObservableObject
 		if (!string.IsNullOrWhiteSpace(run.ErrorMessage))
 		{
 			lines.Add($"Error: {run.ErrorMessage}");
+		}
+
+		if (run.Stash.Columns.Count > 0 || run.Stash.Rows.Count > 0)
+		{
+			lines.Add($"Stash: {run.Stash.Rows.Count} rows across {run.Stash.Columns.Count} columns");
 		}
 
 		if (run.ConsoleEntries.Count > 0)

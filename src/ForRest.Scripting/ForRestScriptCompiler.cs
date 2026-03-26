@@ -300,7 +300,15 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                 extraction => new ExtractionDefinition
                 {
                     Name = extraction.TargetVariableName,
+                    Source = extraction.Source switch
+                    {
+                        ForRestScriptExtractionSource.Body => ExtractionSource.Body,
+                        ForRestScriptExtractionSource.Header => ExtractionSource.Header,
+                        _ => ExtractionSource.Json,
+                    },
                     Selector = extraction.Selector,
+                    Pattern = extraction.Pattern,
+                    Group = extraction.Group,
                     TargetVariableName = extraction.TargetVariableName,
                     TargetScope = extraction.TargetScope,
                 }),
@@ -346,6 +354,18 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                     builder.AppendLine($"tests.Assert(response.Status {RenderOperator(assertion.Operator)} {statusNumber.Value}, {RenderString(assertion.Message)});");
                     break;
                 case ForRestScriptAssertionTarget.Body:
+                    if (assertion.Operator == ForRestScriptComparisonOperator.RegexMatch)
+                    {
+                        if (!TryRenderScalar(assertion.Value, out var bodyPattern))
+                        {
+                            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "Body regex assertions require a scalar pattern.", 0, 0));
+                            continue;
+                        }
+
+                        builder.AppendLine($"tests.Assert(regex.IsMatch(response.Body ?? string.Empty, {RenderString(bodyPattern!)}), {RenderString(assertion.Message)});");
+                        break;
+                    }
+
                     if (!TryRenderScalar(assertion.Value, out var bodyValue))
                     {
                         diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "Body assertions require a scalar comparison value.", 0, 0));
@@ -355,6 +375,20 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                     AppendStringAssertion(builder, "response.Body ?? string.Empty", assertion.Operator, bodyValue!, assertion.Message);
                     break;
                 case ForRestScriptAssertionTarget.Header:
+                    if (assertion.Operator == ForRestScriptComparisonOperator.RegexMatch)
+                    {
+                        if (!TryRenderScalar(assertion.Value, out var headerPattern) || string.IsNullOrWhiteSpace(assertion.HeaderName))
+                        {
+                            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "Header regex assertions require a header name and scalar pattern.", 0, 0));
+                            continue;
+                        }
+
+                        var headerRegexVariableName = $"__headerValue{testIndex}";
+                        builder.AppendLine($"var {headerRegexVariableName} = response.Headers.TryGetValue({RenderString(assertion.HeaderName!)}, out string __headerRaw{testIndex}) ? __headerRaw{testIndex} : string.Empty;");
+                        builder.AppendLine($"tests.Assert(regex.IsMatch({headerRegexVariableName}, {RenderString(headerPattern!)}), {RenderString(assertion.Message)});");
+                        break;
+                    }
+
                     if (!TryRenderScalar(assertion.Value, out var headerValue) || string.IsNullOrWhiteSpace(assertion.HeaderName))
                     {
                         diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "Header assertions require a header name and scalar value.", 0, 0));
@@ -366,6 +400,20 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                     AppendStringAssertion(builder, headerVariableName, assertion.Operator, headerValue!, assertion.Message);
                     break;
                 case ForRestScriptAssertionTarget.Json:
+                    if (assertion.Operator == ForRestScriptComparisonOperator.RegexMatch)
+                    {
+                        var jsonRegexVariableName = $"__jsonValue{testIndex}";
+                        builder.AppendLine($"var {jsonRegexVariableName} = json.Select(response.Json(), {RenderString(assertion.Selector ?? "$")});");
+                        if (!TryRenderScalar(assertion.Value, out var jsonPattern))
+                        {
+                            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "JSON regex assertions require a scalar pattern.", 0, 0));
+                            continue;
+                        }
+
+                        builder.AppendLine($"tests.Assert(regex.IsMatch({jsonRegexVariableName} ?? string.Empty, {RenderString(jsonPattern!)}), {RenderString(assertion.Message)});");
+                        break;
+                    }
+
                     var jsonVariableName = $"__jsonValue{testIndex}";
                     builder.AppendLine($"var {jsonVariableName} = json.Select(response.Json(), {RenderString(assertion.Selector ?? "$")});");
                     if (assertion.Operator == ForRestScriptComparisonOperator.Exists)
@@ -408,6 +456,9 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                 break;
             case ForRestScriptComparisonOperator.Contains:
                 builder.AppendLine($"tests.Assert(({actualExpression}).Contains({expectedLiteral}, StringComparison.Ordinal), {messageLiteral});");
+                break;
+            case ForRestScriptComparisonOperator.RegexMatch:
+                builder.AppendLine($"tests.Assert(regex.IsMatch({actualExpression}, {expectedLiteral}), {messageLiteral});");
                 break;
             default:
                 builder.AppendLine($"tests.Fail({RenderString($"Unsupported string operator '{comparisonOperator}'.")});");

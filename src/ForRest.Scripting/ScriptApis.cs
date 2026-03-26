@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections;
 using System.Dynamic;
 using System.Security.Cryptography;
@@ -5,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ForRest.Domain;
+using ForRest.Models;
 
 namespace ForRest.Scripting;
 
@@ -720,6 +722,145 @@ public sealed class ConsoleApi
     #endregion
 }
 
+public sealed class StashApi : DynamicObject
+{
+    private readonly List<StashRow> rows = [];
+    private readonly Dictionary<string, string> pendingValues = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> columns = [];
+
+    public void Set(string key, object? value)
+    {
+        string normalizedKey = NormalizeKey(key);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            throw new InvalidOperationException("stash column names cannot be empty.");
+        }
+
+        RegisterColumn(normalizedKey);
+        pendingValues[normalizedKey] = ConvertToCellValue(value);
+    }
+
+    public void Add(string key, object? value)
+    {
+        Set(key, value);
+    }
+
+    public void Commit()
+    {
+        if (pendingValues.Count == 0)
+        {
+            return;
+        }
+
+        rows.Add(
+            new()
+            {
+                Values = pendingValues.ToDictionary(static item => item.Key, static item => item.Value, StringComparer.OrdinalIgnoreCase),
+            });
+
+        pendingValues.Clear();
+    }
+
+    public void Push()
+    {
+        Commit();
+    }
+
+    public void ClearPending()
+    {
+        pendingValues.Clear();
+    }
+
+    public void Reset()
+    {
+        rows.Clear();
+        pendingValues.Clear();
+        columns.Clear();
+    }
+
+    public StashTable BuildTable()
+    {
+        List<StashRow> snapshotRows = [.. rows];
+        if (pendingValues.Count > 0)
+        {
+            snapshotRows.Add(
+                new()
+                {
+                    Values = pendingValues.ToDictionary(static item => item.Key, static item => item.Value, StringComparer.OrdinalIgnoreCase),
+                });
+        }
+
+        return new()
+        {
+            Columns = [.. columns],
+            Rows = snapshotRows,
+        };
+    }
+
+    public override bool TrySetMember(SetMemberBinder binder, object? value)
+    {
+        Set(binder.Name, value);
+        return true;
+    }
+
+    public override bool TryGetMember(GetMemberBinder binder, out object? result)
+    {
+        result = pendingValues.TryGetValue(binder.Name, out string? value) ? value : string.Empty;
+        return true;
+    }
+
+    public override bool TrySetIndex(SetIndexBinder binder, object?[] indexes, object? value)
+    {
+        if (indexes.Length == 1 && indexes[0] is string key)
+        {
+            Set(key, value);
+            return true;
+        }
+
+        return base.TrySetIndex(binder, indexes, value);
+    }
+
+    public override bool TryGetIndex(GetIndexBinder binder, object?[] indexes, out object? result)
+    {
+        if (indexes.Length == 1 && indexes[0] is string key)
+        {
+            result = pendingValues.TryGetValue(key, out string? value) ? value : string.Empty;
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
+    private void RegisterColumn(string key)
+    {
+        if (columns.Any(existing => string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        columns.Add(key);
+    }
+
+    private static string NormalizeKey(string? key)
+    {
+        return (key ?? string.Empty).Trim();
+    }
+
+    private static string ConvertToCellValue(object? value)
+    {
+        return value switch
+        {
+            null => string.Empty,
+            string stringValue => stringValue,
+            bool boolValue => boolValue ? "true" : "false",
+            JsonNode jsonNode => jsonNode.ToJsonString(),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
+            _ => value.ToString() ?? string.Empty,
+        };
+    }
+}
+
 public sealed class TimeApi
 {
     public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
@@ -903,4 +1044,6 @@ public sealed class ScriptGlobals
     public required RandomApi random { get; init; }
 
     public required WorkspaceApi workspace { get; init; }
+
+    public required dynamic stash { get; init; }
 }

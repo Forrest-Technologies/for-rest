@@ -36,6 +36,8 @@ Today you can:
 - access JSON response members dynamically, including arrays and top-level collections
 - pass data between sends with `runtime` variables and direct local variables
 - use built-in `regex`, `encoding`, `crypto`, `json`, `random`, `time`, `tests`, and `console` helpers in flow code
+- capture structured response-analysis rows with `stash`
+- use declarative regex extraction and assertion syntax alongside JSON selectors
 
 This makes ForRest workable today for chained request automation, response probing, token scraping, request replay, and bounded iterative workflows without introducing a separate workflow graph format.
 
@@ -385,15 +387,23 @@ Supported targets:
 - `runtime`
 - `request`
 
-Supported selector type:
+Supported selector forms:
 
 - `json "$.path"`
+- `regex body "pattern"`
+- `regex body "pattern" 1`
+- `regex header "Header-Name" "pattern"`
+- `regex header "Header-Name" "pattern" 1`
+- `regex json "$.path" "pattern"`
+- `regex json "$.path" "pattern" 1`
 
-Example:
+Examples:
 
 ```frs
 extract {
   runtime created_id = json "$.payload.id"
+  runtime bearer_token = regex body "Bearer ([A-Za-z0-9-]+)" 1
+  runtime session_id = regex header "Set-Cookie" "session=([^;]+)" 1
 }
 ```
 
@@ -413,6 +423,7 @@ Supported operators:
 - `==`
 - `!=`
 - `contains`
+- `regex`
 - `exists`
 - `>`
 - `>=`
@@ -425,8 +436,11 @@ Examples:
 tests {
   status == 200 "returns 200"
   body contains "Ada" "body mentions Ada"
+  body regex "Bearer ([A-Za-z0-9-]+)" "body includes bearer token"
   header "Content-Type" contains "json" "json response"
+  header "Set-Cookie" regex "session=" "session cookie exists"
   json "$.payload.id" == "42" "id matches"
+  json "$.payload.id" regex "^[0-9]+$" "id is numeric"
   json "$.payload.trace" exists "trace exists"
 }
 ```
@@ -515,6 +529,54 @@ let id = json.select(payload, "$.items[0].id")
 ```
 
 The global `response` is the correct fallback root for copied response expressions. `request` remains the mutable outbound request API, not the response API.
+
+## Response Stash
+
+Flow code can capture structured stash rows during execution. Each stash key becomes a column in the response `stash` tab, and each committed row becomes a table row that can also be replayed from history and exported to CSV.
+
+Supported stash operations:
+
+- `stash.Column = value`
+- `stash["Column Name"] = value`
+- `stash.Commit()`
+- `stash.Push()`
+- `stash.ClearPending()`
+- `stash.Reset()`
+
+Example:
+
+```frs
+let sent = request.send()
+
+stash.Attempt = 0
+stash.Status = sent.status
+stash["UUID"] = sent.uuid
+stash.Commit()
+```
+
+Notes:
+
+- `stash.Commit()` and `stash.Push()` both finalize the current row
+- `stash.ClearPending()` drops the in-progress row without clearing prior committed rows
+- `stash.Reset()` clears both committed rows and the current in-progress row
+- rows only appear when the stash lines actually execute
+- if a branch hits `break`, `continue`, `return`, or `throw` before the stash lines, that path contributes no stash row
+- if the current row was assigned but not explicitly committed, the active run still snapshots those pending values as the final row for the current execution result
+
+For example, in this flow the stash lines only run on non-`200` attempts, so a first-attempt success leaves the stash empty:
+
+```frs
+foreach attempt in [0..2] {
+  let sent = request.send()
+  if sent.status == 200 {
+    break
+  }
+
+  stash.Attempt = attempt
+  stash.Status = sent.status
+  stash.Commit()
+}
+```
 
 ## Built-In Helpers
 
@@ -610,34 +672,23 @@ The current runtime then:
 7. runs generated assertions
 8. returns execution runs, response snapshots, console output, tests, and runtime variables
 
-## Response Stash Roadmap
+## Declarative Regex Extraction And Assertions
 
-The next major response-analysis feature is a first-class stash model.
+The language now supports regex selectors in declarative extraction and expectation syntax.
 
-Planned direction:
+Examples:
 
-- flow code will be able to stash dynamically chosen columns and values during execution
-- the response pane will expose a dedicated `stash` tab
-- stash data will render as a horizontally scrollable table regardless of the current inspector pane width
-- users will be able to export the realized stash table to CSV
+```frs
+extract runtime token = regex body "Bearer ([A-Za-z0-9-]+)" 1
+extract runtime cookie = regex header "Set-Cookie" "session=([^;]+)" 1
+extract runtime payload_id = regex json "$.payload.id" "([0-9]+)" 1
 
-This is intentionally planned as a model-backed feature, not a UI-only table:
+expect body regex "Bearer ([A-Za-z0-9-]+)" "token appears in the body"
+expect header "Content-Type" regex "json" "content type mentions json"
+expect json "$.payload.id" regex "^[0-9]+$" "payload id is numeric"
+```
 
-- execution results need a structured stash payload
-- history replay needs to preserve stash rows per run
-- the UI needs a stable column/value model instead of scraping console output
-
-## Regex Extraction And Assertion Roadmap
-
-The next language/runtime expansion for response analysis is first-class regex selectors in declarative extraction and expectation syntax.
-
-Planned additions:
-
-- `extract runtime token = regex body "pattern" 1`
-- `extract runtime cookie = regex header "Set-Cookie" "pattern" 1`
-- regex-backed expectations against body, headers, and eventually named response variables
-
-This will complement, not replace, the current flow-level `regex.*` helper surface.
+This complements, not replaces, the flow-level `regex.*` helper surface. Use declarative regex when you want response extraction or assertions to live with the request shape, and use `regex.Match(...)` in flow code when the pattern is part of branching or request mutation logic.
 
 ## Power-User Patterns Driving The Next Expansion
 
@@ -672,6 +723,8 @@ Included now:
 - challenge-based Windows auth (`digest`, `ntlm`, `negotiate`)
 - OAuth token acquisition (`oauth_client_credentials`, `oauth_device_code`, `oauth_integrated_windows`)
 - JSON extraction
+- declarative regex extraction and regex-backed expectations
+- structured response stash data with history replay and CSV export
 - regex, encoding, crypto, time, random, console, and tests helper APIs
 - repeat scheduling
 - retry metadata
@@ -681,8 +734,6 @@ Included now:
 Not yet included:
 
 - browser-based authorization code + PKCE helpers
-- first-class declarative regex extraction/assertion syntax
-- structured response stash data and stash-panel export
 - nested multi-request workflow graphs in a single document
 - user-defined functions
 - persistent writes back into global/workspace/environment variable stores

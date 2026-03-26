@@ -275,6 +275,21 @@ public sealed class TraceEntryViewModel(string title, string detail, string when
 	}
 }
 
+public sealed class StashColumnViewModel(string title)
+{
+	public string Title { get; } = title;
+}
+
+public sealed class StashCellViewModel(string value)
+{
+	public string Value { get; } = value;
+}
+
+public sealed class StashRowViewModel(IEnumerable<StashCellViewModel> cells)
+{
+	public ObservableCollection<StashCellViewModel> Cells { get; } = new(cells);
+}
+
 public sealed class LanguageHelpEntryViewModel(
 	string key,
 	string title,

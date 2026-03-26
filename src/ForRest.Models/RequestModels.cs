@@ -94,7 +94,14 @@ public sealed record ExtractionDefinition
 
     public string Name { get; init; } = string.Empty;
 
+    [JsonConverter(typeof(JsonStringEnumConverter<ExtractionSource>))]
+    public ExtractionSource Source { get; init; } = ExtractionSource.Json;
+
     public string Selector { get; init; } = string.Empty;
+
+    public string Pattern { get; init; } = string.Empty;
+
+    public int Group { get; init; } = 1;
 
     public string TargetVariableName { get; init; } = string.Empty;
 
@@ -102,6 +109,13 @@ public sealed record ExtractionDefinition
     public VariableScope TargetScope { get; init; } = VariableScope.Runtime;
 
     public bool IsEnabled { get; init; } = true;
+}
+
+public enum ExtractionSource
+{
+    Body,
+    Header,
+    Json,
 }
 
 public sealed record ScheduleDefinition

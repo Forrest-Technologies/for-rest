@@ -57,6 +57,43 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_populates_stash_rows_from_execution_result()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+					},
+				},
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "POST",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+
+		await viewModel.SendAsync();
+
+		Assert.IsTrue(viewModel.HasStashData);
+		CollectionAssert.AreEqual(new[] { "Method", "Token" }, viewModel.StashColumns.Select(static item => item.Title).ToArray());
+		Assert.HasCount(2, viewModel.StashRows);
+		CollectionAssert.AreEqual(new[] { "GET", "alpha" }, viewModel.StashRows[0].Cells.Select(static item => item.Value).ToArray());
+		CollectionAssert.AreEqual(new[] { "POST", string.Empty }, viewModel.StashRows[1].Cells.Select(static item => item.Value).ToArray());
+	}
+
+	[TestMethod]
 	public void RenameSelectedWorkspace_updates_workspace_label_and_rebases_request_locations()
 	{
 		using TestHarness harness = new();
@@ -80,7 +117,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		viewModel.DeleteSelectedRequest();
 
-		Assert.AreEqual(2, viewModel.OpenDocuments.Count);
+		Assert.HasCount(2, viewModel.OpenDocuments);
 		Assert.AreNotEqual(deletedRequestName, viewModel.RequestName);
 		Assert.IsTrue(viewModel.CanDeleteRequest);
 	}
@@ -98,7 +135,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		viewModel.DeleteSelectedRequest();
 
-		Assert.AreEqual(1, viewModel.OpenDocuments.Count);
+		Assert.HasCount(1, viewModel.OpenDocuments);
 		Assert.AreEqual("New Request", viewModel.RequestName);
 		Assert.IsTrue(viewModel.OpenDocuments.Single().Location.Contains("/requests/", StringComparison.OrdinalIgnoreCase));
 	}
@@ -114,7 +151,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		viewModel.DeleteSelectedWorkspace();
 
-		Assert.AreEqual(2, viewModel.Workspaces.Count);
+		Assert.HasCount(2, viewModel.Workspaces);
 		Assert.AreNotEqual(deletedWorkspaceName, viewModel.SelectedWorkspace);
 		Assert.IsTrue(viewModel.CanDeleteWorkspace);
 	}
@@ -128,7 +165,7 @@ public sealed class MainPageViewModelLayoutTests
 		viewModel.DeleteSelectedWorkspace();
 		viewModel.DeleteSelectedWorkspace();
 
-		Assert.AreEqual(1, viewModel.Workspaces.Count);
+		Assert.HasCount(1, viewModel.Workspaces);
 		Assert.AreEqual("Workspace 1", viewModel.SelectedWorkspace);
 		Assert.AreEqual("Workspace 1", viewModel.Workspaces.Single().Title);
 	}
@@ -214,6 +251,13 @@ public sealed class MainPageViewModelLayoutTests
 
 	private sealed class FakeExecutionService : IForRestScriptExecutionService
 	{
+		private readonly StashTable _stash;
+
+		public FakeExecutionService(StashTable? stash = null)
+		{
+			_stash = stash ?? new();
+		}
+
 		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
 		{
 			return new(
@@ -254,7 +298,8 @@ public sealed class MainPageViewModelLayoutTests
 				RequestName = request.Name,
 				TargetUri = request.UrlTemplate,
 				RawRequest = "GET https://example.test/mobile",
-				Response = response
+				Response = response,
+				Stash = _stash,
 			};
 
 			return Task.FromResult(
@@ -272,7 +317,8 @@ public sealed class MainPageViewModelLayoutTests
 					{
 						State = ExecutionState.Completed,
 						Runs = [run],
-						LatestResponse = response
+						LatestResponse = response,
+						Stash = _stash,
 					}
 				});
 		}

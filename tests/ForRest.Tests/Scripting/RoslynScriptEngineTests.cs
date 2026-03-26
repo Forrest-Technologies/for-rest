@@ -120,6 +120,46 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_captures_stash_rows_from_dynamic_assignments_and_commit()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                stash.Method = request.Method;
+                stash["Status Code"] = response.Status;
+                stash.Commit();
+                stash.Method = "POST";
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                    Method = HttpMethodKind.Get,
+                },
+                Response = new()
+                {
+                    StatusCode = 201,
+                    Body = """{"ok":true}""",
+                    ContentType = "application/json",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        CollectionAssert.AreEqual(new[] { "Method", "Status Code" }, result.Stash.Columns.ToArray());
+        Assert.HasCount(2, result.Stash.Rows);
+        Assert.AreEqual("GET", result.Stash.Rows[0].Values["Method"]);
+        Assert.AreEqual("201", result.Stash.Rows[0].Values["Status Code"]);
+        Assert.AreEqual("POST", result.Stash.Rows[1].Values["Method"]);
+        var statusCode = result.Stash.Rows[1].Values.TryGetValue("Status Code", out var foundStatusCode) ? foundStatusCode : string.Empty;
+        Assert.AreEqual(string.Empty, statusCode);
+    }
+
+    [TestMethod]
     public async Task Run_handles_duplicate_response_headers_without_throwing()
     {
         var result = await scriptEngine.Run(

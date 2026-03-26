@@ -236,6 +236,24 @@ public static class ForRestLanguageCatalog
             "request.send()",
             false),
         new(
+            "stash",
+            "stash",
+            "Response",
+            "Capture structured columns and rows for the stash tab.",
+            "Assign stash columns with `stash.Column = value` or `stash[\"Column Name\"] = value`. Call `stash.Commit()` or `stash.Push()` to finalize the current row. If a branch exits before those lines run, no stash row is created for that branch.",
+            """
+            let sent = request.send()
+            stash.Attempt = 0
+            stash.Status = sent.status
+            stash["UUID"] = sent.uuid
+            stash.Commit()
+            """,
+            ["stash", "table", "csv", "response stash", "capture rows"],
+            ["stash", "stash.commit", "stash.push"],
+            "Property",
+            "stash.${1:Column} = ${2:value}",
+            true),
+        new(
             "request-headers",
             "request.headers",
             "Request",
@@ -341,6 +359,30 @@ public static class ForRestLanguageCatalog
             "Keyword",
             "and",
             false),
+        new(
+            "extract-regex",
+            "extract runtime = regex",
+            "Variables",
+            "Capture response values with declarative regex selectors.",
+            "Regex extraction supports `body`, `header`, and `json` sources. Use an optional capture-group index when you want a specific group instead of the full match.",
+            "extract runtime token = regex body \"Bearer ([A-Za-z0-9-]+)\" 1",
+            ["extract", "regex", "capture group", "response extraction"],
+            ["extract", "regex"],
+            "Snippet",
+            "extract runtime ${1:name} = regex body \"${2:pattern}\" ${3:1}",
+            true),
+        new(
+            "expect-regex",
+            "expect ... regex",
+            "Assertions",
+            "Assert that response content matches a regex pattern.",
+            "Regex assertions work against `body`, `header \"Name\"`, and `json \"$.path\"` targets. Use them when equality or `contains` is too weak for payload validation.",
+            "expect json \"$.payload.id\" regex \"^[0-9]+$\" \"id is numeric\"",
+            ["expect", "regex", "assert", "pattern match"],
+            ["expect", "regex"],
+            "Snippet",
+            "expect body regex \"${1:pattern}\" \"${2:matches body}\"",
+            true),
         new(
             "regex-match",
             "regex.Match",

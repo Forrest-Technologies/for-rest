@@ -47,6 +47,11 @@ public partial class InspectorPane : ContentView
 		await ViewModel.CopyRawResponseAsync();
 	}
 
+	private async void OnExportStashClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.ExportStashCsvAsync();
+	}
+
 	private async void OnResponseVarCopyRequested(object? sender, MonacoResponseVarRequestEventArgs e)
 	{
 		await ViewModel.CopyResponseVariableAsync(e.LineNumber, e.Column);

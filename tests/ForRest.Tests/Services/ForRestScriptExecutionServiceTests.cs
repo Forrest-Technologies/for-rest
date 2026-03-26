@@ -159,6 +159,77 @@ public sealed class ForRestScriptExecutionServiceTests
     }
 
     [TestMethod]
+    public async Task Execute_captures_stash_rows_from_top_level_flow_code()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(listener, 2, attempt => attempt == 1 ? 500 : 200);
+
+        try
+        {
+            var executionService = CreateService();
+            var source =
+                """
+                name "Flow Stash"
+                method GET
+                url "http://127.0.0.1:__PORT__/stash"
+                history false
+                max_send_iterations 3
+
+                let sent = null
+                foreach attempt in [0..2] {
+                  sent = request.send()
+                  stash.Index = attempt
+                  stash.HttpStatus = sent.status
+                  stash.ServerAttempt = sent.attempt
+                  stash.Commit()
+                  if sent.status == 200 {
+                    break
+                  }
+                }
+
+                expect status == 200 "returns 200"
+                """.Replace("__PORT__", port.ToString());
+
+            var result = await executionService.Execute(
+                new(),
+                new()
+                {
+                    Workspace = new()
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "Flow Stash Demo",
+                    },
+                },
+                source,
+                null);
+
+            var capturedRequests = await WaitForRequestsAsync(requestCaptureTask);
+
+            Assert.IsTrue(
+                result.Compilation.Succeeded,
+                string.Join(Environment.NewLine, result.Compilation.Diagnostics.Select(static item => item.Message)));
+            Assert.IsNotNull(result.Execution);
+            Assert.AreEqual(ExecutionState.Completed, result.Execution.State, result.Execution.Runs.Single().ErrorMessage);
+            Assert.HasCount(2, capturedRequests);
+            CollectionAssert.AreEqual(new[] { "Index", "HttpStatus", "ServerAttempt" }, result.Execution.Stash.Columns.ToArray());
+            Assert.HasCount(2, result.Execution.Stash.Rows);
+            Assert.AreEqual("0", result.Execution.Stash.Rows[0].Values["Index"]);
+            Assert.AreEqual("500", result.Execution.Stash.Rows[0].Values["HttpStatus"]);
+            Assert.AreEqual("1", result.Execution.Stash.Rows[0].Values["ServerAttempt"]);
+            Assert.AreEqual("1", result.Execution.Stash.Rows[1].Values["Index"]);
+            Assert.AreEqual("200", result.Execution.Stash.Rows[1].Values["HttpStatus"]);
+            Assert.AreEqual("2", result.Execution.Stash.Rows[1].Values["ServerAttempt"]);
+            Assert.HasCount(2, result.Execution.Runs.Single().Stash.Rows);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
     public async Task Execute_accepts_semicolon_heavy_mixed_style_scripts_without_parse_failures()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

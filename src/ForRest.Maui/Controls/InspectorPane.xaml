@@ -67,6 +67,81 @@
                              Grid.Row="1"
                              IsVisible="{Binding IsInspectorResponseVisible}" />
 
+                <Grid Grid.RowSpan="2"
+                      RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsInspectorStashVisible}">
+                    <Grid ColumnDefinitions="*,Auto"
+                          Padding="0,0,0,8">
+                        <VerticalStackLayout Spacing="0">
+                            <Label Text="Response stash"
+                                   Style="{StaticResource SectionTitleStyle}" />
+                            <Label Text="Captured script rows realized into a table."
+                                   Style="{StaticResource PaneMetaStyle}" />
+                        </VerticalStackLayout>
+                        <Button Grid.Column="1"
+                                Text="Export CSV"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnExportStashClicked"
+                                IsEnabled="{Binding CanExportStashCsv}" />
+                    </Grid>
+
+                    <Grid Grid.Row="1">
+                        <Label Text="{Binding StashEmptyStateText}"
+                               Style="{StaticResource PaneMetaStyle}"
+                               LineBreakMode="WordWrap"
+                               Margin="2,4,2,0"
+                               IsVisible="{Binding ShowStashEmptyState}" />
+
+                        <ScrollView IsVisible="{Binding HasStashData}">
+                            <ScrollView Orientation="Horizontal"
+                                        HorizontalScrollBarVisibility="Always">
+                                <VerticalStackLayout Padding="2,0,2,0"
+                                                     Spacing="0">
+                                    <Border Style="{StaticResource NavigationRowBorderStyle}"
+                                            Margin="0,0,0,6">
+                                        <HorizontalStackLayout Spacing="0"
+                                                               BindableLayout.ItemsSource="{Binding StashColumns}">
+                                            <BindableLayout.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Label Text="{Binding Title}"
+                                                           WidthRequest="176"
+                                                           Padding="8,6"
+                                                           Style="{StaticResource SectionTitleStyle}"
+                                                           LineBreakMode="WordWrap" />
+                                                </DataTemplate>
+                                            </BindableLayout.ItemTemplate>
+                                        </HorizontalStackLayout>
+                                    </Border>
+
+                                    <VerticalStackLayout Spacing="0"
+                                                         BindableLayout.ItemsSource="{Binding StashRows}">
+                                        <BindableLayout.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource NavigationRowBorderStyle}"
+                                                        Margin="0,0,0,6">
+                                                    <HorizontalStackLayout Spacing="0"
+                                                                           BindableLayout.ItemsSource="{Binding Cells}">
+                                                        <BindableLayout.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Label Text="{Binding Value}"
+                                                                       WidthRequest="176"
+                                                                       Padding="8,6"
+                                                                       Style="{StaticResource MonoTextStyle}"
+                                                                       VerticalTextAlignment="Start"
+                                                                       LineBreakMode="WordWrap" />
+                                                            </DataTemplate>
+                                                        </BindableLayout.ItemTemplate>
+                                                    </HorizontalStackLayout>
+                                                </Border>
+                                            </DataTemplate>
+                                        </BindableLayout.ItemTemplate>
+                                    </VerticalStackLayout>
+                                </VerticalStackLayout>
+                            </ScrollView>
+                        </ScrollView>
+                    </Grid>
+                </Grid>
+
                 <ScrollView Grid.RowSpan="2"
                             IsVisible="{Binding IsInspectorHeadersVisible}">
                     <VerticalStackLayout Padding="2,0,2,0"

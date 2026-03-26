@@ -40,4 +40,6 @@ public sealed record ScriptExecutionResult
     public List<ConsoleEntry> ConsoleEntries { get; init; } = [];
 
     public string ErrorMessage { get; init; } = string.Empty;
+
+    public StashTable Stash { get; init; } = new();
 }

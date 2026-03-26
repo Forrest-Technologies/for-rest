@@ -13,6 +13,8 @@ public sealed class ForRestLanguageCatalogTests
 
         Assert.IsTrue(entries.Count > 0);
         Assert.IsTrue(entries.Any(static entry => entry.Key == "request-send"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "stash"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "extract-regex"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "range-literal"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "logic-aliases"));
         Assert.AreEqual(entries.Count, entries.Select(static entry => entry.Key).Distinct(StringComparer.Ordinal).Count());
@@ -24,6 +26,8 @@ public sealed class ForRestLanguageCatalogTests
         string json = ForRestLanguageCatalog.BuildMonacoCatalogJson();
 
         StringAssert.Contains(json, "\"label\":\"request.send()\"");
+        StringAssert.Contains(json, "\"label\":\"stash\"");
+        StringAssert.Contains(json, "\"label\":\"expect ... regex\"");
         StringAssert.Contains(json, "\"label\":\"[0..9]\"");
         StringAssert.Contains(json, "\"kind\":\"Method\"");
         StringAssert.Contains(json, "\"example\":\"let attempts = [0..2]");

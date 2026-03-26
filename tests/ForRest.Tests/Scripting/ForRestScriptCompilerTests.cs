@@ -70,6 +70,46 @@ public sealed class ForRestScriptCompilerTests
     }
 
     [TestMethod]
+    public void Compile_supports_regex_extractions_and_assertions()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Regex Probe"
+            method GET
+            url "https://api.example.test/echo"
+
+            extract runtime body_token = regex body "Bearer ([A-Za-z0-9-]+)"
+            extract runtime session_id = regex header "Set-Cookie" "session=([^;]+)"
+            extract runtime payload_id = regex json "$.payload.id" "([0-9]+)"
+
+            expect body regex "Bearer ([A-Za-z0-9-]+)" "body matches token"
+            expect header "Content-Type" regex "json" "header matches json"
+            expect json "$.payload.id" regex "^[0-9]+$" "json matches id"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        Assert.AreEqual(3, result.Payload.Request.Extractions.Count);
+        Assert.AreEqual(ExtractionSource.Body, result.Payload.Request.Extractions[0].Source);
+        Assert.AreEqual(@"Bearer ([A-Za-z0-9-]+)", result.Payload.Request.Extractions[0].Pattern);
+        Assert.AreEqual(ExtractionSource.Header, result.Payload.Request.Extractions[1].Source);
+        Assert.AreEqual("Set-Cookie", result.Payload.Request.Extractions[1].Selector);
+        Assert.AreEqual(ExtractionSource.Json, result.Payload.Request.Extractions[2].Source);
+        Assert.AreEqual("$.payload.id", result.Payload.Request.Extractions[2].Selector);
+        StringAssert.Contains(result.Payload.Request.TestsScript, "regex.IsMatch(response.Body ?? string.Empty, @\"Bearer ([A-Za-z0-9-]+)\")");
+        StringAssert.Contains(result.Payload.Request.TestsScript, "regex.IsMatch(__headerValue2, @\"json\")");
+        StringAssert.Contains(result.Payload.Request.TestsScript, "regex.IsMatch(__jsonValue3 ?? string.Empty, @\"^[0-9]+$\")");
+    }
+
+    [TestMethod]
     public void Compile_translates_top_level_code_into_pre_request_script()
     {
         var compiler = new ForRestScriptCompiler(new ForRestScriptParser());

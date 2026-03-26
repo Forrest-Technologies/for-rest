@@ -42,6 +42,7 @@ internal static class ForRestFlowScriptCompiler
         "runtime",
         "string",
         "StringComparison",
+        "stash",
         "tests",
         "time",
         "true",

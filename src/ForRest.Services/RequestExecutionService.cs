@@ -45,6 +45,7 @@ public sealed class RequestExecutionService(
             .ToList();
         var consoleEntries = new List<ConsoleEntry>();
         var testResults = new List<TestResult>();
+        StashTable latestStash = new();
 
         async Task<ExecutionRun> ExecuteIteration(int iteration, CancellationToken iterationCancellationToken)
         {
@@ -129,6 +130,7 @@ public sealed class RequestExecutionService(
             consoleEntries.AddRange(preRequestResult.ConsoleEntries);
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, preRequestResult.RuntimeVariables);
             remainingSendIterations = Math.Max(0, remainingSendIterations - preRequestResult.SendCount);
+            StashTable runStash = preRequestResult.Stash;
             if (!string.IsNullOrWhiteSpace(preRequestResult.ErrorMessage))
             {
                 PreparedRequest failedRequest = lastSentPreparedRequest ?? preRequestResult.PreparedRequest ?? preparedRequest;
@@ -147,6 +149,7 @@ public sealed class RequestExecutionService(
                     Response = preRequestResult.Response,
                     ConsoleEntries = [.. preRequestResult.ConsoleEntries],
                     RuntimeVariables = [.. runtimeVariables],
+                    Stash = runStash,
                 };
 
                 if (request.SaveResponseToHistory)
@@ -214,6 +217,8 @@ public sealed class RequestExecutionService(
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, finalExtractedVariables);
             consoleEntries.AddRange(testScriptResult.ConsoleEntries);
             testResults.AddRange(testScriptResult.Tests);
+            runStash = MergeStashTables(runStash, testScriptResult.Stash);
+            latestStash = runStash;
             PreparedRequest executedRequest = lastSentPreparedRequest ?? preparedRequest;
 
             var run = new ExecutionRun
@@ -243,6 +248,7 @@ public sealed class RequestExecutionService(
                     .. testScriptResult.Tests,
                 ],
                 RuntimeVariables = [.. runtimeVariables],
+                Stash = runStash,
             };
 
             if (request.SaveResponseToHistory)
@@ -264,6 +270,7 @@ public sealed class RequestExecutionService(
             RuntimeVariables = [.. runtimeVariables],
             ConsoleEntries = [.. consoleEntries],
             Tests = [.. testResults],
+            Stash = latestRun?.Stash ?? latestStash,
         };
     }
 
@@ -451,6 +458,30 @@ public sealed class RequestExecutionService(
         }
 
         return merged.Values.OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static StashTable MergeStashTables(StashTable left, StashTable right)
+    {
+        List<string> columns = [];
+        foreach (string column in left.Columns.Concat(right.Columns))
+        {
+            if (columns.Any(existing => string.Equals(existing, column, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            columns.Add(column);
+        }
+
+        return new()
+        {
+            Columns = columns,
+            Rows =
+            [
+                .. left.Rows,
+                .. right.Rows,
+            ],
+        };
     }
 
     private async Task<(HttpResponseMessage? Response, long DurationMilliseconds, string ErrorMessage)> SendWithRetry(

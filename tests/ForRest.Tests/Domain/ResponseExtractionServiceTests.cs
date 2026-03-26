@@ -72,5 +72,55 @@ public sealed class ResponseExtractionServiceTests
         Assert.IsEmpty(missingResult);
     }
 
+    [TestMethod]
+    public void Extract_supports_regex_against_body_headers_and_json_selected_values()
+    {
+        var response = new ResponseSnapshot
+        {
+            Body = """{"payload":{"id":"42","token":"Bearer abc-123"}}""",
+            Headers =
+            [
+                new()
+                {
+                    Key = "Set-Cookie",
+                    Value = "session=xyz789; Path=/; HttpOnly",
+                },
+            ],
+        };
+
+        var result = responseExtractionService.Extract(
+            response,
+            [
+                new()
+                {
+                    Source = ExtractionSource.Body,
+                    Pattern = @"Bearer ([A-Za-z0-9-]+)",
+                    Group = 1,
+                    TargetVariableName = "bodyToken",
+                },
+                new()
+                {
+                    Source = ExtractionSource.Header,
+                    Selector = "set-cookie",
+                    Pattern = @"session=([^;]+)",
+                    Group = 1,
+                    TargetVariableName = "sessionId",
+                },
+                new()
+                {
+                    Source = ExtractionSource.Json,
+                    Selector = "$.payload.id",
+                    Pattern = @"([0-9]+)",
+                    Group = 1,
+                    TargetVariableName = "idMatch",
+                },
+            ]);
+
+        Assert.HasCount(3, result);
+        Assert.AreEqual("abc-123", result.Single(static item => item.Key == "bodyToken").Value);
+        Assert.AreEqual("xyz789", result.Single(static item => item.Key == "sessionId").Value);
+        Assert.AreEqual("42", result.Single(static item => item.Key == "idMatch").Value);
+    }
+
     #endregion
 }

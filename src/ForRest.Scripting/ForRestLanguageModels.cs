@@ -37,10 +37,18 @@ public enum ForRestScriptComparisonOperator
     NotEqual,
     Contains,
     Exists,
+    RegexMatch,
     GreaterThan,
     GreaterThanOrEqual,
     LessThan,
     LessThanOrEqual,
+}
+
+public enum ForRestScriptExtractionSource
+{
+    Body,
+    Header,
+    Json,
 }
 
 public enum ForRestRuntimeSeedKind
@@ -170,7 +178,10 @@ public sealed record ForRestScriptBodySection(
 public sealed record ForRestScriptExtraction(
     VariableScope TargetScope,
     string TargetVariableName,
-    string Selector);
+    ForRestScriptExtractionSource Source,
+    string Selector,
+    string Pattern = "",
+    int Group = 1);
 
 public sealed record ForRestScriptAssertion(
     ForRestScriptAssertionTarget Target,
