@@ -1084,6 +1084,8 @@ public partial class MonacoEditorSurface : ContentView
 		{
 			Html = MonacoHostHtml
 		};
+		Loaded += OnLoaded;
+		Unloaded += OnUnloaded;
 	}
 
 	public string Text
@@ -1132,6 +1134,27 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		get => (bool)GetValue(EnableResponseActionsProperty);
 		set => SetValue(EnableResponseActionsProperty, value);
+	}
+
+	private void OnLoaded(object? sender, EventArgs e)
+	{
+		if (!_isEditorReady && !_isWaitingForReady)
+		{
+			_ = EnsureEditorReadyAsync();
+			return;
+		}
+
+		if (_isEditorReady && !_pendingIsReadOnly)
+		{
+			StartSyncTimer();
+		}
+	}
+
+	private void OnUnloaded(object? sender, EventArgs e)
+	{
+		StopSyncTimer();
+		_isEditorReady = false;
+		_isWaitingForReady = false;
 	}
 
 	private static void OnTextChanged(BindableObject bindable, object? oldValue, object? newValue)
@@ -1277,10 +1300,13 @@ public partial class MonacoEditorSurface : ContentView
 
 				RequestStateApply();
 				await FlushPendingStateAsync();
-				await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
-				if (_initialStateApplied)
+				if (!_pendingIsReadOnly)
 				{
-					StartSyncTimer();
+					await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
+					if (_initialStateApplied)
+					{
+						StartSyncTimer();
+					}
 				}
 			}
 		}
@@ -1407,6 +1433,11 @@ public partial class MonacoEditorSurface : ContentView
 
 	private async Task<string> EvaluateRequiredAsync(string script)
 	{
+		if (EditorWebView.Handler is null)
+		{
+			throw new InvalidOperationException("The Monaco web view is not attached to a native handler.");
+		}
+
 		try
 		{
 			return await EditorWebView.EvaluateJavaScriptAsync(script);
@@ -1420,6 +1451,11 @@ public partial class MonacoEditorSurface : ContentView
 
 	private async Task<string?> EvaluateOptionalAsync(string script)
 	{
+		if (EditorWebView.Handler is null || Handler is null)
+		{
+			return null;
+		}
+
 		try
 		{
 			return await EditorWebView.EvaluateJavaScriptAsync(script);
@@ -1433,7 +1469,7 @@ public partial class MonacoEditorSurface : ContentView
 
 	private void StartSyncTimer()
 	{
-		if (_syncTimer is not null || Dispatcher is null || !_initialStateApplied)
+		if (_syncTimer is not null || Dispatcher is null || !_initialStateApplied || _pendingIsReadOnly)
 		{
 			return;
 		}
@@ -1442,6 +1478,17 @@ public partial class MonacoEditorSurface : ContentView
 		_syncTimer.Interval = TimeSpan.FromMilliseconds(450);
 		_syncTimer.Tick += async (_, _) => await SyncEditorTextAsync();
 		_syncTimer.Start();
+	}
+
+	private void StopSyncTimer()
+	{
+		if (_syncTimer is null)
+		{
+			return;
+		}
+
+		_syncTimer.Stop();
+		_syncTimer = null;
 	}
 
 	private async Task SyncEditorTextAsync()

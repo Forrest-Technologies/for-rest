@@ -10,7 +10,11 @@ public partial class WorkbenchCenterPane : ContentView
 	public WorkbenchCenterPane()
 	{
 		InitializeComponent();
-		Loaded += (_, _) => EnsureEditorSurface();
+		Loaded += (_, _) =>
+		{
+			EnsureEditorSurface();
+			EnsureLanguageHelpExampleSurfaces();
+		};
 	}
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
@@ -19,6 +23,7 @@ public partial class WorkbenchCenterPane : ContentView
 	{
 		base.OnBindingContextChanged();
 		EnsureEditorSurface();
+		EnsureLanguageHelpExampleSurfaces();
 	}
 
 	private async void OnEditorSendRequested(object? sender, EventArgs e)
@@ -44,6 +49,11 @@ public partial class WorkbenchCenterPane : ContentView
 	private async void OnCopyLanguageHelpExampleClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopySelectedLanguageHelpExampleAsync();
+
+		if (sender is Button button && ViewModel.CanCopyLanguageHelpExample)
+		{
+			await ShowCopiedStateAsync(button);
+		}
 	}
 
 	private void OnLanguageHelpSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -69,6 +79,19 @@ public partial class WorkbenchCenterPane : ContentView
 		}
 	}
 
+	private void EnsureLanguageHelpExampleSurfaces()
+	{
+		if (InlineLanguageHelpExampleHost.Content is null)
+		{
+			InlineLanguageHelpExampleHost.Content = BuildLanguageHelpExampleSurface();
+		}
+
+		if (CompactLanguageHelpExampleHost.Content is null)
+		{
+			CompactLanguageHelpExampleHost.Content = BuildLanguageHelpExampleSurface();
+		}
+	}
+
 	private View BuildPreferredEditor()
 	{
 		if (AppLaunchGuard.IsSafeModeEnabled)
@@ -91,6 +114,23 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 		editor.SetBinding(MonacoEditorSurface.LanguageHelpJsonProperty, nameof(MainPageViewModel.LanguageHelpCatalogJson));
 		editor.SendRequested += OnEditorSendRequested;
+		return editor;
+	}
+
+	private View BuildLanguageHelpExampleSurface()
+	{
+		if (AppLaunchGuard.IsSafeModeEnabled || !PlatformExperience.UseWebCodeEditors())
+		{
+			return BuildLanguageHelpFallbackEditor();
+		}
+
+		MonacoEditorSurface editor = new()
+		{
+			IsReadOnly = true,
+		};
+		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.SelectedLanguageHelpExample));
+		editor.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		editor.Language = "forrest";
 		return editor;
 	}
 
@@ -158,5 +198,36 @@ public partial class WorkbenchCenterPane : ContentView
 		Grid.SetRow(banner, 0);
 		Grid.SetRow(editor, 1);
 		return grid;
+	}
+
+	private View BuildLanguageHelpFallbackEditor()
+	{
+		Editor editor = new()
+		{
+			AutoSize = EditorAutoSizeOption.Disabled,
+			IsReadOnly = true,
+			FontFamily = "OpenSansRegular",
+			FontSize = 12,
+			TextColor = Color.FromArgb("#16202A"),
+			BackgroundColor = Colors.Transparent,
+			Margin = new Thickness(8)
+		};
+		editor.SetBinding(Editor.TextProperty, nameof(MainPageViewModel.SelectedLanguageHelpExample));
+		return editor;
+	}
+
+	private static async Task ShowCopiedStateAsync(Button button)
+	{
+		string originalText = button.Text;
+		button.Text = "Copied";
+
+		try
+		{
+			await Task.Delay(1200);
+		}
+		finally
+		{
+			button.Text = originalText;
+		}
 	}
 }

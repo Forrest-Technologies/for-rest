@@ -100,12 +100,6 @@
                                 <Label Text="Search supported syntax, helpers, and examples"
                                        Style="{StaticResource PaneMetaStyle}" />
                             </VerticalStackLayout>
-                            <Button Grid.Column="1"
-                                    Text="Copy"
-                                    Style="{StaticResource DenseTabButtonStyle}"
-                                    IsEnabled="{Binding CanCopyLanguageHelpExample}"
-                                    Clicked="OnCopyLanguageHelpExampleClicked"
-                                    SemanticProperties.Description="Copy the selected ForRest example" />
                         </Grid>
 
                         <Entry Grid.Row="1"
@@ -171,15 +165,26 @@
                                                LineBreakMode="WordWrap"
                                                Style="{StaticResource PaneMetaStyle}" />
 
-                                        <Label Text="Example"
-                                               Style="{StaticResource MonoMetaStyle}" />
+                                        <Grid ColumnDefinitions="*,Auto"
+                                              ColumnSpacing="8">
+                                            <Label Text="Example"
+                                                   VerticalTextAlignment="Center"
+                                                   Style="{StaticResource MonoMetaStyle}" />
+                                            <Button Grid.Column="1"
+                                                    Text="Copy"
+                                                    Style="{StaticResource DenseTabButtonStyle}"
+                                                    IsEnabled="{Binding CanCopyLanguageHelpExample}"
+                                                    Clicked="OnCopyLanguageHelpExampleClicked"
+                                                    SemanticProperties.Description="Copy the selected ForRest example" />
+                                        </Grid>
 
-                                        <Editor Text="{Binding SelectedLanguageHelpExample}"
-                                                IsReadOnly="True"
-                                                AutoSize="TextChanges"
-                                                FontFamily="OpenSansRegular"
-                                                FontSize="12"
-                                                BackgroundColor="Transparent" />
+                                        <Border BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                                                Stroke="{DynamicResource ThemeDividerColor}"
+                                                StrokeThickness="1"
+                                                StrokeShape="RoundRectangle 8">
+                                            <ContentView x:Name="InlineLanguageHelpExampleHost"
+                                                         HeightRequest="228" />
+                                        </Border>
                                     </VerticalStackLayout>
                                 </VerticalStackLayout>
                             </ScrollView>
@@ -211,12 +216,6 @@
                                 <Label Text="Search supported syntax, helpers, and examples"
                                        Style="{StaticResource PaneMetaStyle}" />
                             </VerticalStackLayout>
-                            <Button Grid.Column="1"
-                                    Text="Copy"
-                                    Style="{StaticResource DenseTabButtonStyle}"
-                                    IsEnabled="{Binding CanCopyLanguageHelpExample}"
-                                    Clicked="OnCopyLanguageHelpExampleClicked"
-                                    SemanticProperties.Description="Copy the selected ForRest example" />
                         </Grid>
 
                         <Entry Grid.Row="1"
@@ -282,15 +281,26 @@
                                                LineBreakMode="WordWrap"
                                                Style="{StaticResource PaneMetaStyle}" />
 
-                                        <Label Text="Example"
-                                               Style="{StaticResource MonoMetaStyle}" />
+                                        <Grid ColumnDefinitions="*,Auto"
+                                              ColumnSpacing="8">
+                                            <Label Text="Example"
+                                                   VerticalTextAlignment="Center"
+                                                   Style="{StaticResource MonoMetaStyle}" />
+                                            <Button Grid.Column="1"
+                                                    Text="Copy"
+                                                    Style="{StaticResource DenseTabButtonStyle}"
+                                                    IsEnabled="{Binding CanCopyLanguageHelpExample}"
+                                                    Clicked="OnCopyLanguageHelpExampleClicked"
+                                                    SemanticProperties.Description="Copy the selected ForRest example" />
+                                        </Grid>
 
-                                        <Editor Text="{Binding SelectedLanguageHelpExample}"
-                                                IsReadOnly="True"
-                                                AutoSize="TextChanges"
-                                                FontFamily="OpenSansRegular"
-                                                FontSize="12"
-                                                BackgroundColor="Transparent" />
+                                        <Border BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                                                Stroke="{DynamicResource ThemeDividerColor}"
+                                                StrokeThickness="1"
+                                                StrokeShape="RoundRectangle 8">
+                                            <ContentView x:Name="CompactLanguageHelpExampleHost"
+                                                         HeightRequest="228" />
+                                        </Border>
                                     </VerticalStackLayout>
                                 </VerticalStackLayout>
                             </ScrollView>
