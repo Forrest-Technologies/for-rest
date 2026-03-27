@@ -8,6 +8,7 @@ This repository currently uses the third-party components listed below. Exact ve
 - Microsoft.Extensions.* family
 - Microsoft.CodeAnalysis.* family
 - Microsoft.Data.Sqlite
+- monaco-editor
 - System.Security.Cryptography.ProtectedData
 - MSTest and Microsoft.Testing.* families
 - Newtonsoft.Json

@@ -58,8 +58,7 @@ public partial class MonacoEditorSurface : ContentView
   <div id="container"></div>
   <script>
     (function () {
-      const version = "0.38.0";
-      const baseUrl = `https://cdn.jsdelivr.net/npm/monaco-editor@${version}/min`;
+      const baseUrl = new URL("monaco/", document.baseURI).toString().replace(/\/$/, "");
 
       window.MonacoEnvironment = {
         getWorkerUrl: function () {
@@ -1172,11 +1171,23 @@ public partial class MonacoEditorSurface : ContentView
 		InitializeComponent();
 		EditorWebView.Source = new HtmlWebViewSource
 		{
-			Html = MonacoHostHtml
+			Html = MonacoHostHtml,
+			BaseUrl = GetEditorWebViewBaseUrl()
 		};
 		EditorWebView.HandlerChanged += OnEditorWebViewHandlerChanged;
 		Loaded += OnLoaded;
 		Unloaded += OnUnloaded;
+	}
+
+	private static string GetEditorWebViewBaseUrl()
+	{
+#if WINDOWS
+		return "https://appdir/";
+#elif ANDROID
+		return "file:///android_asset/";
+#else
+		return "/";
+#endif
 	}
 
 	public string Text

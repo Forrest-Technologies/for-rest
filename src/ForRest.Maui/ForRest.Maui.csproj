@@ -58,4 +58,9 @@
 		<ProjectReference Include="..\ForRest.Services\ForRest.Services.csproj" />
 	</ItemGroup>
 
+	<Target Name="ValidateMonacoAssets" BeforeTargets="PrepareForBuild">
+		<Error Condition="!Exists('$(MSBuildProjectDirectory)\Resources\Raw\monaco\vs\loader.js')"
+		       Text="Packaged Monaco assets are missing from Resources\Raw\monaco. Run scripts\Update-Monaco.ps1 to restore the local editor bundle." />
+	</Target>
+
 </Project>
