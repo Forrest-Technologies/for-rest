@@ -22,8 +22,57 @@ public sealed class RequestWorkbenchStateStore
     public RequestWorkbenchStateStore(string? customStateFilePath = null)
     {
         stateFilePath = string.IsNullOrWhiteSpace(customStateFilePath)
-            ? Path.Combine(FileSystem.AppDataDirectory, "request-workbench-state.json")
+            ? ResolveDefaultStateFilePath()
             : customStateFilePath;
+    }
+
+    private static string ResolveDefaultStateFilePath()
+    {
+        foreach (string candidateDirectory in GetDefaultStateDirectories())
+        {
+            if (!string.IsNullOrWhiteSpace(candidateDirectory))
+            {
+                return Path.Combine(candidateDirectory, "request-workbench-state.json");
+            }
+        }
+
+        return Path.Combine(Path.GetTempPath(), "ForRest", "request-workbench-state.json");
+    }
+
+    private static IEnumerable<string> GetDefaultStateDirectories()
+    {
+        string? currentAppDataDirectory = TryResolvePath(static () => FileSystem.Current.AppDataDirectory);
+        if (!string.IsNullOrWhiteSpace(currentAppDataDirectory))
+        {
+            yield return currentAppDataDirectory;
+        }
+
+        string? legacyAppDataDirectory = TryResolvePath(static () => FileSystem.AppDataDirectory);
+        if (!string.IsNullOrWhiteSpace(legacyAppDataDirectory) &&
+            !string.Equals(legacyAppDataDirectory, currentAppDataDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return legacyAppDataDirectory;
+        }
+
+        string? localAppData = TryResolvePath(static () => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            yield return Path.Combine(localAppData, "ForRest");
+        }
+
+        yield return Path.Combine(Path.GetTempPath(), "ForRest");
+    }
+
+    private static string? TryResolvePath(Func<string> resolver)
+    {
+        try
+        {
+            return resolver();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async Task<RequestWorkbenchState> LoadAsync(

@@ -4,6 +4,12 @@ using System.Text;
 using System.Text.Json;
 using ForRest.Maui.Theming;
 using Microsoft.Maui.Dispatching;
+#if ANDROID
+using Android.Content;
+using Android.Views;
+using Android.Views.InputMethods;
+using Android.Webkit;
+#endif
 
 namespace ForRest.Maui.Controls;
 
@@ -541,6 +547,63 @@ public partial class MonacoEditorSurface : ContentView
         responseActionsRegistered: false,
         lastContextPosition: null,
         isApplyingProtectedEdit: false,
+        layoutRefreshHandle: null,
+        topPadding: 8,
+        baseBottomPadding: 24,
+        scheduleLayoutRefresh: function () {
+          if (this.layoutRefreshHandle) {
+            return;
+          }
+
+          this.layoutRefreshHandle = window.requestAnimationFrame(() => {
+            this.layoutRefreshHandle = null;
+            this.refreshViewportLayout();
+          });
+        },
+        refreshViewportLayout: function () {
+          const container = document.getElementById("container");
+          if (!container) {
+            return;
+          }
+
+          const viewport = window.visualViewport;
+          const viewportHeight = Math.max(0, Math.floor(viewport ? viewport.height : window.innerHeight || document.documentElement.clientHeight || 0));
+          const nextHeight = viewportHeight > 0 ? `${viewportHeight}px` : "100%";
+          document.documentElement.style.height = nextHeight;
+          document.body.style.height = nextHeight;
+          container.style.height = nextHeight;
+
+          const keyboardInset = viewport
+            ? Math.max(0, Math.round((window.innerHeight || viewport.height) - viewport.height - viewport.offsetTop))
+            : 0;
+
+          if (this.editor) {
+            this.editor.updateOptions({
+              padding: {
+                top: this.topPadding,
+                bottom: this.baseBottomPadding + keyboardInset
+              }
+            });
+            this.editor.layout();
+
+            const position = this.editor.getPosition();
+            if (position) {
+              this.editor.revealPositionInCenterIfOutsideViewport(position);
+            }
+          }
+        },
+        attachViewportListeners: function () {
+          if (this.viewportListenersAttached) {
+            return;
+          }
+
+          this.viewportListenersAttached = true;
+          window.addEventListener("resize", () => this.scheduleLayoutRefresh());
+          if (window.visualViewport) {
+            window.visualViewport.addEventListener("resize", () => this.scheduleLayoutRefresh());
+            window.visualViewport.addEventListener("scroll", () => this.scheduleLayoutRefresh());
+          }
+        },
         create: function (monaco) {
           registerLanguage(monaco);
           this.model = monaco.editor.createModel(this.pendingValue || "", this.pendingLanguage || "forrest");
@@ -591,6 +654,11 @@ public partial class MonacoEditorSurface : ContentView
             padding: { top: 8, bottom: 24 }
           });
 
+          const domNode = this.editor.getDomNode();
+          if (domNode) {
+            domNode.style.touchAction = "auto";
+          }
+
           this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function () {
             requestHostCommand("send");
           });
@@ -635,6 +703,8 @@ public partial class MonacoEditorSurface : ContentView
             applyText: this.pendingShouldApplyText
           });
           this.editor.focus();
+          this.attachViewportListeners();
+          this.scheduleLayoutRefresh();
         },
         ensureResponseActions: function (monaco) {
           if (this.responseActionsRegistered || !this.pendingEnableResponseActions || !this.editor) {
@@ -804,6 +874,7 @@ public partial class MonacoEditorSurface : ContentView
           this.applyDiagnostics();
 
           this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
+          this.scheduleLayoutRefresh();
 
           return JSON.stringify({
             ok: true,
@@ -1092,6 +1163,9 @@ public partial class MonacoEditorSurface : ContentView
 	private bool _pendingEnableResponseActions;
 	private bool _contentHydrated;
 	private bool _shouldApplyTextToEditor = true;
+#if ANDROID
+	private Android.Webkit.WebView? _androidPlatformWebView;
+#endif
 
 	public MonacoEditorSurface()
 	{
@@ -1100,6 +1174,7 @@ public partial class MonacoEditorSurface : ContentView
 		{
 			Html = MonacoHostHtml
 		};
+		EditorWebView.HandlerChanged += OnEditorWebViewHandlerChanged;
 		Loaded += OnLoaded;
 		Unloaded += OnUnloaded;
 	}
@@ -1154,6 +1229,9 @@ public partial class MonacoEditorSurface : ContentView
 
 	private void OnLoaded(object? sender, EventArgs e)
 	{
+#if ANDROID
+		AttachAndroidWebView();
+#endif
 		if (!_isEditorReady && !_isWaitingForReady)
 		{
 			_ = EnsureEditorReadyAsync();
@@ -1171,6 +1249,16 @@ public partial class MonacoEditorSurface : ContentView
 		StopSyncTimer();
 		_isEditorReady = false;
 		_isWaitingForReady = false;
+#if ANDROID
+		DetachAndroidWebView();
+#endif
+	}
+
+	private void OnEditorWebViewHandlerChanged(object? sender, EventArgs e)
+	{
+#if ANDROID
+		AttachAndroidWebView();
+#endif
 	}
 
 	private static void OnTextChanged(BindableObject bindable, object? oldValue, object? newValue)
@@ -1327,7 +1415,11 @@ public partial class MonacoEditorSurface : ContentView
 				await FlushPendingStateAsync();
 				if (!_pendingIsReadOnly)
 				{
+#if ANDROID
+					await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+#else
 					await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
+#endif
 					if (_initialStateApplied)
 					{
 						StartSyncTimer();
@@ -1629,6 +1721,107 @@ public partial class MonacoEditorSurface : ContentView
 
 		throw new InvalidOperationException("Monaco editor did not hydrate the expected document text.");
 	}
+
+#if ANDROID
+	private void AttachAndroidWebView()
+	{
+		Android.Webkit.WebView? platformView = EditorWebView.Handler?.PlatformView as Android.Webkit.WebView;
+		if (ReferenceEquals(_androidPlatformWebView, platformView))
+		{
+			return;
+		}
+
+		DetachAndroidWebView();
+		_androidPlatformWebView = platformView;
+		if (_androidPlatformWebView is null)
+		{
+			return;
+		}
+
+		_androidPlatformWebView.Focusable = true;
+		_androidPlatformWebView.FocusableInTouchMode = true;
+		_androidPlatformWebView.Clickable = true;
+		_androidPlatformWebView.LongClickable = true;
+		_androidPlatformWebView.Touch += OnAndroidWebViewTouch;
+	}
+
+	private void DetachAndroidWebView()
+	{
+		if (_androidPlatformWebView is null)
+		{
+			return;
+		}
+
+		_androidPlatformWebView.Touch -= OnAndroidWebViewTouch;
+		_androidPlatformWebView = null;
+	}
+
+	private void OnAndroidWebViewTouch(object? sender, Android.Views.View.TouchEventArgs e)
+	{
+		e.Handled = false;
+
+		if (_pendingIsReadOnly || e.Event is null || _androidPlatformWebView is null)
+		{
+			return;
+		}
+
+		if (e.Event.ActionMasked is MotionEventActions.Down &&
+		    !_androidPlatformWebView.HasFocus)
+		{
+			_ = BootstrapAndroidEditorTouchAsync();
+		}
+	}
+
+	private async Task BootstrapAndroidEditorTouchAsync()
+	{
+		await Task.Delay(32);
+		await FocusAndroidEditorAsync(requestKeyboard: true, focusMonaco: false, keyboardDelayMs: 75);
+	}
+
+	private async Task FocusAndroidEditorAsync(bool requestKeyboard, bool focusMonaco, int keyboardDelayMs = 40)
+	{
+		AttachAndroidWebView();
+		if (_androidPlatformWebView is null)
+		{
+			if (focusMonaco)
+			{
+				await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
+			}
+
+			return;
+		}
+
+		await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(() =>
+		{
+			EditorWebView.Focus();
+			_androidPlatformWebView.RequestFocusFromTouch();
+			_androidPlatformWebView.RequestFocus();
+		});
+
+		if (focusMonaco)
+		{
+			await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
+		}
+
+		if (!requestKeyboard)
+		{
+			return;
+		}
+
+		await Task.Delay(keyboardDelayMs);
+		await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(() =>
+		{
+			if (_androidPlatformWebView is null)
+			{
+				return;
+			}
+
+			InputMethodManager? inputMethodManager = _androidPlatformWebView.Context?.GetSystemService(Context.InputMethodService) as InputMethodManager;
+			inputMethodManager?.RestartInput(_androidPlatformWebView);
+			inputMethodManager?.ShowSoftInput(_androidPlatformWebView, ShowFlags.Implicit);
+		});
+	}
+#endif
 
 	private static bool TryGetQueryValue(Uri uri, string key, out int value)
 	{

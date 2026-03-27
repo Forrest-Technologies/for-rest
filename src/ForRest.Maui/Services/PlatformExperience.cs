@@ -13,7 +13,7 @@ public static class PlatformExperience
 
 	public static bool UseWebCodeEditors(DevicePlatform platform)
 	{
-		return platform == DevicePlatform.WinUI;
+		return platform == DevicePlatform.WinUI || platform == DevicePlatform.Android;
 	}
 
 	public static bool SupportsThemeConfigWatcher()

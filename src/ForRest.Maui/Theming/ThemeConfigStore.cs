@@ -61,7 +61,39 @@ public sealed class ThemeConfigStore
 			return Path.Combine(workspaceRoot, "config", FileName);
 		}
 
-		return Path.Combine(FileSystem.Current.AppDataDirectory, "config", FileName);
+		foreach (string candidateDirectory in GetFallbackConfigDirectories())
+		{
+			if (!string.IsNullOrWhiteSpace(candidateDirectory))
+			{
+				return Path.Combine(candidateDirectory, "config", FileName);
+			}
+		}
+
+		return Path.Combine(Path.GetTempPath(), "ForRest", "config", FileName);
+	}
+
+	private static IEnumerable<string> GetFallbackConfigDirectories()
+	{
+		string? currentAppDataDirectory = TryResolvePath(static () => FileSystem.Current.AppDataDirectory);
+		if (!string.IsNullOrWhiteSpace(currentAppDataDirectory))
+		{
+			yield return currentAppDataDirectory;
+		}
+
+		string? legacyAppDataDirectory = TryResolvePath(static () => FileSystem.AppDataDirectory);
+		if (!string.IsNullOrWhiteSpace(legacyAppDataDirectory) &&
+		    !string.Equals(legacyAppDataDirectory, currentAppDataDirectory, StringComparison.OrdinalIgnoreCase))
+		{
+			yield return legacyAppDataDirectory;
+		}
+
+		string? localAppData = TryResolvePath(static () => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+		if (!string.IsNullOrWhiteSpace(localAppData))
+		{
+			yield return Path.Combine(localAppData, "ForRest");
+		}
+
+		yield return Path.Combine(Path.GetTempPath(), "ForRest");
 	}
 
 	private static string? TryFindWorkspaceRoot(string? startPath)
@@ -88,5 +120,17 @@ public sealed class ThemeConfigStore
 		}
 
 		return null;
+	}
+
+	private static string? TryResolvePath(Func<string> resolver)
+	{
+		try
+		{
+			return resolver();
+		}
+		catch
+		{
+			return null;
+		}
 	}
 }

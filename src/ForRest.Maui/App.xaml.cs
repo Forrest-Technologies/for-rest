@@ -32,16 +32,7 @@ public partial class App : Application
 		string shellPageName;
 		try
 		{
-			if (DeviceInfo.Platform == DevicePlatform.Android)
-			{
-				shellPage = _services.GetRequiredService<AndroidMainPage>();
-				shellPageName = nameof(AndroidMainPage);
-			}
-			else
-			{
-				shellPage = _services.GetRequiredService<MainPage>();
-				shellPageName = nameof(MainPage);
-			}
+			(shellPage, shellPageName) = ResolveStartupPage();
 		}
 		catch (Exception exception)
 		{
@@ -60,13 +51,12 @@ public partial class App : Application
 			Title = "For-Rest"
 		};
 
-		if (DeviceInfo.Platform == DevicePlatform.WinUI)
-		{
-			window.Width = 1480;
-			window.Height = 920;
-			window.MinimumWidth = 1120;
-			window.MinimumHeight = 720;
-		}
+#if WINDOWS
+		window.Width = 1480;
+		window.Height = 920;
+		window.MinimumWidth = 1120;
+		window.MinimumHeight = 720;
+#endif
 
 		window.HandlerChanged += (_, _) => WindowChromeStyler.Apply(window, _themeService.CurrentTheme);
 		WindowChromeStyler.Apply(window, _themeService.CurrentTheme);
@@ -117,5 +107,29 @@ public partial class App : Application
 				}
 			}
 		};
+	}
+
+	private (Page Page, string Name) ResolveStartupPage()
+	{
+#if ANDROID
+		if (AppLaunchGuard.IsSafeModeEnabled)
+		{
+			return (_services.GetRequiredService<AndroidMainPage>(), nameof(AndroidMainPage));
+		}
+
+		try
+		{
+			return (_services.GetRequiredService<MainPage>(), nameof(MainPage));
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException(
+				"Failed to resolve the full Android workbench. Falling back to the Android recovery shell.",
+				exception);
+			return (_services.GetRequiredService<AndroidMainPage>(), nameof(AndroidMainPage));
+		}
+#else
+		return (_services.GetRequiredService<MainPage>(), nameof(MainPage));
+#endif
 	}
 }

@@ -276,11 +276,9 @@ public sealed class MainPageViewModel : ObservableObject
 		RebuildWorkspaceCollections(starterWorkspace);
 		themeService.ThemeChanged += OnThemeChanged;
 		ApplyThemePalette(themeService.CurrentTheme);
-		RefreshActivationStatus();
 		RefreshLanguageHelpEntries();
 		ActivateRequestEditor();
 		SyncSupportEditorsFromRequestSource();
-		UpdateRequestMetadataFromSource();
 	}
 
 	public ObservableCollection<PaneTabViewModel> LeftPaneTabs { get; }
@@ -1744,6 +1742,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 			SelectExplorerItemByContext(selectedDocument.Location);
 			ApplyRequestSelection(selectedDocument.Title, selectedDocument.Method, selectedDocument.Summary, selectedDocument.Location);
+			UpdateRequestMetadataFromSource();
 		}
 		finally
 		{
@@ -2407,6 +2406,15 @@ public sealed class MainPageViewModel : ObservableObject
 				}
 			}
 		}
+		catch (Exception exception)
+		{
+			_headersEditorText = string.Empty;
+			_bodyEditorText = string.Empty;
+			_testsEditorText = string.Empty;
+			_variablesEditorText = string.Empty;
+			_requestBodyMode = RequestBodyMode.Json;
+			AppLaunchGuard.RecordException("Failed to synchronize support editors from the request source.", exception);
+		}
 		finally
 		{
 			_suppressDocumentSynchronization = false;
@@ -2415,34 +2423,48 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void UpdateRequestMetadataFromSource()
 	{
-		ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(
-			_requestEditorText,
-			GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId,
-			RequestName);
-		ApplyEditorDebugSnapshot(
-			ForRestEditorDebugSnapshotFactory.Create(
-				_requestEditorText,
-				compilation,
-				SelectedWorkspace,
-				SelectedEnvironment,
-				RequestName,
-				BuildDefaultRequestUrl(RequestLocation)));
-
-		if (!compilation.Succeeded || compilation.Payload is null)
+		try
 		{
-			ExecutionStatus = compilation.Diagnostics.Count == 0
-				? "Editing request document"
-				: string.Join("  ", compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
-			RequestTarget = BuildDefaultRequestUrl(RequestLocation);
-			return;
-		}
+			ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(
+				_requestEditorText,
+				GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId,
+				RequestName);
+			ApplyEditorDebugSnapshot(
+				ForRestEditorDebugSnapshotFactory.Create(
+					_requestEditorText,
+					compilation,
+					SelectedWorkspace,
+					SelectedEnvironment,
+					RequestName,
+					BuildDefaultRequestUrl(RequestLocation)));
 
-		RequestName = compilation.Payload.Request.Name;
-		SelectedMethod = compilation.Payload.Request.Method.ToString().ToUpperInvariant();
-		RequestTarget = compilation.Payload.Request.UrlTemplate;
-		RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
-		ExecutionStatus = "Request document ready";
-		UpdateCurrentDocumentMetadata();
+			if (!compilation.Succeeded || compilation.Payload is null)
+			{
+				ExecutionStatus = compilation.Diagnostics.Count == 0
+					? "Editing request document"
+					: string.Join("  ", compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
+				RequestTarget = BuildDefaultRequestUrl(RequestLocation);
+				return;
+			}
+
+			RequestName = compilation.Payload.Request.Name;
+			SelectedMethod = compilation.Payload.Request.Method.ToString().ToUpperInvariant();
+			RequestTarget = compilation.Payload.Request.UrlTemplate;
+			RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
+			ExecutionStatus = "Request document ready";
+			UpdateCurrentDocumentMetadata();
+		}
+		catch (Exception exception)
+		{
+			RequestTarget = BuildDefaultRequestUrl(RequestLocation);
+			ExecutionStatus = "Request document unavailable during startup.";
+			EditorDebugStateText = "Startup recovery";
+			EditorDebugSummaryText = "Request metadata unavailable";
+			EditorDebugDetailText = "ForRest recovered from a startup-time request metadata failure.";
+			EditorDebugAccentColor = _dangerColor;
+			DebugOutputText = exception.ToString();
+			AppLaunchGuard.RecordException("Request metadata update failed.", exception);
+		}
 	}
 
 	private void MarkCurrentDocumentDirty()
@@ -2845,7 +2867,15 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private string ReadSettingsText(ShellThemeName currentTheme)
 	{
-		return _settingsTomlDocumentService.LoadOrCreate(new ForRestSettings(currentTheme));
+		try
+		{
+			return _settingsTomlDocumentService.LoadOrCreate(new ForRestSettings(currentTheme));
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Settings text load failed.", exception);
+			return string.Empty;
+		}
 	}
 
 	private string BuildEditableRangesJson(string text)

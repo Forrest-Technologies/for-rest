@@ -137,48 +137,18 @@
                            Style="{StaticResource MonoMetaStyle}" />
                 </Grid>
 
-                <Grid Grid.Row="1">
-                    <Editor x:Name="ResponseBodyEditor"
-                            Text="{Binding ResponseBodyText}"
-                            IsReadOnly="True"
-                            AutoSize="Disabled"
-                            Margin="0"
-                            FontFamily="OpenSansRegular"
-                            FontSize="13"
-                            TextColor="{DynamicResource ThemeTextPrimaryColor}"
-                            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
-                            IsSpellCheckEnabled="False"
-                            IsTextPredictionEnabled="False"
-                            Keyboard="Text" />
-
-                    <Editor x:Name="ResponseRawEditor"
-                            Text="{Binding ResponseRawText}"
-                            IsReadOnly="True"
-                            IsVisible="False"
-                            AutoSize="Disabled"
-                            Margin="0"
-                            FontFamily="OpenSansRegular"
-                            FontSize="13"
-                            TextColor="{DynamicResource ThemeTextPrimaryColor}"
-                            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
-                            IsSpellCheckEnabled="False"
-                            IsTextPredictionEnabled="False"
-                            Keyboard="Text" />
-
-                    <Editor x:Name="ResponseDebugEditor"
-                            Text="{Binding DebugOutputText}"
-                            IsReadOnly="True"
-                            IsVisible="False"
-                            AutoSize="Disabled"
-                            Margin="0"
-                            FontFamily="OpenSansRegular"
-                            FontSize="13"
-                            TextColor="{DynamicResource ThemeTextPrimaryColor}"
-                            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
-                            IsSpellCheckEnabled="False"
-                            IsTextPredictionEnabled="False"
-                            Keyboard="Text" />
-                </Grid>
+                <Editor x:Name="ResponseOutputEditor"
+                        Grid.Row="1"
+                        IsReadOnly="True"
+                        AutoSize="Disabled"
+                        Margin="0"
+                        FontFamily="OpenSansRegular"
+                        FontSize="13"
+                        TextColor="{DynamicResource ThemeTextPrimaryColor}"
+                        BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                        IsSpellCheckEnabled="False"
+                        IsTextPredictionEnabled="False"
+                        Keyboard="Text" />
             </Grid>
         </Border>
     </Grid>

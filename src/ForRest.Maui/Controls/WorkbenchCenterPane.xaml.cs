@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Linq;
 using ForRest.Maui.ViewModels;
 using ForRest.Maui.Services;
@@ -7,6 +8,8 @@ namespace ForRest.Maui.Controls;
 
 public partial class WorkbenchCenterPane : ContentView
 {
+	private INotifyPropertyChanged? _viewModelNotifier;
+
 	public WorkbenchCenterPane()
 	{
 		InitializeComponent();
@@ -21,9 +24,32 @@ public partial class WorkbenchCenterPane : ContentView
 
 	protected override void OnBindingContextChanged()
 	{
+		if (_viewModelNotifier is not null)
+		{
+			_viewModelNotifier.PropertyChanged -= OnViewModelPropertyChanged;
+			_viewModelNotifier = null;
+		}
+
 		base.OnBindingContextChanged();
+
+		if (BindingContext is INotifyPropertyChanged notifier)
+		{
+			_viewModelNotifier = notifier;
+			_viewModelNotifier.PropertyChanged += OnViewModelPropertyChanged;
+		}
+
 		EnsureEditorSurface();
 		EnsureLanguageHelpExampleSurfaces();
+	}
+
+	private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+	{
+		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.ShowInlineLanguageHelpDrawer), StringComparison.Ordinal) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.ShowCompactLanguageHelpDrawer), StringComparison.Ordinal))
+		{
+			EnsureLanguageHelpExampleSurfaces();
+		}
 	}
 
 	private async void OnEditorSendRequested(object? sender, EventArgs e)
@@ -86,12 +112,17 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private void EnsureLanguageHelpExampleSurfaces()
 	{
-		if (InlineLanguageHelpExampleHost.Content is null)
+		if (BindingContext is not MainPageViewModel viewModel)
+		{
+			return;
+		}
+
+		if (viewModel.ShowInlineLanguageHelpDrawer && InlineLanguageHelpExampleHost.Content is null)
 		{
 			InlineLanguageHelpExampleHost.Content = BuildLanguageHelpExampleSurface();
 		}
 
-		if (CompactLanguageHelpExampleHost.Content is null)
+		if (viewModel.ShowCompactLanguageHelpDrawer && CompactLanguageHelpExampleHost.Content is null)
 		{
 			CompactLanguageHelpExampleHost.Content = BuildLanguageHelpExampleSurface();
 		}

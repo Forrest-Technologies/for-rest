@@ -13,9 +13,9 @@ public sealed class PlatformExperienceTests
 	}
 
 	[TestMethod]
-	public void UseWebCodeEditors_returns_false_for_android()
+	public void UseWebCodeEditors_returns_true_for_android()
 	{
-		Assert.IsFalse(PlatformExperience.UseWebCodeEditors(DevicePlatform.Android));
+		Assert.IsTrue(PlatformExperience.UseWebCodeEditors(DevicePlatform.Android));
 	}
 
 	[TestMethod]

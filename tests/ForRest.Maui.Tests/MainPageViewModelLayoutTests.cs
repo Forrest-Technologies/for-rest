@@ -94,6 +94,23 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task InitializeAsync_recovers_when_request_compile_throws_during_startup()
+	{
+		using TestHarness harness = new();
+		FakeExecutionService executionService = new(throwOnCompile: true);
+
+		MainPageViewModel viewModel = harness.CreateViewModel(executionService);
+
+		Assert.AreEqual(0, executionService.CompileCallCount);
+		await viewModel.InitializeAsync();
+
+		Assert.AreEqual(1, executionService.CompileCallCount);
+		Assert.AreEqual("Request document unavailable during startup.", viewModel.ExecutionStatus);
+		StringAssert.Contains(viewModel.DebugOutputText, "compile boom");
+		Assert.AreEqual("Startup recovery", viewModel.EditorDebugStateText);
+	}
+
+	[TestMethod]
 	public void RenameSelectedWorkspace_updates_workspace_label_and_rebases_request_locations()
 	{
 		using TestHarness harness = new();
@@ -252,14 +269,24 @@ public sealed class MainPageViewModelLayoutTests
 	private sealed class FakeExecutionService : IForRestScriptExecutionService
 	{
 		private readonly StashTable _stash;
+		private readonly bool _throwOnCompile;
 
-		public FakeExecutionService(StashTable? stash = null)
+		public FakeExecutionService(StashTable? stash = null, bool throwOnCompile = false)
 		{
 			_stash = stash ?? new();
+			_throwOnCompile = throwOnCompile;
 		}
+
+		public int CompileCallCount { get; private set; }
 
 		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
 		{
+			CompileCallCount++;
+			if (_throwOnCompile)
+			{
+				throw new InvalidOperationException("compile boom");
+			}
+
 			return new(
 				null,
 				new ForRestExecutionPayload

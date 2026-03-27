@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using ForRest.Maui.Services;
 using ForRest.Maui.ViewModels;
 
@@ -5,6 +6,8 @@ namespace ForRest.Maui.Controls;
 
 public partial class InspectorPane : ContentView
 {
+	private INotifyPropertyChanged? _viewModelNotifier;
+
 	public InspectorPane()
 	{
 		InitializeComponent();
@@ -15,8 +18,30 @@ public partial class InspectorPane : ContentView
 
 	protected override void OnBindingContextChanged()
 	{
+		if (_viewModelNotifier is not null)
+		{
+			_viewModelNotifier.PropertyChanged -= OnViewModelPropertyChanged;
+			_viewModelNotifier = null;
+		}
+
 		base.OnBindingContextChanged();
+
+		if (BindingContext is INotifyPropertyChanged notifier)
+		{
+			_viewModelNotifier = notifier;
+			_viewModelNotifier.PropertyChanged += OnViewModelPropertyChanged;
+		}
+
 		EnsureResponseBodyViewer();
+	}
+
+	private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+	{
+		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorResponseVisible), StringComparison.Ordinal))
+		{
+			EnsureResponseBodyViewer();
+		}
 	}
 
 	private void OnHideClicked(object? sender, EventArgs e)
@@ -29,6 +54,7 @@ public partial class InspectorPane : ContentView
 		if (sender is Button { CommandParameter: PaneTabViewModel tab })
 		{
 			ViewModel.SelectRightPaneTab(tab);
+			EnsureResponseBodyViewer();
 		}
 	}
 
@@ -59,7 +85,7 @@ public partial class InspectorPane : ContentView
 
 	private void EnsureResponseBodyViewer()
 	{
-		if (ResponseBodyViewerHost.Content is not null)
+		if (ResponseBodyViewerHost.Content is not null || !IsVisible || !ViewModel.IsInspectorResponseVisible)
 		{
 			return;
 		}
@@ -67,6 +93,16 @@ public partial class InspectorPane : ContentView
 		ResponseBodyViewerHost.Content = PlatformExperience.UseWebCodeEditors() && !AppLaunchGuard.IsSafeModeEnabled
 			? BuildMonacoResponseViewer()
 			: BuildNativeResponseViewer();
+	}
+
+	protected override void OnPropertyChanged(string? propertyName = null)
+	{
+		base.OnPropertyChanged(propertyName);
+
+		if (string.Equals(propertyName, nameof(IsVisible), StringComparison.Ordinal) && IsVisible)
+		{
+			EnsureResponseBodyViewer();
+		}
 	}
 
 	private View BuildMonacoResponseViewer()

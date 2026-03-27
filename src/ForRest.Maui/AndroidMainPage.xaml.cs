@@ -129,9 +129,15 @@ public partial class AndroidMainPage : ContentPage
 	private void UpdateOutputView(AndroidOutputView outputView)
 	{
 		_outputView = outputView;
-		ResponseBodyEditor.IsVisible = outputView == AndroidOutputView.Response;
-		ResponseRawEditor.IsVisible = outputView == AndroidOutputView.Raw;
-		ResponseDebugEditor.IsVisible = outputView == AndroidOutputView.Debug;
+		ResponseOutputEditor.RemoveBinding(Editor.TextProperty);
+		ResponseOutputEditor.SetBinding(
+			Editor.TextProperty,
+			outputView switch
+			{
+				AndroidOutputView.Raw => nameof(MainPageViewModel.ResponseRawText),
+				AndroidOutputView.Debug => nameof(MainPageViewModel.DebugOutputText),
+				_ => nameof(MainPageViewModel.ResponseBodyText)
+			});
 		OutputTitleLabel.Text = outputView switch
 		{
 			AndroidOutputView.Raw => "Raw Exchange",
