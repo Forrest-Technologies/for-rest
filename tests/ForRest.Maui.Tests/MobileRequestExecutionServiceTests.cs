@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -5,6 +6,7 @@ using ForRest.Domain;
 using ForRest.Maui.Services;
 using ForRest.Models;
 using ForRest.Services;
+using ForRest.Scripting;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForRest.Maui.Tests;
@@ -13,16 +15,18 @@ namespace ForRest.Maui.Tests;
 public sealed class MobileRequestExecutionServiceTests
 {
 	[TestMethod]
-	public async Task Execute_sends_request_and_records_mobile_safe_warning()
+	public async Task Execute_runs_full_scripting_flow_for_mobile_workbench_requests()
 	{
-		using LocalHttpServer server = new("""{"ok":true}""");
+		using LocalHttpServer server = new("""{"uuid":"alpha"}""");
 		InMemoryExecutionHistoryRepository historyRepository = new();
-		MobileRequestExecutionService service = new(
+		RequestExecutionService service = new(
 			new RequestCompiler(new VariableResolver()),
 			new ResponseExtractionService(),
 			historyRepository,
 			new RepeatRunnerService(),
-			NullLogger<MobileRequestExecutionService>.Instance);
+			new RoslynScriptEngine(NullLogger<RoslynScriptEngine>.Instance),
+			NullLogger<RequestExecutionService>.Instance,
+			new RequestAuthenticationService(NullLogger<RequestAuthenticationService>.Instance));
 		WorkspaceSnapshot workspace = new()
 		{
 			Workspace = new WorkspaceDefinition
@@ -37,8 +41,21 @@ public sealed class MobileRequestExecutionServiceTests
 			Name = "Local Request",
 			Method = HttpMethodKind.Get,
 			UrlTemplate = server.Url,
-			PreRequestScript = "await request.send();",
-			TestsScript = "tests.Assert(true, \"noop\");",
+			MaxSendIterations = 1,
+			SaveResponseToHistory = true,
+			PreRequestScript =
+			"""
+			var sent = await request.send();
+			variables.Set("captured_uuid", sent.uuid);
+			stash.Status = sent.status;
+			stash.Uuid = sent.uuid;
+			stash.Commit();
+			""",
+			TestsScript =
+			"""
+			tests.Equal(200, response.Status, "status is 200");
+			tests.Equal("alpha", response.uuid, "uuid is exposed");
+			""",
 		};
 
 		RequestExecutionResult result = await service.Execute(new AppProfile(), workspace, request, environment: null);
@@ -47,10 +64,15 @@ public sealed class MobileRequestExecutionServiceTests
 		Assert.AreEqual(ExecutionState.Completed, result.State);
 		Assert.IsNotNull(result.LatestResponse);
 		Assert.AreEqual(200, result.LatestResponse.StatusCode);
+		Assert.AreEqual("alpha", result.RuntimeVariables.Single(static item => item.Key == "captured_uuid").Value);
+		Assert.HasCount(2, result.Tests);
+		Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
+		CollectionAssert.AreEqual(new[] { "Status", "Uuid" }, result.Stash.Columns.ToArray());
+		Assert.HasCount(1, result.Stash.Rows);
+		Assert.AreEqual("200", result.Stash.Rows[0].Values["Status"]);
+		Assert.AreEqual("alpha", result.Stash.Rows[0].Values["Uuid"]);
 		Assert.HasCount(1, history);
-		Assert.HasCount(1, result.ConsoleEntries);
-		StringAssert.Contains(result.ConsoleEntries[0].Message, "mobile-safe mode");
-		Assert.IsEmpty(result.Tests);
+		Assert.IsFalse(result.ConsoleEntries.Any(static entry => entry.Message.Contains("mobile-safe mode", StringComparison.OrdinalIgnoreCase)));
 	}
 
 	private sealed class LocalHttpServer : IDisposable
