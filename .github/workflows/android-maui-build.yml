@@ -146,9 +146,9 @@ jobs:
             $publishArgs += @(
               '-p:AndroidKeyStore=true',
               '-p:AndroidSigningKeyStore=${{ steps.signing.outputs.keystore_path }}',
-              '-p:AndroidSigningKeyAlias=' + $signingKeyAlias,
-              '-p:AndroidSigningKeyPass=' + $signingKeyPassword,
-              '-p:AndroidSigningStorePass=' + $signingStorePassword
+              "-p:AndroidSigningKeyAlias=$signingKeyAlias",
+              "-p:AndroidSigningKeyPass=$signingKeyPassword",
+              "-p:AndroidSigningStorePass=$signingStorePassword"
             )
           }
 

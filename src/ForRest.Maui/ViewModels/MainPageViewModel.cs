@@ -39,6 +39,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private Color _successColor = Color.FromArgb("#1E7A5F");
 	private Color _warningColor = Color.FromArgb("#A5691B");
 	private Color _dangerColor = Color.FromArgb("#B2433D");
+	private readonly IThemeService _themeService;
 	private readonly SettingsTomlDocumentService _settingsTomlDocumentService;
 	private readonly RequestWorkbenchStateStore _requestWorkbenchStateStore;
 	private readonly IForRestScriptExecutionService _scriptExecutionService;
@@ -132,6 +133,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ForRestScriptDocumentTextService documentTextService,
 		IAppActivationService appActivationService)
 	{
+		_themeService = themeService;
 		_settingsTomlDocumentService = settingsTomlDocumentService;
 		_requestWorkbenchStateStore = requestWorkbenchStateStore;
 		_scriptExecutionService = scriptExecutionService;
@@ -550,6 +552,11 @@ public sealed class MainPageViewModel : ObservableObject
 				_themeConfigText = value;
 				if (!_suppressSettingsAutosave)
 				{
+					if (_settingsTomlDocumentService.CanAutoSave(_themeConfigText))
+					{
+						_themeService.PreviewConfigText(_themeConfigText);
+					}
+
 					ScheduleSettingsAutosave();
 				}
 			}
@@ -2172,7 +2179,11 @@ public sealed class MainPageViewModel : ObservableObject
 		EditorThemeKey = e.Theme.MonacoThemeKey;
 		ExecutionStatus = e.StatusMessage;
 		ApplyThemePalette(e.Theme);
-		UpdateSettingsTextFromDisk(_currentThemeName);
+		if (!(e.IsPreview && IsActiveSettingsEditor))
+		{
+			UpdateSettingsTextFromDisk(_currentThemeName);
+		}
+
 		RefreshActivationStatus();
 	}
 

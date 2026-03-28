@@ -11,4 +11,6 @@ public interface IThemeService
 	string ConfigFilePath { get; }
 
 	void Start();
+
+	void PreviewConfigText(string text);
 }

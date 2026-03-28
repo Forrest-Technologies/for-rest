@@ -187,6 +187,27 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual("Workspace 1", viewModel.Workspaces.Single().Title);
 	}
 
+	[TestMethod]
+	public void ActiveEditorText_previews_theme_immediately_without_reloading_settings_from_disk()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		string updatedText = viewModel.ActiveEditorText
+			.Replace("azure = true", "azure = false", StringComparison.Ordinal)
+			.Replace("dark = false", "dark = true", StringComparison.Ordinal);
+
+		viewModel.ActiveEditorText = updatedText;
+
+		Assert.AreEqual(new ThemeCatalog().GetTheme(ShellThemeName.Dark).MonacoThemeKey, viewModel.EditorThemeKey);
+		StringAssert.Contains(viewModel.ActiveEditorText, "dark = true");
+		StringAssert.Contains(viewModel.ActiveEditorText, "azure = false");
+	}
+
 	private sealed class TestHarness : IDisposable
 	{
 		private readonly string _previousConfigFile;
@@ -243,11 +264,14 @@ public sealed class MainPageViewModelLayoutTests
 	private sealed class FakeThemeService : IThemeService
 	{
 		private readonly ThemeCatalog _themeCatalog = new();
+		private readonly ThemeConfigParser _parser = new();
+		private readonly ThemeConfigNormalizer _normalizer = new(new SettingsTomlTemplate());
+		private EventHandler<ThemeChangedEventArgs>? _themeChanged;
 
 		public event EventHandler<ThemeChangedEventArgs>? ThemeChanged
 		{
-			add { }
-			remove { }
+			add => _themeChanged += value;
+			remove => _themeChanged -= value;
 		}
 
 		public ShellThemeDefinition CurrentTheme => _themeCatalog.GetTheme(ShellThemeName.Azure);
@@ -258,6 +282,13 @@ public sealed class MainPageViewModelLayoutTests
 
 		public void Start()
 		{
+		}
+
+		public void PreviewConfigText(string text)
+		{
+			ThemeNormalizationResult normalized = _normalizer.Normalize(_parser.Parse(text));
+			ShellThemeDefinition theme = _themeCatalog.GetTheme(normalized.Settings.Theme);
+			_themeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, $"theme {theme.Name.ToConfigName()}", configNormalized: false, isPreview: true));
 		}
 	}
 

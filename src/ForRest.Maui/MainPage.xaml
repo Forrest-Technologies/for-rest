@@ -119,6 +119,7 @@
         </Border>
 
         <Border Grid.Row="2"
+                Margin="{OnPlatform Android='8,0,8,8', Default='0'}"
                 Style="{StaticResource StatusBarBorderStyle}">
             <Grid>
                 <Grid IsVisible="{Binding ShowDesktopStatusBar}"

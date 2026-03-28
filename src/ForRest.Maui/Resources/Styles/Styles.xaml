@@ -75,7 +75,7 @@
     </Style>
 
     <Style x:Key="StatusBarBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="2,2" />
+        <Setter Property="Padding" Value="{OnPlatform Android='8,4', Default='2,2'}" />
         <Setter Property="BackgroundColor" Value="{DynamicResource ThemeStatusBackgroundColor}" />
         <Setter Property="Stroke" Value="{DynamicResource ThemeStatusBorderColor}" />
     </Style>

@@ -101,13 +101,16 @@ public sealed record ShellThemeDefinition(
 public sealed class ThemeChangedEventArgs(
 	ShellThemeDefinition theme,
 	string statusMessage,
-	bool configNormalized) : EventArgs
+	bool configNormalized,
+	bool isPreview = false) : EventArgs
 {
 	public ShellThemeDefinition Theme { get; } = theme;
 
 	public string StatusMessage { get; } = statusMessage;
 
 	public bool ConfigNormalized { get; } = configNormalized;
+
+	public bool IsPreview { get; } = isPreview;
 }
 
 public static class ThemeResourceKeys

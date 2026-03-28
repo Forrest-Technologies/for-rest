@@ -57,6 +57,24 @@ public sealed class ThemeService : IThemeService, IDisposable
 		}
 	}
 
+	public void PreviewConfigText(string text)
+	{
+		_processingLock.Wait();
+		try
+		{
+			string rawText = ThemeConfigStore.NormalizeLineEndings(text);
+			ThemeConfigDocument parsedDocument = _themeConfigParser.Parse(rawText);
+			ThemeNormalizationResult normalizationResult = _themeConfigNormalizer.Normalize(parsedDocument);
+			ShellThemeDefinition theme = _themeCatalog.GetTheme(normalizationResult.Settings.Theme);
+			string statusMessage = BuildStatusMessage(theme, normalizationResult.Messages, "preview", configNormalized: false);
+			ApplyTheme(theme, statusMessage, configNormalized: false, isPreview: true);
+		}
+		finally
+		{
+			_processingLock.Release();
+		}
+	}
+
 	public void Dispose()
 	{
 		_reloadDebounceSource?.Cancel();
@@ -142,10 +160,10 @@ public sealed class ThemeService : IThemeService, IDisposable
 
 		ShellThemeDefinition theme = _themeCatalog.GetTheme(normalizationResult.Settings.Theme);
 		string statusMessage = BuildStatusMessage(theme, normalizationResult.Messages, origin, requiresRewrite);
-		ApplyTheme(theme, statusMessage, requiresRewrite);
+		ApplyTheme(theme, statusMessage, requiresRewrite, isPreview: false);
 	}
 
-	private void ApplyTheme(ShellThemeDefinition theme, string statusMessage, bool configNormalized)
+	private void ApplyTheme(ShellThemeDefinition theme, string statusMessage, bool configNormalized, bool isPreview)
 	{
 		Action applyAction = () =>
 		{
@@ -195,7 +213,7 @@ public sealed class ThemeService : IThemeService, IDisposable
 			ApplyColor(resources, ThemeResourceKeys.WindowChromeInactiveBackgroundColor, theme.Colors.WindowChromeInactiveBackgroundColor);
 			ApplyColor(resources, ThemeResourceKeys.WindowChromeInactiveForegroundColor, theme.Colors.WindowChromeInactiveForegroundColor);
 
-			ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, statusMessage, configNormalized));
+			ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, statusMessage, configNormalized, isPreview));
 		};
 
 		if (MainThread.IsMainThread)
