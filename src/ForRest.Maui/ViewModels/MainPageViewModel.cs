@@ -3108,11 +3108,44 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				await Task.Delay(600, saveSource.Token);
 				_settingsTomlDocumentService.SaveRawText(pendingText);
+				if (!saveSource.IsCancellationRequested)
+				{
+					RefreshSettingsEditorAfterSave();
+				}
 			}
 			catch (OperationCanceledException)
 			{
 			}
 		});
+	}
+
+	private void RefreshSettingsEditorAfterSave()
+	{
+		void refresh()
+		{
+			if (!IsActiveSettingsEditor)
+			{
+				return;
+			}
+
+			UpdateSettingsTextFromDisk(_currentThemeName);
+		}
+
+		try
+		{
+			if (MainThread.IsMainThread)
+			{
+				refresh();
+			}
+			else
+			{
+				MainThread.BeginInvokeOnMainThread(refresh);
+			}
+		}
+		catch
+		{
+			refresh();
+		}
 	}
 
 	private void UpdateSettingsTextFromDisk(ShellThemeName currentTheme)

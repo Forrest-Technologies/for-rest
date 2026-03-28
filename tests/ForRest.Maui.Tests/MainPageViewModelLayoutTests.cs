@@ -208,6 +208,27 @@ public sealed class MainPageViewModelLayoutTests
 		StringAssert.Contains(viewModel.ActiveEditorText, "azure = false");
 	}
 
+	[TestMethod]
+	public async Task ActiveEditorText_refreshes_settings_projection_after_ai_toggle_autosave()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("provider = ", StringComparison.Ordinal));
+		string updatedText = viewModel.ActiveEditorText.Replace("enabled = false", "enabled = true", StringComparison.Ordinal);
+
+		viewModel.ActiveEditorText = updatedText;
+		await Task.Delay(900);
+
+		StringAssert.Contains(viewModel.ActiveEditorText, "enabled = true");
+		StringAssert.Contains(viewModel.ActiveEditorText, "provider = \"openai\"");
+		StringAssert.Contains(viewModel.ActiveEditorText, "api_key = \"\"");
+	}
+
 	private sealed class TestHarness : IDisposable
 	{
 		private readonly string _previousConfigFile;
