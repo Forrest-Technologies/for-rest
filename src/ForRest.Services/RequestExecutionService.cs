@@ -24,7 +24,14 @@ public sealed class RequestExecutionService(
         EnvironmentDefinition? environment,
         CancellationToken cancellationToken = default)
     {
-        return await Execute(profile, workspace, request, environment, [], cancellationToken);
+        return await ExecuteInternal(
+            profile,
+            workspace,
+            request,
+            environment,
+            [],
+            BuildExecutionChain(workspace, request),
+            cancellationToken);
     }
 
     public async Task<RequestExecutionResult> Execute(
@@ -34,6 +41,25 @@ public sealed class RequestExecutionService(
         EnvironmentDefinition? environment,
         IReadOnlyList<VariableDefinition> initialRuntimeVariables,
         CancellationToken cancellationToken = default)
+    {
+        return await ExecuteInternal(
+            profile,
+            workspace,
+            request,
+            environment,
+            initialRuntimeVariables,
+            BuildExecutionChain(workspace, request),
+            cancellationToken);
+    }
+
+    private async Task<RequestExecutionResult> ExecuteInternal(
+        AppProfile profile,
+        WorkspaceSnapshot workspace,
+        RequestDefinition request,
+        EnvironmentDefinition? environment,
+        IReadOnlyList<VariableDefinition> initialRuntimeVariables,
+        IReadOnlyCollection<string> executionChain,
+        CancellationToken cancellationToken)
     {
         var runtimeVariables = initialRuntimeVariables
             .Where(static item => item.Scope == VariableScope.Runtime)
@@ -109,6 +135,18 @@ public sealed class RequestExecutionService(
                 }
             }
 
+            Task<ScriptExecutionResult> ExecuteWorkspaceRequestAsync(string reference, IReadOnlyList<VariableDefinition> callerRuntimeVariables)
+            {
+                return ExecuteWorkspaceRequestByReference(
+                    profile,
+                    workspace,
+                    environment,
+                    reference,
+                    callerRuntimeVariables,
+                    executionChain,
+                    iterationCancellationToken);
+            }
+
             var preRequestResult = await scriptEngine.Run(
                 new()
                 {
@@ -123,6 +161,7 @@ public sealed class RequestExecutionService(
                     RequestVariables = request.Variables,
                     RuntimeVariables = runtimeVariables,
                     SendAsync = ExecuteScriptSend,
+                    ExecuteWorkspaceRequestAsync = ExecuteWorkspaceRequestAsync,
                     MaxSendIterations = request.MaxSendIterations,
                 },
                 iterationCancellationToken);
@@ -161,7 +200,7 @@ public sealed class RequestExecutionService(
             }
 
             preparedRequest = preRequestResult.PreparedRequest;
-            ResponseSnapshot? responseSnapshot = preRequestResult.Response;
+            ResponseSnapshot? responseSnapshot = preRequestResult.SentResponse;
             string errorMessage = string.Empty;
 
             if (responseSnapshot is null)
@@ -207,11 +246,12 @@ public sealed class RequestExecutionService(
                     RequestVariables = request.Variables,
                     RuntimeVariables = runtimeVariables,
                     SendAsync = ExecuteScriptSend,
+                    ExecuteWorkspaceRequestAsync = ExecuteWorkspaceRequestAsync,
                     MaxSendIterations = remainingSendIterations,
                 },
                 iterationCancellationToken);
 
-            responseSnapshot = testScriptResult.Response ?? responseSnapshot;
+            responseSnapshot = testScriptResult.SentResponse ?? responseSnapshot;
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, testScriptResult.RuntimeVariables);
             var finalExtractedVariables = responseExtractionService.Extract(responseSnapshot, request.Extractions);
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, finalExtractedVariables);
@@ -277,6 +317,140 @@ public sealed class RequestExecutionService(
     #endregion
 
     #region Private Methods
+
+    private async Task<ScriptExecutionResult> ExecuteWorkspaceRequestByReference(
+        AppProfile profile,
+        WorkspaceSnapshot workspace,
+        EnvironmentDefinition? environment,
+        string reference,
+        IReadOnlyList<VariableDefinition> callerRuntimeVariables,
+        IReadOnlyCollection<string> executionChain,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(reference))
+        {
+            throw new InvalidOperationException("workspace.execute() requires a request name or location.");
+        }
+
+        WorkspaceNodeDefinition node = ResolveWorkspaceRequestNode(workspace, reference);
+        HashSet<string> nestedChain = new(executionChain, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> nodeAliases = new(StringComparer.OrdinalIgnoreCase);
+        AddWorkspaceNodeAliases(nodeAliases, node);
+
+        if (nodeAliases.Any(nestedChain.Contains))
+        {
+            string targetName = node.Request?.Name ?? node.Name;
+            throw new InvalidOperationException($"workspace.execute(\"{reference}\") detected a recursive script call to '{targetName}'.");
+        }
+
+        foreach (string alias in nodeAliases)
+        {
+            nestedChain.Add(alias);
+        }
+
+        if (node.Request is null)
+        {
+            throw new InvalidOperationException($"workspace.execute(\"{reference}\") could not compile the referenced request.");
+        }
+
+        RequestDefinition nestedRequest = node.Request with
+        {
+            SaveResponseToHistory = false,
+        };
+
+        RequestExecutionResult nestedExecution = await ExecuteInternal(
+            profile,
+            workspace,
+            nestedRequest,
+            environment,
+            callerRuntimeVariables,
+            nestedChain,
+            cancellationToken);
+
+        string errorMessage = nestedExecution.State == ExecutionState.Failed
+            ? nestedExecution.Runs.LastOrDefault()?.ErrorMessage ?? $"workspace.execute(\"{reference}\") failed."
+            : string.Empty;
+
+        return new()
+        {
+            Response = nestedExecution.LatestResponse,
+            RuntimeVariables = [.. nestedExecution.RuntimeVariables],
+            Tests = [.. nestedExecution.Tests],
+            ConsoleEntries = [.. nestedExecution.ConsoleEntries],
+            ErrorMessage = errorMessage,
+            Stash = nestedExecution.Stash,
+        };
+    }
+
+    private static IReadOnlyCollection<string> BuildExecutionChain(WorkspaceSnapshot workspace, RequestDefinition request)
+    {
+        HashSet<string> aliases = new(StringComparer.OrdinalIgnoreCase);
+        AddAlias(aliases, request.Name);
+
+        foreach (WorkspaceNodeDefinition node in workspace.Nodes.Where(node => MatchesCompiledRequest(node, request)))
+        {
+            AddWorkspaceNodeAliases(aliases, node);
+        }
+
+        return [.. aliases];
+    }
+
+    private static WorkspaceNodeDefinition ResolveWorkspaceRequestNode(WorkspaceSnapshot workspace, string reference)
+    {
+        string trimmedReference = reference.Trim();
+        List<WorkspaceNodeDefinition> locationMatches =
+        [
+            .. workspace.Nodes.Where(
+                node => node.Kind == WorkspaceNodeKind.Request
+                        && string.Equals(node.Location, trimmedReference, StringComparison.OrdinalIgnoreCase)),
+        ];
+
+        if (locationMatches.Count == 1)
+        {
+            return locationMatches[0];
+        }
+
+        List<WorkspaceNodeDefinition> nameMatches =
+        [
+            .. workspace.Nodes.Where(
+                node => node.Kind == WorkspaceNodeKind.Request
+                        && (string.Equals(node.Request?.Name, trimmedReference, StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(node.Name, trimmedReference, StringComparison.OrdinalIgnoreCase))),
+        ];
+
+        return nameMatches.Count switch
+        {
+            1 => nameMatches[0],
+            > 1 => throw new InvalidOperationException(
+                $"workspace.execute(\"{trimmedReference}\") matched multiple requests. Use the request location instead."),
+            _ => throw new InvalidOperationException(
+                $"workspace.execute(\"{trimmedReference}\") could not find a matching request in the current workspace."),
+        };
+    }
+
+    private static bool MatchesCompiledRequest(WorkspaceNodeDefinition node, RequestDefinition request)
+    {
+        return node.Request is not null
+               && node.Kind == WorkspaceNodeKind.Request
+               && node.Request.Method == request.Method
+               && string.Equals(node.Request.Name, request.Name, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(node.Request.UrlTemplate, request.UrlTemplate, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AddWorkspaceNodeAliases(HashSet<string> aliases, WorkspaceNodeDefinition node)
+    {
+        AddAlias(aliases, node.Location);
+        AddAlias(aliases, node.Name);
+        AddAlias(aliases, node.Request?.Name);
+    }
+
+    private static void AddAlias(HashSet<string> aliases, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            aliases.Add(value.Trim());
+        }
+    }
 
     private static bool DefaultCertificateValidation(
         HttpRequestMessage requestMessage,

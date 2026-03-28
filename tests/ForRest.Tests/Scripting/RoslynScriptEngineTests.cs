@@ -500,6 +500,90 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_supports_workspace_execute_and_merges_nested_runtime_outputs()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                var auth = await workspace.execute("/requests/auth/token");
+                tests.Equal(201, auth.status, "workspace execute returns response");
+                tests.Equal("abc123", auth.token, "workspace execute exposes response json");
+                tests.Equal("Bearer abc123", variables.Get("auth_header"), "nested runtime variables merge back");
+                tests.Equal(201, response.Status, "global response tracks nested execute");
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test/secure"),
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+                ExecuteWorkspaceRequestAsync = static (_, _) =>
+                    Task.FromResult(
+                        new ScriptExecutionResult
+                        {
+                            Response = new()
+                            {
+                                StatusCode = 201,
+                                Body = """{"token":"abc123"}""",
+                                ContentType = "application/json",
+                            },
+                            RuntimeVariables =
+                            [
+                                new()
+                                {
+                                    Key = "auth_header",
+                                    Value = "Bearer abc123",
+                                    Scope = VariableScope.Runtime,
+                                },
+                            ],
+                            ConsoleEntries =
+                            [
+                                new()
+                                {
+                                    Level = ConsoleEntryLevel.Info,
+                                    Message = "nested helper ran",
+                                },
+                            ],
+                            Tests =
+                            [
+                                new()
+                                {
+                                    Name = "nested helper pass",
+                                    Message = "nested helper pass",
+                                    State = TestOutcomeState.Passed,
+                                },
+                            ],
+                            Stash = new()
+                            {
+                                Columns = ["Token"],
+                                Rows =
+                                [
+                                    new()
+                                    {
+                                        Values = new(StringComparer.OrdinalIgnoreCase)
+                                        {
+                                            ["Token"] = "abc123",
+                                        },
+                                    },
+                                ],
+                            },
+                        }),
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual(201, result.Response?.StatusCode);
+        Assert.AreEqual("Bearer abc123", result.RuntimeVariables.Single(static item => item.Key == "auth_header").Value);
+        Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
+        Assert.IsTrue(result.ConsoleEntries.Any(static entry => entry.Message == "nested helper ran"));
+        Assert.HasCount(1, result.Stash.Rows);
+        Assert.AreEqual("abc123", result.Stash.Rows[0].Values["Token"]);
+    }
+
+    [TestMethod]
     public async Task Run_preserves_duplicate_request_headers_for_security_flows()
     {
         var result = await scriptEngine.Run(

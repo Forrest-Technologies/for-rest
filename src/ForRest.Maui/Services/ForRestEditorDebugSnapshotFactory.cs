@@ -126,20 +126,24 @@ public static class ForRestEditorDebugSnapshotFactory
 		return $"{diagnostics.Count} diagnostic(s)  first at L{line}:C{column}";
 	}
 
-	private static string BuildDiagnosticsJson(IReadOnlyList<ForRestScriptDiagnostic> diagnostics, IReadOnlyList<string> lines)
-	{
-		if (diagnostics.Count == 0)
-		{
-			return "[]";
-		}
+    private static string BuildDiagnosticsJson(IReadOnlyList<ForRestScriptDiagnostic> diagnostics, IReadOnlyList<string> lines)
+    {
+        if (diagnostics.Count == 0)
+        {
+            return "[]";
+        }
 
-		List<ForRestEditorDiagnosticMarker> markers =
-		[
-			.. diagnostics.Select(diagnostic => CreateMarker(diagnostic, lines)),
-		];
+        List<ForRestEditorDiagnosticMarker> markers =
+        [
+            .. diagnostics
+                .Where(static diagnostic => diagnostic.Line > 0 && diagnostic.Column > 0)
+                .Select(diagnostic => CreateMarker(diagnostic, lines)),
+        ];
 
-		return JsonSerializer.Serialize(markers, JsonOptions);
-	}
+        return markers.Count == 0
+            ? "[]"
+            : JsonSerializer.Serialize(markers, JsonOptions);
+    }
 
 	private static ForRestEditorDiagnosticMarker CreateMarker(ForRestScriptDiagnostic diagnostic, IReadOnlyList<string> lines)
 	{

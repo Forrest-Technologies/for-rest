@@ -87,6 +87,111 @@ public sealed class ForRestScriptExecutionServiceTests
     }
 
     [TestMethod]
+    public async Task Execute_renders_workspace_execute_results_inside_request_templates()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestCaptureTask = CaptureRequests(
+            listener,
+            2,
+            static _ => 200,
+            attempt => attempt == 1
+                ? """{"uuid":"70078e36-d48d-4b28-bb43-79ba9e9864ba"}"""
+                : """{"ok":true}""");
+
+        try
+        {
+            var workspaceId = Guid.NewGuid();
+            var executionService = CreateService();
+            var helperSource =
+                """
+                name "Get UUID"
+                method GET
+                url "http://127.0.0.1:__PORT__/uuid"
+                history false
+                max_send_iterations 1
+
+                let sent = request.send()
+
+                expect status == 200 "returns 200"
+                """.Replace("__PORT__", port.ToString());
+            var helperCompilation = executionService.Compile(helperSource, workspaceId, "Get UUID");
+            Assert.IsTrue(
+                helperCompilation.Succeeded,
+                string.Join(Environment.NewLine, helperCompilation.Diagnostics.Select(static item => item.Message)));
+
+            var source =
+                """"
+                name "Post Echo"
+                method POST
+                url "http://127.0.0.1:__PORT__/post"
+                timeout 15000
+                max_send_iterations 1
+                redirects true
+                ssl true
+                history false
+                content_type "application/json"
+
+                let uuid = workspace.execute("Get UUID")
+
+                header "Accept" = "application/json"
+                header "X-UUID-Test" = "{{uuid.uuid}}"
+
+                body json """
+                {
+                  "request": "Post Echo",
+                  "guid": "{{uuid.uuid}}"
+                }
+                """
+
+                let sent = request.send()
+
+                expect status == 200 "returns 200"
+                """".Replace("__PORT__", port.ToString());
+
+            var workspace = new WorkspaceSnapshot
+            {
+                Workspace = new()
+                {
+                    Id = workspaceId,
+                    Name = "Template Demo",
+                },
+                Nodes =
+                [
+                    new()
+                    {
+                        WorkspaceId = workspaceId,
+                        Kind = WorkspaceNodeKind.Request,
+                        Name = "Get UUID",
+                        Location = "/requests/helpers/get-uuid",
+                        SortOrder = 0,
+                        Request = helperCompilation.Payload?.Request,
+                    },
+                ],
+            };
+
+            var result = await executionService.Execute(new(), workspace, source, null);
+            var capturedRequests = await WaitForRequestsAsync(requestCaptureTask);
+
+            Assert.IsTrue(
+                result.Compilation.Succeeded,
+                string.Join(Environment.NewLine, result.Compilation.Diagnostics.Select(static item => item.Message)));
+            Assert.IsNotNull(result.Execution);
+            Assert.AreEqual(ExecutionState.Completed, result.Execution.State, result.Execution.Runs.Single().ErrorMessage);
+            Assert.HasCount(2, capturedRequests);
+            Assert.AreEqual("/uuid", capturedRequests[0].PathAndQuery);
+            Assert.AreEqual("/post", capturedRequests[1].PathAndQuery);
+            Assert.AreEqual("70078e36-d48d-4b28-bb43-79ba9e9864ba", capturedRequests[1].Headers["X-UUID-Test"]);
+            StringAssert.Contains(capturedRequests[1].Body, "\"guid\": \"70078e36-d48d-4b28-bb43-79ba9e9864ba\"");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
     public async Task Execute_runs_request_send_from_top_level_frs_code()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

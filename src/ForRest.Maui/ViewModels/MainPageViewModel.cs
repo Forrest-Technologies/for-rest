@@ -792,7 +792,22 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool ShowRightPaneRestoreButton => !_isCompactLayout && _rightPaneCollapsed;
 
-	public bool CanSend => !_isSending && IsActiveRequestEditor && _canExecuteRequests;
+	public bool IsSending
+	{
+		get => _isSending;
+		private set
+		{
+			if (SetProperty(ref _isSending, value))
+			{
+				OnPropertyChanged(nameof(CanSend));
+				OnPropertyChanged(nameof(SendButtonText));
+			}
+		}
+	}
+
+	public bool CanSend => !IsSending && IsActiveRequestEditor && _canExecuteRequests;
+
+	public string SendButtonText => IsSending ? string.Empty : "\u25B6";
 
 	public bool CanMoveWorkspaceLeft => GetSelectedWorkspaceIndex() > 0;
 
@@ -928,7 +943,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public async Task SendAsync()
 	{
-		if (!IsActiveRequestEditor || _isSending)
+		if (!IsActiveRequestEditor || IsSending)
 		{
 			return;
 		}
@@ -940,18 +955,22 @@ public sealed class MainPageViewModel : ObservableObject
 			return;
 		}
 
-		_isSending = true;
-		OnPropertyChanged(nameof(CanSend));
+		IsSending = true;
 		try
 		{
 			string executionSource = NormalizeCurrentRequestEditorSource(applyToEditor: true);
 			await PersistCurrentRequestAsync();
-			ForRestScriptExecutionOutcome outcome = await _scriptExecutionService.Execute(
-				BuildProfile(),
-				BuildWorkspaceSnapshot(),
-				executionSource,
-				BuildEnvironmentDefinition(),
-				RequestName);
+			AppProfile profile = BuildProfile();
+			WorkspaceSnapshot workspaceSnapshot = BuildWorkspaceSnapshot();
+			EnvironmentDefinition? environment = BuildEnvironmentDefinition();
+			string requestName = RequestName;
+			ForRestScriptExecutionOutcome outcome = await Task.Run(
+				() => _scriptExecutionService.Execute(
+					profile,
+					workspaceSnapshot,
+					executionSource,
+					environment,
+					requestName));
 
 			if (!outcome.Compilation.Succeeded || outcome.Compilation.Payload is null)
 			{
@@ -1050,8 +1069,7 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 		finally
 		{
-			_isSending = false;
-			OnPropertyChanged(nameof(CanSend));
+			IsSending = false;
 		}
 	}
 
@@ -2243,6 +2261,7 @@ public sealed class MainPageViewModel : ObservableObject
 		RequestWorkbenchDocumentState state = workspace.Documents.FirstOrDefault(
 			document => string.Equals(document.Location, location, StringComparison.OrdinalIgnoreCase))
 			?? BuildDefaultDocumentState(title, method, summary, location);
+		_requestEditorDiagnosticsJson = string.IsNullOrWhiteSpace(state.DiagnosticsJson) ? "[]" : state.DiagnosticsJson;
 
 		_suppressRequestAutosave = true;
 		_suppressDocumentSynchronization = true;
@@ -2541,7 +2560,8 @@ public sealed class MainPageViewModel : ObservableObject
 			Summary = RequestSummary,
 			Location = RequestLocation,
 			RequestSource = NormalizeCurrentRequestEditorSource(applyToEditor: false),
-			PreRequestScript = string.Empty
+			PreRequestScript = string.Empty,
+			DiagnosticsJson = _requestEditorDiagnosticsJson
 		};
 	}
 
@@ -2752,8 +2772,38 @@ public sealed class MainPageViewModel : ObservableObject
 					new VariableDefinition { Key = "base_url", Value = BuildBaseUrl(RequestTarget), Scope = VariableScope.Workspace }
 				]
 			},
+			Nodes = BuildWorkspaceNodes(workspaceState),
 			Environments = BuildEnvironmentDefinition() is { } environment ? [environment] : []
 		};
+	}
+
+	private List<WorkspaceNodeDefinition> BuildWorkspaceNodes(RequestWorkbenchWorkspaceState workspaceState)
+	{
+		List<WorkspaceNodeDefinition> nodes = [];
+		int sortOrder = 0;
+
+		foreach (RequestWorkbenchDocumentState document in workspaceState.Documents)
+		{
+			string normalizedSource = NormalizeLineEndings(
+				RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(
+					document.RequestSource,
+					document.PreRequestScript,
+					document.Title));
+			ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(normalizedSource, workspaceState.Id, document.Title);
+
+			nodes.Add(
+				new WorkspaceNodeDefinition
+				{
+					WorkspaceId = workspaceState.Id,
+					Kind = WorkspaceNodeKind.Request,
+					Name = document.Title,
+					Location = document.Location,
+					SortOrder = sortOrder++,
+					Request = compilation.Payload?.Request,
+				});
+		}
+
+		return nodes;
 	}
 
 	private EnvironmentDefinition BuildEnvironmentDefinition()
@@ -2964,6 +3014,16 @@ public sealed class MainPageViewModel : ObservableObject
 		if (IsActiveRequestEditor)
 		{
 			ActiveEditorDiagnosticsJson = snapshot.DiagnosticsJson;
+		}
+
+		if (IsActiveRequestEditor && !string.IsNullOrWhiteSpace(RequestLocation))
+		{
+			RequestWorkbenchDocumentState currentRequest = BuildCurrentDocumentState();
+			UpdateSelectedWorkspaceState(
+				workspace => workspace with
+				{
+					Documents = UpsertDocument(workspace.Documents, currentRequest)
+				});
 		}
 
 		EditorDebugStateText = snapshot.StatusText;

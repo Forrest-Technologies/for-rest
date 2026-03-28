@@ -215,6 +215,109 @@ public sealed class RequestExecutionServiceTests
         }
     }
 
+    [TestMethod]
+    public async Task Execute_workspace_execute_runs_nested_request_without_nested_history_entries()
+    {
+        var workspaceId = Guid.NewGuid();
+        var historyRepository = new RecordingExecutionHistoryRepository();
+        var requestExecutionService = CreateScriptEnabledService(historyRepository);
+
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var serverTask = CaptureRequests(
+            listener,
+            [
+                new CapturedResponse(200, """{"token":"abc123"}"""),
+                new CapturedResponse(200, """{"secured":true}"""),
+            ]);
+
+        try
+        {
+            var helperRequest = new RequestDefinition
+            {
+                WorkspaceId = workspaceId,
+                Name = "Token Helper",
+                Method = HttpMethodKind.Get,
+                UrlTemplate = $"http://127.0.0.1:{port}/token",
+                SaveResponseToHistory = true,
+                Extractions =
+                [
+                    new()
+                    {
+                        Name = "auth_token",
+                        Selector = "$.token",
+                        TargetVariableName = "auth_token",
+                        TargetScope = VariableScope.Runtime,
+                    },
+                ],
+            };
+
+            var parentRequest = new RequestDefinition
+            {
+                WorkspaceId = workspaceId,
+                Name = "Secure Data",
+                Method = HttpMethodKind.Get,
+                UrlTemplate = $"http://127.0.0.1:{port}/secure",
+                SaveResponseToHistory = true,
+                MaxSendIterations = 1,
+                PreRequestScript =
+                """
+                var auth = await workspace.execute("/requests/auth/token");
+                request.SetHeader("Authorization", $"Bearer {auth.token}");
+                request.SetHeader("X-Token-Var", variables.Get("auth_token"));
+                """,
+            };
+
+            var workspace = new WorkspaceSnapshot
+            {
+                Workspace = new()
+                {
+                    Id = workspaceId,
+                    Name = "Secure Workspace",
+                },
+                Nodes =
+                [
+                    new()
+                    {
+                        WorkspaceId = workspaceId,
+                        Kind = WorkspaceNodeKind.Request,
+                        Name = "Secure Data",
+                        Location = "/requests/secure/data",
+                        SortOrder = 0,
+                        Request = parentRequest,
+                    },
+                    new()
+                    {
+                        WorkspaceId = workspaceId,
+                        Kind = WorkspaceNodeKind.Request,
+                        Name = "Token Helper",
+                        Location = "/requests/auth/token",
+                        SortOrder = 1,
+                        Request = helperRequest,
+                    },
+                ],
+            };
+
+            var result = await requestExecutionService.Execute(new(), workspace, parentRequest, null);
+            var capturedRequests = await serverTask;
+
+            Assert.AreEqual(ExecutionState.Completed, result.State, result.Runs.Single().ErrorMessage);
+            Assert.HasCount(2, capturedRequests);
+            Assert.AreEqual("/token", capturedRequests[0].PathAndQuery);
+            Assert.AreEqual("/secure", capturedRequests[1].PathAndQuery);
+            Assert.AreEqual("Bearer abc123", capturedRequests[1].Headers["Authorization"]);
+            Assert.AreEqual("abc123", capturedRequests[1].Headers["X-Token-Var"]);
+            Assert.AreEqual("abc123", result.RuntimeVariables.Single(static item => item.Key == "auth_token").Value);
+            Assert.HasCount(1, historyRepository.Runs);
+            Assert.AreEqual("Secure Data", historyRepository.Runs.Single().RequestName);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     #endregion
 
     #region Private Methods
@@ -299,9 +402,37 @@ public sealed class RequestExecutionServiceTests
         return requests;
     }
 
+    private static async Task<List<CapturedRequest>> CaptureRequests(
+        TcpListener listener,
+        IReadOnlyList<CapturedResponse> responses,
+        CancellationToken cancellationToken = default)
+    {
+        var requests = new List<CapturedRequest>();
+
+        for (var attempt = 0; attempt < responses.Count; attempt++)
+        {
+            requests.Add(await CaptureSingleRequest(listener, responses[attempt], attempt + 1, cancellationToken));
+        }
+
+        return requests;
+    }
+
     private static async Task<CapturedRequest> CaptureSingleRequest(
         TcpListener listener,
         int statusCode,
+        int attempt,
+        CancellationToken cancellationToken = default)
+    {
+        return await CaptureSingleRequest(
+            listener,
+            new CapturedResponse(statusCode, null),
+            attempt,
+            cancellationToken);
+    }
+
+    private static async Task<CapturedRequest> CaptureSingleRequest(
+        TcpListener listener,
+        CapturedResponse responseDefinition,
         int attempt,
         CancellationToken cancellationToken = default)
     {
@@ -342,9 +473,13 @@ public sealed class RequestExecutionServiceTests
         }
 
         var body = new string(bodyCharacters, 0, totalRead);
-        var reasonPhrase = statusCode == 201 ? "Created" : "OK";
-        var responseBody = $$"""{"received":true,"source":"loopback","attempt":{{attempt}}}""";
-        var response = $"HTTP/1.1 {statusCode} {reasonPhrase}\r\nContent-Type: application/json\r\nContent-Length: {Encoding.UTF8.GetByteCount(responseBody)}\r\nSet-Cookie: session=loopback; Path=/\r\nConnection: close\r\n\r\n{responseBody}";
+        var statusCode = responseDefinition.StatusCode;
+        var reasonPhrase = responseDefinition.ReasonPhrase ?? (statusCode == 201 ? "Created" : "OK");
+        var responseBody = responseDefinition.Body ?? $$"""{"received":true,"source":"loopback","attempt":{{attempt}}}""";
+        var contentType = string.IsNullOrWhiteSpace(responseDefinition.ContentType)
+            ? "application/json"
+            : responseDefinition.ContentType;
+        var response = $"HTTP/1.1 {statusCode} {reasonPhrase}\r\nContent-Type: {contentType}\r\nContent-Length: {Encoding.UTF8.GetByteCount(responseBody)}\r\nSet-Cookie: session=loopback; Path=/\r\nConnection: close\r\n\r\n{responseBody}";
         var responseBytes = Encoding.UTF8.GetBytes(response);
         await stream.WriteAsync(responseBytes, cancellationToken);
         await stream.FlushAsync(cancellationToken);
@@ -366,6 +501,12 @@ public sealed class RequestExecutionServiceTests
         string PathAndQuery,
         Dictionary<string, string> Headers,
         string Body);
+
+    private sealed record CapturedResponse(
+        int StatusCode,
+        string? Body,
+        string? ReasonPhrase = null,
+        string? ContentType = "application/json");
 
     private sealed class RecordingExecutionHistoryRepository : IExecutionHistoryRepository
     {

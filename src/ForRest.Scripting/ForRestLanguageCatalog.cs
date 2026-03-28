@@ -236,6 +236,21 @@ public static class ForRestLanguageCatalog
             "request.send()",
             false),
         new(
+            "workspace-execute",
+            "workspace.execute()",
+            "Workspace",
+            "Run another request from the current workspace and return its latest response snapshot.",
+            "`workspace.execute(\"Request Name\")` reuses the current variable context, merges runtime variables from the nested request back into the caller, updates the global response, and suppresses standalone history entries for the nested helper run.",
+            """
+            let auth = workspace.execute("/requests/auth/token")
+            request.headers["Authorization"] = $"Bearer {auth.token}"
+            """,
+            ["workspace", "nested request", "token helper", "helper script"],
+            ["workspace.execute", "workspace.run"],
+            "Method",
+            "workspace.execute(\"${1:/requests/auth/token}\")",
+            false),
+        new(
             "stash",
             "stash",
             "Response",

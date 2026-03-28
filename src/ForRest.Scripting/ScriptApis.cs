@@ -49,6 +49,8 @@ public sealed class ScriptRequestApi
 
     private int sendCount;
 
+    private ResponseSnapshot? lastSentResponse;
+
     public string Method { get; set; }
 
     public string Url { get; set; }
@@ -64,6 +66,8 @@ public sealed class ScriptRequestApi
     public int RemainingSendIterations => Math.Max(0, maxSendIterations - sendCount);
 
     public int SendCount => Volatile.Read(ref sendCount);
+
+    public ResponseSnapshot? LastSentResponse => lastSentResponse;
 
     #endregion
 
@@ -104,6 +108,7 @@ public sealed class ScriptRequestApi
         }
 
         ResponseSnapshot? response = await sendAsync(preparedRequest);
+        lastSentResponse = response;
         responseApi.Update(response);
         return new ScriptResponseApi(response);
     }
@@ -586,6 +591,50 @@ public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
         return variables.Values.ToList();
     }
 
+    public IReadOnlyList<VariableDefinition> RuntimeVariables()
+    {
+        return
+        [
+            .. variables.Values
+                .Where(static item => item.Scope == VariableScope.Runtime)
+                .OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase),
+        ];
+    }
+
+    public void MergeRuntimeVariables(IEnumerable<VariableDefinition> runtimeVariables)
+    {
+        foreach (VariableDefinition variable in runtimeVariables.Where(static item => item.Scope == VariableScope.Runtime))
+        {
+            variables[variable.Key] = variable with
+            {
+                Scope = VariableScope.Runtime,
+            };
+        }
+    }
+
+    public void ClearRuntimeNamespace(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        List<string> keysToRemove =
+        [
+            .. variables
+                .Where(
+                    item => item.Value.Scope == VariableScope.Runtime
+                            && (string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase)
+                                || item.Key.StartsWith($"{key}.", StringComparison.OrdinalIgnoreCase)))
+                .Select(static item => item.Key),
+        ];
+
+        foreach (string existingKey in keysToRemove)
+        {
+            variables.Remove(existingKey);
+        }
+    }
+
     public string RenderTemplate(string template)
     {
         return VariableTokenPattern.Replace(
@@ -673,6 +722,11 @@ public sealed class TestsApi
         });
     }
 
+    public void Import(IEnumerable<TestResult> results)
+    {
+        testResults.AddRange(results);
+    }
+
     #endregion
 }
 
@@ -704,6 +758,11 @@ public sealed class ConsoleApi
     public void Error(object? value)
     {
         Add(ConsoleEntryLevel.Error, value);
+    }
+
+    public void Import(IEnumerable<ConsoleEntry> entriesToImport)
+    {
+        entries.AddRange(entriesToImport);
     }
 
     #endregion
@@ -795,6 +854,29 @@ public sealed class StashApi : DynamicObject
             Columns = [.. columns],
             Rows = snapshotRows,
         };
+    }
+
+    public void Import(StashTable table)
+    {
+        foreach (string column in table.Columns)
+        {
+            string normalizedColumn = NormalizeKey(column);
+            if (string.IsNullOrWhiteSpace(normalizedColumn))
+            {
+                continue;
+            }
+
+            RegisterColumn(normalizedColumn);
+        }
+
+        foreach (StashRow row in table.Rows)
+        {
+            rows.Add(
+                new()
+                {
+                    Values = row.Values.ToDictionary(static item => item.Key, static item => item.Value, StringComparer.OrdinalIgnoreCase),
+                });
+        }
     }
 
     public override bool TrySetMember(SetMemberBinder binder, object? value)
@@ -1012,11 +1094,74 @@ public sealed class RandomApi
     #endregion
 }
 
-public sealed class WorkspaceApi(WorkspaceDefinition workspace)
+public sealed class WorkspaceApi
 {
+    private readonly WorkspaceDefinition workspace;
+    private readonly VariablesApi variablesApi;
+    private readonly ScriptResponseApi responseApi;
+    private readonly TestsApi testsApi;
+    private readonly ConsoleApi consoleApi;
+    private readonly StashApi stashApi;
+    private readonly Func<string, IReadOnlyList<VariableDefinition>, Task<ScriptExecutionResult>>? executeWorkspaceRequestAsync;
+
+    public WorkspaceApi(
+        WorkspaceDefinition workspace,
+        VariablesApi variablesApi,
+        ScriptResponseApi responseApi,
+        TestsApi testsApi,
+        ConsoleApi consoleApi,
+        StashApi stashApi,
+        Func<string, IReadOnlyList<VariableDefinition>, Task<ScriptExecutionResult>>? executeWorkspaceRequestAsync = null)
+    {
+        this.workspace = workspace;
+        this.variablesApi = variablesApi;
+        this.responseApi = responseApi;
+        this.testsApi = testsApi;
+        this.consoleApi = consoleApi;
+        this.stashApi = stashApi;
+        this.executeWorkspaceRequestAsync = executeWorkspaceRequestAsync;
+    }
+
     public Guid Id => workspace.Id;
 
     public string Name => workspace.Name;
+
+    public Task<dynamic> execute(string reference)
+    {
+        return ExecuteAsync(reference);
+    }
+
+    public Task<dynamic> run(string reference)
+    {
+        return ExecuteAsync(reference);
+    }
+
+    public async Task<dynamic> ExecuteAsync(string reference)
+    {
+        if (executeWorkspaceRequestAsync is null)
+        {
+            throw new InvalidOperationException("workspace.execute() is unavailable for this request.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reference))
+        {
+            throw new InvalidOperationException("workspace.execute() requires a request name or location.");
+        }
+
+        ScriptExecutionResult result = await executeWorkspaceRequestAsync(reference.Trim(), variablesApi.RuntimeVariables());
+        consoleApi.Import(result.ConsoleEntries);
+        testsApi.Import(result.Tests);
+        stashApi.Import(result.Stash);
+        variablesApi.MergeRuntimeVariables(result.RuntimeVariables);
+        responseApi.Update(result.Response);
+
+        if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+        {
+            throw new InvalidOperationException(result.ErrorMessage);
+        }
+
+        return new ScriptResponseApi(result.Response);
+    }
 }
 
 public sealed class ScriptGlobals

@@ -69,18 +69,29 @@
                 <Grid Grid.Column="0">
                     <ContentView x:Name="EditorHost" />
 
-                    <Button Text="&#x25B6;"
-                            Clicked="OnSendClicked"
-                            IsEnabled="{Binding CanSend}"
-                            HorizontalOptions="End"
-                            VerticalOptions="End"
-                            Margin="0,0,18,18"
-                            FontSize="18"
-                            Padding="0"
-                            SemanticProperties.Description="Run script"
-                            SemanticProperties.Hint="Runs the current request script"
-                            Style="{StaticResource FloatingActionButtonStyle}"
-                            ZIndex="10" />
+                    <Grid HorizontalOptions="End"
+                          VerticalOptions="End"
+                          Margin="0,0,18,18"
+                          ZIndex="10">
+                        <Button Text="{Binding SendButtonText}"
+                                Clicked="OnSendClicked"
+                                IsEnabled="{Binding CanSend}"
+                                FontSize="18"
+                                Padding="0"
+                                SemanticProperties.Description="Run script"
+                                SemanticProperties.Hint="Runs the current request script"
+                                Style="{StaticResource FloatingActionButtonStyle}" />
+
+                        <ActivityIndicator IsRunning="{Binding IsSending}"
+                                           IsVisible="{Binding IsSending}"
+                                           Color="{DynamicResource ThemeAccentTextColor}"
+                                           WidthRequest="24"
+                                           HeightRequest="24"
+                                           HorizontalOptions="Center"
+                                           VerticalOptions="Center"
+                                           InputTransparent="True"
+                                           ZIndex="11" />
+                    </Grid>
                 </Grid>
 
                 <Border Grid.Column="1"

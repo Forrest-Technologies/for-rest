@@ -76,6 +76,7 @@ internal static class ForRestFlowScriptCompiler
     public static string Compile(
         string flowSource,
         IEnumerable<string> knownVariableNames,
+        IEnumerable<string>? templateBoundVariableNames,
         List<ForRestScriptDiagnostic> diagnostics)
     {
         if (string.IsNullOrWhiteSpace(flowSource))
@@ -91,6 +92,12 @@ internal static class ForRestFlowScriptCompiler
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static item => item, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        HashSet<string> templateBoundIdentifiers =
+        [
+            .. (templateBoundVariableNames ?? [])
+                .Where(IsFlowIdentifier)
+                .Distinct(StringComparer.OrdinalIgnoreCase),
+        ];
 
         foreach (var identifier in knownIdentifiers)
         {
@@ -104,7 +111,7 @@ internal static class ForRestFlowScriptCompiler
         var lines = Normalize(flowSource).Split('\n');
         var index = 0;
         var tempCounter = 0;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(knownIdentifiers, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: false);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(knownIdentifiers, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: false);
         return builder.ToString().Trim();
     }
 
@@ -114,6 +121,7 @@ internal static class ForRestFlowScriptCompiler
         ref int index,
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
+        IReadOnlySet<string> templateBoundIdentifiers,
         ref int tempCounter,
         bool allowBlockTerminator)
     {
@@ -158,17 +166,17 @@ internal static class ForRestFlowScriptCompiler
                 return;
             }
 
-            if (TryCompileIfStatement(builder, lines, ref index, diagnostics, locals, ref tempCounter))
+            if (TryCompileIfStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
             {
                 continue;
             }
 
-            if (TryCompileWhileStatement(builder, lines, ref index, diagnostics, locals, ref tempCounter))
+            if (TryCompileWhileStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
             {
                 continue;
             }
 
-            if (TryCompileForEachStatement(builder, lines, ref index, diagnostics, locals, ref tempCounter))
+            if (TryCompileForEachStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
             {
                 continue;
             }
@@ -180,7 +188,7 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
-            if (TryCompileLetStatement(builder, trimmed, locals, ref tempCounter))
+            if (TryCompileLetStatement(builder, trimmed, locals, templateBoundIdentifiers))
             {
                 index++;
                 continue;
@@ -220,7 +228,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine(TranslateRawStatement(trimmed, locals));
                 index++;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
                 builder.AppendLine("}");
                 continue;
             }
@@ -263,6 +271,7 @@ internal static class ForRestFlowScriptCompiler
         ref int index,
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
+        IReadOnlySet<string> templateBoundIdentifiers,
         ref int tempCounter)
     {
         if (!TryReadBlockHeader(lines, index, "if", out var condition, out var consumedLineCount))
@@ -274,7 +283,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
         builder.AppendLine("}");
 
         while (index < lines.Count)
@@ -301,7 +310,7 @@ internal static class ForRestFlowScriptCompiler
                 builder.Append(TranslateExpression(elseIfCondition, locals));
                 builder.AppendLine(") {");
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
                 builder.AppendLine("}");
                 continue;
             }
@@ -310,7 +319,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine("else {");
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
                 builder.AppendLine("}");
             }
 
@@ -326,6 +335,7 @@ internal static class ForRestFlowScriptCompiler
         ref int index,
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
+        IReadOnlySet<string> templateBoundIdentifiers,
         ref int tempCounter)
     {
         if (!TryReadBlockHeader(lines, index, "while", out var condition, out var consumedLineCount))
@@ -337,7 +347,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
         builder.AppendLine("}");
         return true;
     }
@@ -348,6 +358,7 @@ internal static class ForRestFlowScriptCompiler
         ref int index,
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
+        IReadOnlySet<string> templateBoundIdentifiers,
         ref int tempCounter)
     {
         if (!TryReadForEachHeader(lines, index, out var iteratorName, out var sourceExpression, out var consumedLineCount))
@@ -365,7 +376,7 @@ internal static class ForRestFlowScriptCompiler
             iteratorName
         };
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
         builder.AppendLine("}");
         return true;
     }
@@ -374,7 +385,7 @@ internal static class ForRestFlowScriptCompiler
         StringBuilder builder,
         string trimmed,
         HashSet<string> locals,
-        ref int tempCounter)
+        IReadOnlySet<string> templateBoundIdentifiers)
     {
         if (!TryReadKeywordRemainder(trimmed, "let", out var remainder))
         {
@@ -392,6 +403,16 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(expression, locals));
         builder.AppendLine(";");
         locals.Add(name);
+
+        if (templateBoundIdentifiers.Contains(name))
+        {
+            builder.Append("__flow.Bind(");
+            builder.Append(RenderString(name));
+            builder.Append(", ");
+            builder.Append(name);
+            builder.AppendLine(");");
+        }
+
         return true;
     }
 
@@ -489,7 +510,6 @@ internal static class ForRestFlowScriptCompiler
                 segment = segment.Replace("guid()", "random.Guid()", StringComparison.OrdinalIgnoreCase);
                 segment = segment.Replace("now()", "time.Now", StringComparison.OrdinalIgnoreCase);
                 segment = segment.Replace("utc_now()", "time.UtcNow", StringComparison.OrdinalIgnoreCase);
-                segment = NormalizeSendCalls(segment);
                 segment = RewriteKeywordBooleanOperators(segment);
                 segment = RewriteRangeLiterals(segment);
                 segment = RewriteCountAliases(segment);
@@ -497,6 +517,7 @@ internal static class ForRestFlowScriptCompiler
                 segment = segment.Replace("random(", "random.Number(", StringComparison.OrdinalIgnoreCase);
                 return segment;
             });
+        translated = NormalizeSendCalls(translated);
 
         var builder = new StringBuilder();
         for (var index = 0; index < translated.Length; index++)
@@ -710,18 +731,213 @@ internal static class ForRestFlowScriptCompiler
 
     private static string NormalizeSendCalls(string expression)
     {
-        const string awaitSendSentinel = "__forrest_await_request_send__";
-        var normalized = Regex.Replace(
-            expression,
-            @"await\s+request\.send\s*\(\s*\)",
-            awaitSendSentinel,
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        normalized = Regex.Replace(
-            normalized,
-            @"request\.send\s*\(\s*\)",
-            "(await request.send())",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        return normalized.Replace(awaitSendSentinel, "(await request.send())", StringComparison.Ordinal);
+        var normalized = NormalizeAwaitableCall(expression, "request.send");
+        normalized = NormalizeAwaitableCall(normalized, "workspace.execute");
+        return NormalizeAwaitableCall(normalized, "workspace.run");
+    }
+
+    private static string NormalizeAwaitableCall(string expression, string invocationName)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            return expression;
+        }
+
+        var builder = new StringBuilder(expression.Length + 32);
+        bool inString = false;
+        bool escaped = false;
+        char quote = '\0';
+
+        for (int index = 0; index < expression.Length;)
+        {
+            char character = expression[index];
+            if (inString)
+            {
+                builder.Append(character);
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character))
+                     || (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote))
+                    && !escaped)
+                {
+                    inString = false;
+                    quote = '\0';
+                }
+
+                escaped = character == '\\' && !escaped;
+                if (character != '\\')
+                {
+                    escaped = false;
+                }
+
+                index++;
+                continue;
+            }
+
+            if (IsQuoteDelimiter(character))
+            {
+                inString = true;
+                quote = character;
+                escaped = false;
+                builder.Append(character);
+                index++;
+                continue;
+            }
+
+            if (IsInvocationMatch(expression, index, invocationName)
+                && TryFindAwaitableCallEnd(expression, index + invocationName.Length, out int endExclusive))
+            {
+                bool alreadyAwaited = IsAwaitedInvocation(expression, index);
+                if (!alreadyAwaited)
+                {
+                    builder.Append("(await ");
+                }
+
+                builder.Append(expression, index, endExclusive - index);
+
+                if (!alreadyAwaited)
+                {
+                    builder.Append(')');
+                }
+
+                index = endExclusive;
+                continue;
+            }
+
+            builder.Append(character);
+            index++;
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool IsInvocationMatch(string expression, int index, string invocationName)
+    {
+        if (index > 0 && IsIdentifierCharacter(expression[index - 1]))
+        {
+            return false;
+        }
+
+        if (index + invocationName.Length > expression.Length
+            || string.Compare(expression, index, invocationName, 0, invocationName.Length, StringComparison.OrdinalIgnoreCase) != 0)
+        {
+            return false;
+        }
+
+        int nextIndex = index + invocationName.Length;
+        if (nextIndex < expression.Length && IsIdentifierCharacter(expression[nextIndex]))
+        {
+            return false;
+        }
+
+        while (nextIndex < expression.Length && char.IsWhiteSpace(expression[nextIndex]))
+        {
+            nextIndex++;
+        }
+
+        return nextIndex < expression.Length && expression[nextIndex] == '(';
+    }
+
+    private static bool TryFindAwaitableCallEnd(string expression, int startIndex, out int endExclusive)
+    {
+        int openParenIndex = startIndex;
+        while (openParenIndex < expression.Length && char.IsWhiteSpace(expression[openParenIndex]))
+        {
+            openParenIndex++;
+        }
+
+        if (openParenIndex >= expression.Length || expression[openParenIndex] != '(')
+        {
+            endExclusive = -1;
+            return false;
+        }
+
+        int parenthesisDepth = 0;
+        bool inString = false;
+        bool escaped = false;
+        char quote = '\0';
+
+        for (int index = openParenIndex; index < expression.Length; index++)
+        {
+            char character = expression[index];
+            if (inString)
+            {
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character))
+                     || (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote))
+                    && !escaped)
+                {
+                    inString = false;
+                    quote = '\0';
+                }
+
+                escaped = character == '\\' && !escaped;
+                if (character != '\\')
+                {
+                    escaped = false;
+                }
+
+                continue;
+            }
+
+            if (IsQuoteDelimiter(character))
+            {
+                inString = true;
+                quote = character;
+                escaped = false;
+                continue;
+            }
+
+            if (character == '(')
+            {
+                parenthesisDepth++;
+                continue;
+            }
+
+            if (character == ')')
+            {
+                parenthesisDepth--;
+                if (parenthesisDepth == 0)
+                {
+                    endExclusive = index + 1;
+                    return true;
+                }
+            }
+        }
+
+        endExclusive = -1;
+        return false;
+    }
+
+    private static bool IsAwaitedInvocation(string expression, int invocationIndex)
+    {
+        int endIndex = invocationIndex - 1;
+        while (endIndex >= 0 && char.IsWhiteSpace(expression[endIndex]))
+        {
+            endIndex--;
+        }
+
+        if (endIndex < 0)
+        {
+            return false;
+        }
+
+        int startIndex = endIndex;
+        while (startIndex >= 0 && IsIdentifierCharacter(expression[startIndex]))
+        {
+            startIndex--;
+        }
+
+        string token = expression[(startIndex + 1)..(endIndex + 1)];
+        return string.Equals(token, "await", StringComparison.OrdinalIgnoreCase)
+               && (startIndex < 0 || !IsIdentifierCharacter(expression[startIndex]));
+    }
+
+    private static bool IsIdentifierCharacter(char character)
+    {
+        return char.IsLetterOrDigit(character) || character == '_';
+    }
+
+    private static bool IsQuoteDelimiter(char character)
+    {
+        return IsSupportedDoubleQuoteDelimiter(character) || character == '\'';
     }
 
     private static string RewriteKeywordBooleanOperators(string expression)
@@ -903,7 +1119,7 @@ internal static class ForRestFlowScriptCompiler
         diagnostics.Add(
             new(
                 ForRestScriptDiagnosticSeverity.Error,
-                "Malformed legacy helper call. Close the call or rewrite it using ForRest syntax such as 'log ...', 'warn ...', 'error ...', 'request.headers[\"Name\"] = value', 'runtime key = value', or 'request.send()'.",
+                "Malformed legacy helper call. Close the call or rewrite it using ForRest syntax such as 'log ...', 'warn ...', 'error ...', 'request.headers[\"Name\"] = value', 'runtime key = value', 'request.send()', or 'workspace.execute(\"Request Name\")'.",
                 index + 1,
                 1));
         return true;
@@ -918,6 +1134,10 @@ internal static class ForRestFlowScriptCompiler
                || value.StartsWith("variables.Set(", StringComparison.Ordinal)
                || value.StartsWith("await request.send(", StringComparison.Ordinal)
                || value.StartsWith("request.send(", StringComparison.Ordinal)
+               || value.StartsWith("await workspace.execute(", StringComparison.Ordinal)
+               || value.StartsWith("workspace.execute(", StringComparison.Ordinal)
+               || value.StartsWith("await workspace.run(", StringComparison.Ordinal)
+               || value.StartsWith("workspace.run(", StringComparison.Ordinal)
                || value.StartsWith("var sent = await request.send(", StringComparison.Ordinal)
                || value.StartsWith("let sent = await request.send(", StringComparison.Ordinal)
                || value.StartsWith("var sent = request.send(", StringComparison.Ordinal)
@@ -1528,5 +1748,167 @@ public sealed class ForRestFlowRuntime(VariablesApi variables)
             JsonNode jsonNode => jsonNode.ToJsonString(),
             _ => value.ToString() ?? string.Empty,
         };
+    }
+
+    public void Bind(string key, object? value)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        string rootKey = key.Trim();
+        variables.ClearRuntimeNamespace(rootKey);
+        foreach ((string bindingKey, string bindingValue) in FlattenBindings(rootKey, value))
+        {
+            variables.Set(bindingKey, bindingValue);
+        }
+    }
+
+    private IEnumerable<(string Key, string Value)> FlattenBindings(string rootKey, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                yield return (rootKey, string.Empty);
+                yield break;
+            case ScriptResponseApi response:
+                JsonNode? responseJson = response.Json();
+                yield return (rootKey, responseJson?.ToJsonString() ?? response.Body);
+                yield return ($"{rootKey}.status", response.Status.ToString(CultureInfo.InvariantCulture));
+                yield return ($"{rootKey}.body", response.Body);
+                if (!string.IsNullOrWhiteSpace(response.ContentType))
+                {
+                    yield return ($"{rootKey}.content_type", response.ContentType);
+                }
+
+                foreach (KeyValuePair<string, string> header in response.Headers.Where(static item => !string.IsNullOrWhiteSpace(item.Key)))
+                {
+                    yield return ($"{rootKey}.headers.{header.Key}", header.Value ?? string.Empty);
+                }
+
+                if (responseJson is not null)
+                {
+                    foreach ((string nestedKey, string nestedValue) in FlattenJsonBindings(rootKey, responseJson))
+                    {
+                        yield return (nestedKey, nestedValue);
+                    }
+                }
+
+                yield break;
+            case JsonNode jsonNode:
+                yield return (rootKey, jsonNode.ToJsonString());
+                foreach ((string nestedKey, string nestedValue) in FlattenJsonBindings(rootKey, jsonNode))
+                {
+                    yield return (nestedKey, nestedValue);
+                }
+
+                yield break;
+            default:
+                JsonNode? serializedNode = TrySerializeToJsonNode(value);
+                if (serializedNode is not null)
+                {
+                    yield return (rootKey, serializedNode.ToJsonString());
+                    foreach ((string nestedKey, string nestedValue) in FlattenJsonBindings(rootKey, serializedNode))
+                    {
+                        yield return (nestedKey, nestedValue);
+                    }
+
+                    yield break;
+                }
+
+                yield return (rootKey, S(value));
+                yield break;
+        }
+    }
+
+    private IEnumerable<(string Key, string Value)> FlattenJsonBindings(string rootKey, JsonNode node)
+    {
+        if (node is not JsonObject jsonObject)
+        {
+            yield break;
+        }
+
+        foreach ((string propertyName, JsonNode? propertyValue) in jsonObject)
+        {
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                continue;
+            }
+
+            string nestedKey = $"{rootKey}.{propertyName}";
+            switch (propertyValue)
+            {
+                case null:
+                    yield return (nestedKey, string.Empty);
+                    break;
+                case JsonValue jsonValue:
+                    yield return (nestedKey, JsonScalarToString(jsonValue));
+                    break;
+                case JsonObject childObject:
+                    yield return (nestedKey, childObject.ToJsonString());
+                    foreach ((string childKey, string childValue) in FlattenJsonBindings(nestedKey, childObject))
+                    {
+                        yield return (childKey, childValue);
+                    }
+                    break;
+                case JsonArray jsonArray:
+                    yield return (nestedKey, jsonArray.ToJsonString());
+                    break;
+            }
+        }
+    }
+
+    private static string JsonScalarToString(JsonValue value)
+    {
+        if (value.TryGetValue<string>(out string? stringValue))
+        {
+            return stringValue ?? string.Empty;
+        }
+
+        if (value.TryGetValue<bool>(out bool boolValue))
+        {
+            return boolValue ? "true" : "false";
+        }
+
+        if (value.TryGetValue<int>(out int intValue))
+        {
+            return intValue.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (value.TryGetValue<long>(out long longValue))
+        {
+            return longValue.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (value.TryGetValue<decimal>(out decimal decimalValue))
+        {
+            return decimalValue.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (value.TryGetValue<double>(out double doubleValue))
+        {
+            return doubleValue.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return value.ToJsonString().Trim('"');
+    }
+
+    private static JsonNode? TrySerializeToJsonNode(object value)
+    {
+        try
+        {
+            return value switch
+            {
+                string => null,
+                char => null,
+                IFormattable => null,
+                _ => JsonSerializer.SerializeToNode(value),
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

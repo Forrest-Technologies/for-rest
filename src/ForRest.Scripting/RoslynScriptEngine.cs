@@ -76,7 +76,14 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 crypto = new CryptoApi(),
                 regex = new RegexApi(),
                 random = new RandomApi(),
-                workspace = new WorkspaceApi(request.Workspace),
+                workspace = new WorkspaceApi(
+                    request.Workspace,
+                    variablesApi,
+                    responseApi,
+                    testsApi,
+                    consoleApi,
+                    stashApi,
+                    request.ExecuteWorkspaceRequestAsync),
                 stash = stashApi,
             };
 
@@ -119,6 +126,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             {
                 PreparedRequest = originalRequest.PreparedRequest,
                 Response = originalRequest.Response,
+                SentResponse = requestApi?.LastSentResponse,
                 SendCount = requestApi?.SendCount ?? 0,
                 RuntimeVariables =
                 [
@@ -141,6 +149,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         {
             PreparedRequest = BuildPreparedRequestOrFallback(originalRequest.PreparedRequest, requestApi),
             Response = responseApi?.Snapshot ?? originalRequest.Response,
+            SentResponse = requestApi.LastSentResponse,
             SendCount = requestApi.SendCount,
             RuntimeVariables =
             [

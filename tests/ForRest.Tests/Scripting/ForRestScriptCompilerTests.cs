@@ -180,6 +180,71 @@ public sealed class ForRestScriptCompilerTests
     }
 
     [TestMethod]
+    public void Compile_auto_awaits_workspace_execute_in_flow()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            request {
+              method = GET
+              url = "https://api.example.test/secure"
+            }
+
+            flow {
+              let auth = workspace.execute("/requests/auth/token")
+              request.headers["Authorization"] = $"Bearer {auth.token}"
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic auth = (await workspace.execute(\"/requests/auth/token\"));");
+        Assert.IsFalse(result.Payload.Request.PreRequestScript.Contains("await await", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Compile_binds_template_referenced_workspace_execute_result_for_request_templates()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """"
+            request {
+              method = POST
+              url = "https://api.example.test/echo"
+              content_type = "application/json"
+            }
+
+            body json """
+            {
+              "guid": "{{uuid.uuid}}"
+            }
+            """
+
+            flow {
+              let uuid = workspace.execute("Get UUID")
+            }
+            """";
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "__flow.Bind(\"uuid\", uuid);");
+    }
+
+    [TestMethod]
     public void Compile_rejects_classic_c_style_for_loops_with_clear_diagnostic()
     {
         var compiler = new ForRestScriptCompiler(new ForRestScriptParser());

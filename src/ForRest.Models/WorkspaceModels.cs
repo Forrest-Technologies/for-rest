@@ -57,6 +57,8 @@ public sealed record WorkspaceNodeDefinition
 
     public string Name { get; init; } = string.Empty;
 
+    public string Location { get; init; } = string.Empty;
+
     public int SortOrder { get; init; }
 
     public bool IsPinned { get; init; }

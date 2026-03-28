@@ -288,6 +288,8 @@ public sealed record RequestWorkbenchDocumentState
     public string RequestSource { get; init; } = string.Empty;
 
     public string PreRequestScript { get; init; } = string.Empty;
+
+    public string DiagnosticsJson { get; init; } = "[]";
 }
 
 internal sealed record LegacyRequestWorkbenchState

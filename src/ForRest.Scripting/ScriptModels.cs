@@ -22,6 +22,8 @@ public sealed record ScriptExecutionRequest
 
     public Func<PreparedRequest, Task<ResponseSnapshot?>>? SendAsync { get; init; }
 
+    public Func<string, IReadOnlyList<VariableDefinition>, Task<ScriptExecutionResult>>? ExecuteWorkspaceRequestAsync { get; init; }
+
     public int MaxSendIterations { get; init; }
 }
 
@@ -30,6 +32,8 @@ public sealed record ScriptExecutionResult
     public PreparedRequest PreparedRequest { get; init; } = new();
 
     public ResponseSnapshot? Response { get; init; }
+
+    public ResponseSnapshot? SentResponse { get; init; }
 
     public int SendCount { get; init; }
 

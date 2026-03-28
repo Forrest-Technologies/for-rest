@@ -1,10 +1,13 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ForRest.Scripting;
 
 public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRestScriptCompiler
 {
+    private static readonly Regex TemplateTokenPattern = new(@"\{\{(?<key>[\w\.\-]+)\}\}|\$\{(?<key>[\w\.\-]+)\}", RegexOptions.Compiled);
+
     #region Public Methods
 
     public ForRestScriptParseResult Parse(string source)
@@ -60,8 +63,6 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             .Concat(runtimeSeeds.Select(static item => item.Key))
             .ToList();
 
-        var flowScript = ForRestFlowScriptCompiler.Compile(document.Flow, flowVariableNames, diagnostics);
-
         if (!TryReadRequiredIdentifier(document.Request, "method", out var methodText, diagnostics, "request")
             || !Enum.TryParse<HttpMethodKind>(methodText, true, out var method))
         {
@@ -96,6 +97,9 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                 FormValues = multipartValues,
             };
         }
+
+        var templateBoundVariableNames = CollectTemplateBoundVariableNames(urlTemplate ?? string.Empty, headers, queryParameters, body, auth);
+        var flowScript = ForRestFlowScriptCompiler.Compile(document.Flow, flowVariableNames, templateBoundVariableNames, diagnostics);
 
         var request = new RequestDefinition
         {
@@ -266,6 +270,107 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
         {
             Mode = RequestBodyMode.None,
         };
+    }
+
+    private static IReadOnlyCollection<string> CollectTemplateBoundVariableNames(
+        string urlTemplate,
+        IEnumerable<KeyValueDefinition> headers,
+        IEnumerable<KeyValueDefinition> queryParameters,
+        RequestBodyDefinition body,
+        RequestAuthDefinition auth)
+    {
+        HashSet<string> variableNames = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string template in EnumerateTemplates(urlTemplate, headers, queryParameters, body, auth))
+        {
+            foreach (Match match in TemplateTokenPattern.Matches(template))
+            {
+                string key = match.Groups["key"].Value;
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                int separatorIndex = key.IndexOf('.');
+                string rootName = separatorIndex >= 0 ? key[..separatorIndex] : key;
+                if (IsFlowIdentifier(rootName))
+                {
+                    variableNames.Add(rootName);
+                }
+            }
+        }
+
+        return [.. variableNames];
+    }
+
+    private static IEnumerable<string> EnumerateTemplates(
+        string urlTemplate,
+        IEnumerable<KeyValueDefinition> headers,
+        IEnumerable<KeyValueDefinition> queryParameters,
+        RequestBodyDefinition body,
+        RequestAuthDefinition auth)
+    {
+        yield return urlTemplate;
+        yield return body.RawContent;
+        yield return body.ContentType;
+        yield return auth.Username;
+        yield return auth.Password;
+        yield return auth.BearerToken;
+        yield return auth.ApiKeyName;
+        yield return auth.ApiKeyValue;
+        yield return auth.HeaderName;
+        yield return auth.HeaderValue;
+        yield return auth.QueryParameterName;
+        yield return auth.Scheme;
+        yield return auth.Domain;
+        yield return auth.Authority;
+        yield return auth.TokenUrl;
+        yield return auth.ClientId;
+        yield return auth.ClientSecret;
+        yield return auth.Scopes;
+        yield return auth.Resource;
+        yield return auth.Audience;
+
+        foreach (KeyValueDefinition header in headers)
+        {
+            yield return header.Key;
+            yield return header.Value;
+        }
+
+        foreach (KeyValueDefinition queryParameter in queryParameters)
+        {
+            yield return queryParameter.Key;
+            yield return queryParameter.Value;
+        }
+
+        foreach (KeyValueDefinition formValue in body.FormValues)
+        {
+            yield return formValue.Key;
+            yield return formValue.Value;
+        }
+    }
+
+    private static bool IsFlowIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (!(char.IsLetter(value[0]) || value[0] == '_'))
+        {
+            return false;
+        }
+
+        for (int index = 1; index < value.Length; index++)
+        {
+            if (!(char.IsLetterOrDigit(value[index]) || value[index] == '_'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static List<KeyValueDefinition> BuildEntries(
