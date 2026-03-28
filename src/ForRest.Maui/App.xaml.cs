@@ -18,6 +18,14 @@ public partial class App : Application
 		_themeService.ThemeChanged += OnThemeChanged;
 		try
 		{
+			RoslynRuntimeDirectoryBootstrapper.Initialize();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Roslyn runtime directory initialization failed.", exception);
+		}
+		try
+		{
 			_themeService.Start();
 		}
 		catch (Exception exception)

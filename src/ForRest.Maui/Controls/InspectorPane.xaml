@@ -52,11 +52,13 @@
                     <Button Grid.Column="1"
                             Text="Copy Body"
                             Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnCopyResponseClicked" />
+                            Clicked="OnCopyResponseClicked"
+                            IsEnabled="{Binding CanCopyResponseBody}" />
                     <Button Grid.Column="2"
                             Text="Copy Raw"
                             Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnCopyRawResponseClicked" />
+                            Clicked="OnCopyRawResponseClicked"
+                            IsEnabled="{Binding CanCopyRawResponse}" />
                     <Button Grid.Column="3"
                             Text="{Binding ResponsePrettyPrintButtonText}"
                             Style="{StaticResource DenseTabButtonStyle}"
@@ -70,7 +72,7 @@
                 <Grid Grid.RowSpan="2"
                       RowDefinitions="Auto,*"
                       IsVisible="{Binding IsInspectorStashVisible}">
-                    <Grid ColumnDefinitions="*,Auto"
+                    <Grid ColumnDefinitions="*,Auto,Auto"
                           Padding="0,0,0,8">
                         <VerticalStackLayout Spacing="0">
                             <Label Text="Response stash"
@@ -79,6 +81,11 @@
                                    Style="{StaticResource PaneMetaStyle}" />
                         </VerticalStackLayout>
                         <Button Grid.Column="1"
+                                Text="Copy Table"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopyStashClicked"
+                                IsEnabled="{Binding CanCopyStash}" />
+                        <Button Grid.Column="2"
                                 Text="Export CSV"
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnExportStashClicked"
@@ -123,12 +130,15 @@
                                                                            BindableLayout.ItemsSource="{Binding Cells}">
                                                         <BindableLayout.ItemTemplate>
                                                             <DataTemplate>
-                                                                <Label Text="{Binding Value}"
-                                                                       WidthRequest="176"
-                                                                       Padding="8,6"
-                                                                       Style="{StaticResource MonoTextStyle}"
-                                                                       VerticalTextAlignment="Start"
-                                                                       LineBreakMode="WordWrap" />
+                                                                <controls:CopyableLabel Text="{Binding Value}"
+                                                                                        CopyText="{Binding Value}"
+                                                                                        CopiedMessage="Copied stash cell."
+                                                                                        Copied="OnInlineCopyCompleted"
+                                                                                        WidthRequest="176"
+                                                                                        Padding="8,6"
+                                                                                        Style="{StaticResource MonoTextStyle}"
+                                                                                        VerticalTextAlignment="Start"
+                                                                                        LineBreakMode="WordWrap" />
                                                             </DataTemplate>
                                                         </BindableLayout.ItemTemplate>
                                                     </HorizontalStackLayout>
@@ -142,64 +152,98 @@
                     </Grid>
                 </Grid>
 
-                <ScrollView Grid.RowSpan="2"
-                            IsVisible="{Binding IsInspectorHeadersVisible}">
-                    <VerticalStackLayout Padding="2,0,2,0"
-                                         Spacing="0">
-                        <Grid ColumnDefinitions="130,*"
-                              Padding="0,0,0,8">
-                            <Label Text="Header"
-                                   Style="{StaticResource SectionTitleStyle}" />
-                            <Label Grid.Column="1"
-                                   Text="Value"
-                                   Style="{StaticResource SectionTitleStyle}" />
-                        </Grid>
+                <Grid Grid.RowSpan="2"
+                      RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsInspectorHeadersVisible}">
+                    <Grid ColumnDefinitions="*,Auto"
+                          Padding="0,0,0,8">
+                        <Label Text="Response headers"
+                               Style="{StaticResource SectionTitleStyle}" />
+                        <Button Grid.Column="1"
+                                Text="Copy Headers"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopyHeadersClicked"
+                                IsEnabled="{Binding CanCopyHeaders}" />
+                    </Grid>
 
+                    <ScrollView Grid.Row="1">
+                        <VerticalStackLayout Padding="2,0,2,0"
+                                             Spacing="0">
+                            <Grid ColumnDefinitions="130,*"
+                                  Padding="0,0,0,8">
+                                <Label Text="Header"
+                                       Style="{StaticResource SectionTitleStyle}" />
+                                <Label Grid.Column="1"
+                                       Text="Value"
+                                       Style="{StaticResource SectionTitleStyle}" />
+                            </Grid>
+
+                            <VerticalStackLayout Spacing="0"
+                                                 BindableLayout.ItemsSource="{Binding ResponseHeaderRows}">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource NavigationRowBorderStyle}">
+                                            <Grid ColumnDefinitions="130,*">
+                                                <Label Text="{Binding Name}"
+                                                       Style="{StaticResource MonoTextStyle}" />
+                                                <controls:CopyableLabel Grid.Column="1"
+                                                                        Text="{Binding Value}"
+                                                                        CopyText="{Binding Value}"
+                                                                        CopiedMessage="Copied header value."
+                                                                        Copied="OnInlineCopyCompleted"
+                                                                        LineBreakMode="WordWrap" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </VerticalStackLayout>
+                        </VerticalStackLayout>
+                    </ScrollView>
+                </Grid>
+
+                <Grid Grid.RowSpan="2"
+                      RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsInspectorTraceVisible}">
+                    <Grid ColumnDefinitions="*,Auto"
+                          Padding="0,0,0,8">
+                        <Label Text="Execution trace"
+                               Style="{StaticResource SectionTitleStyle}" />
+                        <Button Grid.Column="1"
+                                Text="Copy Trace"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopyTraceClicked"
+                                IsEnabled="{Binding CanCopyTrace}" />
+                    </Grid>
+
+                    <ScrollView Grid.Row="1">
                         <VerticalStackLayout Spacing="0"
-                                             BindableLayout.ItemsSource="{Binding ResponseHeaderRows}">
+                                             BindableLayout.ItemsSource="{Binding TraceEntries}">
                             <BindableLayout.ItemTemplate>
                                 <DataTemplate>
                                     <Border Style="{StaticResource NavigationRowBorderStyle}">
-                                        <Grid ColumnDefinitions="130,*">
-                                            <Label Text="{Binding Name}"
-                                                   Style="{StaticResource MonoTextStyle}" />
+                                        <Grid ColumnDefinitions="*,Auto"
+                                              ColumnSpacing="10">
+                                            <VerticalStackLayout Spacing="1">
+                                                <Label Text="{Binding Title}"
+                                                       TextColor="{Binding AccentColor}"
+                                                       Style="{StaticResource SectionTitleStyle}" />
+                                                <controls:CopyableLabel Text="{Binding Detail}"
+                                                                        CopyText="{Binding Detail}"
+                                                                        CopiedMessage="Copied trace detail."
+                                                                        Copied="OnInlineCopyCompleted"
+                                                                        Style="{StaticResource PaneMetaStyle}"
+                                                                        LineBreakMode="WordWrap" />
+                                            </VerticalStackLayout>
                                             <Label Grid.Column="1"
-                                                   Text="{Binding Value}"
-                                                   LineBreakMode="WordWrap" />
+                                                   Text="{Binding When}"
+                                                   Style="{StaticResource MonoMetaStyle}" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
                             </BindableLayout.ItemTemplate>
                         </VerticalStackLayout>
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView Grid.RowSpan="2"
-                            IsVisible="{Binding IsInspectorTraceVisible}">
-                    <VerticalStackLayout Spacing="0"
-                                         BindableLayout.ItemsSource="{Binding TraceEntries}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource NavigationRowBorderStyle}">
-                                    <Grid ColumnDefinitions="*,Auto"
-                                          ColumnSpacing="10">
-                                        <VerticalStackLayout Spacing="1">
-                                            <Label Text="{Binding Title}"
-                                                   TextColor="{Binding AccentColor}"
-                                                   Style="{StaticResource SectionTitleStyle}" />
-                                            <Label Text="{Binding Detail}"
-                                                   Style="{StaticResource PaneMetaStyle}"
-                                                   LineBreakMode="WordWrap" />
-                                        </VerticalStackLayout>
-                                        <Label Grid.Column="1"
-                                               Text="{Binding When}"
-                                               Style="{StaticResource MonoMetaStyle}" />
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </VerticalStackLayout>
-                </ScrollView>
+                    </ScrollView>
+                </Grid>
 
                 <Grid Grid.RowSpan="2"
                       RowDefinitions="Auto,*"
@@ -211,7 +255,8 @@
                         <Button Grid.Column="1"
                                 Text="Copy Raw"
                                 Style="{StaticResource DenseTabButtonStyle}"
-                                Clicked="OnCopyRawResponseClicked" />
+                                Clicked="OnCopyRawResponseClicked"
+                                IsEnabled="{Binding CanCopyRawResponse}" />
                     </Grid>
 
                     <controls:EditorSurface Grid.Row="1"
@@ -222,13 +267,27 @@
                                             Text="{Binding ResponseRawText}" />
                 </Grid>
 
-                <controls:EditorSurface Grid.RowSpan="2"
-                                        IsVisible="{Binding IsInspectorDebugVisible}"
-                                        Language="plaintext"
-                                        IsReadOnly="True"
-                                        ShowHeader="False"
-                                        ShowFooter="False"
-                                        Text="{Binding DebugOutputText}" />
+                <Grid Grid.RowSpan="2"
+                      RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsInspectorDebugVisible}">
+                    <Grid ColumnDefinitions="*,Auto"
+                          Padding="0,0,0,8">
+                        <Label Text="Debug output"
+                               Style="{StaticResource SectionTitleStyle}" />
+                        <Button Grid.Column="1"
+                                Text="Copy Debug"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopyDebugClicked"
+                                IsEnabled="{Binding CanCopyDebugOutput}" />
+                    </Grid>
+
+                    <controls:EditorSurface Grid.Row="1"
+                                            Language="plaintext"
+                                            IsReadOnly="True"
+                                            ShowHeader="False"
+                                            ShowFooter="False"
+                                            Text="{Binding DebugOutputText}" />
+                </Grid>
             </Grid>
         </Grid>
     </Border>

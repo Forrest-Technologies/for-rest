@@ -1,6 +1,6 @@
 using ForRest.Maui.Services;
 using ForRest.Maui.ViewModels;
-using Microsoft.Maui.ApplicationModel.DataTransfer;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ForRest.Maui;
 
@@ -9,16 +9,15 @@ public partial class AndroidMainPage : ContentPage
 	private bool _isInitialized;
 	private AndroidOutputView _outputView = AndroidOutputView.Response;
 
-	public AndroidMainPage(MainPageViewModel viewModel)
+	public AndroidMainPage()
 	{
 		InitializeComponent();
-		BindingContext = viewModel;
 		Loaded += OnPageLoaded;
 		SizeChanged += OnPageSizeChanged;
 		UpdateOutputView(AndroidOutputView.Response);
 	}
 
-	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
+	private MainPageViewModel? ViewModel => BindingContext as MainPageViewModel;
 
 	private async void OnPageLoaded(object? sender, EventArgs e)
 	{
@@ -30,6 +29,12 @@ public partial class AndroidMainPage : ContentPage
 		_isInitialized = true;
 		try
 		{
+			EnsureBindingContext();
+			if (ViewModel is null)
+			{
+				throw new InvalidOperationException("AndroidMainPage could not resolve MainPageViewModel.");
+			}
+
 			ViewModel.UpdateLayoutMode(Width);
 			await ViewModel.InitializeAsync();
 			AppLaunchGuard.MarkLaunchCompleted();
@@ -43,16 +48,31 @@ public partial class AndroidMainPage : ContentPage
 
 	private void OnPageSizeChanged(object? sender, EventArgs e)
 	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
 		ViewModel.UpdateLayoutMode(Width);
 	}
 
 	private async void OnSendClicked(object? sender, EventArgs e)
 	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
 		await ExecuteWithLaunchGuard(ViewModel.SendAsync, "Android send failed.");
 	}
 
 	private async void OnCopyRequestClicked(object? sender, EventArgs e)
 	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
 		await ExecuteWithLaunchGuard(ViewModel.CopyActiveEditorAsync, "Android request copy failed.");
 	}
 
@@ -73,6 +93,11 @@ public partial class AndroidMainPage : ContentPage
 
 	private void OnTogglePrettyPrintClicked(object? sender, EventArgs e)
 	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
 		try
 		{
 			ViewModel.ToggleResponsePrettyPrint();
@@ -85,6 +110,11 @@ public partial class AndroidMainPage : ContentPage
 
 	private async void OnCopyOutputClicked(object? sender, EventArgs e)
 	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
 		try
 		{
 			switch (_outputView)
@@ -96,15 +126,7 @@ public partial class AndroidMainPage : ContentPage
 					await ViewModel.CopyRawResponseAsync();
 					break;
 				default:
-					string debugText = ViewModel.DebugOutputText ?? string.Empty;
-					if (string.IsNullOrWhiteSpace(debugText))
-					{
-						ViewModel.ExecutionStatus = "No debug output available to copy.";
-						return;
-					}
-
-					await Clipboard.Default.SetTextAsync(debugText);
-					ViewModel.ExecutionStatus = "Copied debug output.";
+					await ViewModel.CopyDebugOutputAsync();
 					break;
 			}
 		}
@@ -112,6 +134,22 @@ public partial class AndroidMainPage : ContentPage
 		{
 			AppLaunchGuard.RecordException("Android output copy failed.", exception);
 		}
+	}
+
+	private void EnsureBindingContext()
+	{
+		if (BindingContext is MainPageViewModel)
+		{
+			return;
+		}
+
+		IServiceProvider? services = Handler?.MauiContext?.Services;
+		if (services is null)
+		{
+			return;
+		}
+
+		BindingContext = services.GetService<MainPageViewModel>();
 	}
 
 	private async Task ExecuteWithLaunchGuard(Func<Task> action, string context)

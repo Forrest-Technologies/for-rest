@@ -1,27 +1,24 @@
 namespace ForRest.Scripting;
 
+using System.Collections.Immutable;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Scripting;
+using Microsoft.CodeAnalysis.Scripting;
+using Microsoft.CodeAnalysis.Scripting.Hosting;
+
 public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : IScriptEngine
 {
     #region Private Fields
 
-    private static readonly ScriptOptions ScriptOptions = Microsoft.CodeAnalysis.Scripting.ScriptOptions.Default
-        .AddReferences(
-            typeof(object).Assembly,
-            typeof(Enumerable).Assembly,
-            typeof(JsonNode).Assembly,
-            typeof(Microsoft.CSharp.RuntimeBinder.Binder).Assembly,
-            typeof(ForRestFlowRuntime).Assembly,
-            typeof(PreparedRequest).Assembly,
-            typeof(VariableDefinition).Assembly)
-        .AddImports(
-            "System",
-            "System.Linq",
-            "System.Collections.Generic",
-            "System.Text",
-            "System.Text.Json.Nodes",
-            "System.Text.RegularExpressions",
-            "ForRest.Scripting",
-            "ForRest.Models");
+    private const string RoslynRuntimeDirectoryDataKey = "ForRest.RoslynRuntimeDirectory";
+
+    private static readonly Lazy<ScriptRuntimeConfiguration> ScriptRuntime = new(
+        CreateScriptRuntimeConfiguration,
+        LazyThreadSafetyMode.ExecutionAndPublication);
 
     #endregion
 
@@ -87,7 +84,13 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 stash = stashApi,
             };
 
-            await CSharpScript.RunAsync(request.Script, ScriptOptions, globals, cancellationToken: cancellationToken);
+            var scriptRuntime = ScriptRuntime.Value;
+            var script = CSharpScript.Create(
+                request.Script,
+                scriptRuntime.Options,
+                typeof(ScriptGlobals),
+                CreateAssemblyLoader(scriptRuntime.ReferenceAssemblies));
+            await script.RunAsync(globals, cancellationToken: cancellationToken);
         }
         catch (CompilationErrorException exception)
         {
@@ -99,6 +102,10 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Script execution failed");
+            if (ShouldReportReferenceDiagnostics(exception))
+            {
+                consoleApi.Error(BuildReferenceDiagnostics());
+            }
             consoleApi.Error(exception.Message);
             return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, exception.Message);
         }
@@ -179,6 +186,426 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             return fallback;
         }
     }
+
+    private static ScriptRuntimeConfiguration CreateScriptRuntimeConfiguration()
+    {
+        var assemblies = GetReferenceAssemblies();
+        var references = assemblies
+            .Select(CreateMetadataReference)
+            .ToArray();
+
+        var options = Microsoft.CodeAnalysis.Scripting.ScriptOptions.Default
+           .WithReferences(references)
+           .AddImports(
+               "System",
+               "System.Linq",
+               "System.Collections.Generic",
+               "System.Text",
+               "System.Text.Json.Nodes",
+               "System.Text.RegularExpressions",
+               "ForRest.Scripting",
+               "ForRest.Models");
+
+        return new(options, assemblies);
+    }
+
+    private static IReadOnlyList<Assembly> GetReferenceAssemblies()
+    {
+        var assemblies = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<Assembly>();
+
+        foreach (var assembly in GetReferenceAssemblyRoots())
+        {
+            Enqueue(assembly);
+        }
+
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().Where(ShouldIncludeAssembly))
+        {
+            Enqueue(assembly);
+        }
+
+        foreach (var referenceName in GetDefaultReferenceNames())
+        {
+            if (TryResolveAssembly(referenceName, out var assembly))
+            {
+                Enqueue(assembly);
+            }
+        }
+
+        while (pending.Count > 0)
+        {
+            var assembly = pending.Dequeue();
+            foreach (var reference in assembly.GetReferencedAssemblies())
+            {
+                if (!ShouldIncludeAssemblyName(reference.Name))
+                {
+                    continue;
+                }
+
+                if (TryResolveAssembly(reference, out var resolvedAssembly))
+                {
+                    Enqueue(resolvedAssembly);
+                }
+            }
+        }
+
+        return [.. assemblies.Values];
+
+        void Enqueue(Assembly assembly)
+        {
+            if (!ShouldIncludeAssembly(assembly))
+            {
+                return;
+            }
+
+            var assemblyName = assembly.GetName().Name;
+            if (string.IsNullOrWhiteSpace(assemblyName) || assemblies.ContainsKey(assemblyName))
+            {
+                return;
+            }
+
+            assemblies[assemblyName] = assembly;
+            pending.Enqueue(assembly);
+        }
+    }
+
+    private static InteractiveAssemblyLoader CreateAssemblyLoader(IReadOnlyList<Assembly> assemblies)
+    {
+        var loader = new InteractiveAssemblyLoader();
+        foreach (var assembly in assemblies)
+        {
+            loader.RegisterDependency(assembly);
+            if (TryGetAssemblyFilePath(assembly) is { } assemblyPath)
+            {
+                loader.RegisterDependency(AssemblyIdentity.FromAssemblyDefinition(assembly), assemblyPath);
+            }
+        }
+
+        return loader;
+    }
+
+    private static string? GetRoslynRuntimeDirectory()
+    {
+        var runtimeDirectory = AppContext.GetData(RoslynRuntimeDirectoryDataKey) as string;
+        return string.IsNullOrWhiteSpace(runtimeDirectory) ? null : runtimeDirectory;
+    }
+
+    private static string? TryGetAssemblyFilePath(Assembly assembly)
+    {
+        var location = GetAssemblyLocation(assembly);
+        if (!string.IsNullOrWhiteSpace(location) && Path.IsPathRooted(location) && File.Exists(location))
+        {
+            return location;
+        }
+
+        var runtimeDirectory = GetRoslynRuntimeDirectory();
+        if (string.IsNullOrWhiteSpace(runtimeDirectory))
+        {
+            return null;
+        }
+
+        var assemblyName = assembly.GetName().Name;
+        if (string.IsNullOrWhiteSpace(assemblyName))
+        {
+            return null;
+        }
+
+        var candidatePath = Path.Combine(runtimeDirectory, $"{assemblyName}.dll");
+        return File.Exists(candidatePath) ? candidatePath : null;
+    }
+
+    private static IEnumerable<Assembly> GetReferenceAssemblyRoots() =>
+    [
+        typeof(object).Assembly,
+        typeof(Enumerable).Assembly,
+        typeof(JsonNode).Assembly,
+        typeof(Regex).Assembly,
+        typeof(Microsoft.CSharp.RuntimeBinder.Binder).Assembly,
+        typeof(ForRestFlowRuntime).Assembly,
+        typeof(PreparedRequest).Assembly,
+        typeof(VariableDefinition).Assembly,
+    ];
+
+    private static IEnumerable<string> GetDefaultReferenceNames() =>
+        Microsoft.CodeAnalysis.Scripting.ScriptOptions.Default.MetadataReferences
+            .Select(GetReferenceName)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)!;
+
+    private static string? GetReferenceName(MetadataReference reference)
+    {
+        if (string.IsNullOrWhiteSpace(reference.Display))
+        {
+            return null;
+        }
+
+        const string unresolvedPrefix = "Unresolved: ";
+        return reference.Display.StartsWith(unresolvedPrefix, StringComparison.OrdinalIgnoreCase)
+            ? reference.Display[unresolvedPrefix.Length..].Trim()
+            : Path.GetFileNameWithoutExtension(reference.Display);
+    }
+
+    private static bool TryResolveAssembly(string simpleName, out Assembly assembly)
+    {
+        var assemblyName = new AssemblyName(simpleName);
+        return TryResolveAssembly(assemblyName, out assembly);
+    }
+
+    private static bool TryResolveAssembly(AssemblyName assemblyName, out Assembly assembly)
+    {
+        var loadedAssembly = AppDomain.CurrentDomain.GetAssemblies()
+            .FirstOrDefault(candidate => string.Equals(candidate.GetName().Name, assemblyName.Name, StringComparison.OrdinalIgnoreCase));
+        if (loadedAssembly is not null)
+        {
+            assembly = loadedAssembly;
+            return true;
+        }
+
+        try
+        {
+            assembly = Assembly.Load(assemblyName);
+            return true;
+        }
+        catch
+        {
+            assembly = null!;
+            return false;
+        }
+    }
+
+    private static bool ShouldIncludeAssembly(Assembly assembly)
+    {
+        if (assembly.IsDynamic)
+        {
+            return false;
+        }
+
+        return ShouldIncludeAssemblyName(assembly.GetName().Name);
+    }
+
+    private static bool ShouldIncludeAssemblyName(string? assemblyName)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyName))
+        {
+            return false;
+        }
+
+        return assemblyName.StartsWith("System.", StringComparison.Ordinal) ||
+               assemblyName.StartsWith("ForRest.", StringComparison.Ordinal) ||
+               string.Equals(assemblyName, "System", StringComparison.Ordinal) ||
+               string.Equals(assemblyName, "System.Private.CoreLib", StringComparison.Ordinal) ||
+               string.Equals(assemblyName, "Microsoft.CSharp", StringComparison.Ordinal) ||
+               string.Equals(assemblyName, "netstandard", StringComparison.Ordinal) ||
+               string.Equals(assemblyName, "mscorlib", StringComparison.Ordinal);
+    }
+
+    private static MetadataReference CreateMetadataReference(Assembly assembly)
+    {
+        if (TryCreateMetadataReferenceFromFilePath(assembly, out var fileReference))
+        {
+            return fileReference;
+        }
+
+        if (TryResolveAppBaseReference(assembly, out var appBaseReference))
+        {
+            return appBaseReference;
+        }
+
+        if (TryResolveTrustedPlatformReference(assembly, out var trustedPlatformReference))
+        {
+            return trustedPlatformReference;
+        }
+
+        if (TryCreateMetadataReferenceFromRawMetadata(assembly, out var metadataReference))
+        {
+            return metadataReference;
+        }
+
+        var assemblyName = assembly.GetName().Name ?? assembly.FullName ?? "<unknown>";
+        throw new FileNotFoundException($"Unable to create a Roslyn metadata reference for '{assemblyName}'.");
+    }
+
+    private static bool TryCreateMetadataReferenceFromFilePath(Assembly assembly, out MetadataReference reference)
+    {
+        var location = TryGetAssemblyFilePath(assembly);
+        if (!string.IsNullOrWhiteSpace(location))
+        {
+            reference = MetadataReference.CreateFromFile(location);
+            return true;
+        }
+
+        reference = null!;
+        return false;
+    }
+
+    private static string? GetAssemblyLocation(Assembly assembly)
+    {
+        try
+        {
+            var location = assembly.Location;
+            return string.IsNullOrWhiteSpace(location) ? null : location;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryResolveAppBaseReference(Assembly assembly, out MetadataReference reference)
+    {
+        var assemblyName = assembly.GetName().Name;
+        if (string.IsNullOrWhiteSpace(assemblyName))
+        {
+            reference = null!;
+            return false;
+        }
+
+        var probeDirectories = new[]
+        {
+            GetRoslynRuntimeDirectory(),
+            AppContext.BaseDirectory,
+            Path.Combine(AppContext.BaseDirectory, ".__override__"),
+            RuntimeEnvironment.GetRuntimeDirectory(),
+            GetAssemblyLocation(assembly) is { } assemblyLocation ? Path.GetDirectoryName(assemblyLocation) : null,
+        };
+
+        foreach (string directory in probeDirectories.OfType<string>().Where(static path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var candidatePath = Path.Combine(directory, $"{assemblyName}.dll");
+            if (File.Exists(candidatePath))
+            {
+                reference = MetadataReference.CreateFromFile(candidatePath);
+                return true;
+            }
+        }
+
+        reference = null!;
+        return false;
+    }
+
+    private static bool TryResolveTrustedPlatformReference(Assembly assembly, out MetadataReference reference)
+    {
+        var assemblyName = assembly.GetName().Name;
+        if (string.IsNullOrWhiteSpace(assemblyName))
+        {
+            reference = null!;
+            return false;
+        }
+
+        var trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (string.IsNullOrWhiteSpace(trustedPlatformAssemblies))
+        {
+            reference = null!;
+            return false;
+        }
+
+        var matchingPath = trustedPlatformAssemblies
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(path => string.Equals(
+                Path.GetFileNameWithoutExtension(path),
+                assemblyName,
+                StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(matchingPath) || !File.Exists(matchingPath))
+        {
+            reference = null!;
+            return false;
+        }
+
+        reference = MetadataReference.CreateFromFile(matchingPath);
+        return true;
+    }
+
+    private static unsafe bool TryCreateMetadataReferenceFromRawMetadata(Assembly assembly, out MetadataReference reference)
+    {
+        if (!System.Reflection.Metadata.AssemblyExtensions.TryGetRawMetadata(assembly, out var metadataBlob, out var metadataLength) ||
+            metadataBlob == null ||
+            metadataLength <= 0)
+        {
+            reference = null!;
+            return false;
+        }
+
+        var filePath = GetAssemblyLocation(assembly);
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        {
+            filePath = null;
+        }
+
+        var moduleMetadata = ModuleMetadata.CreateFromMetadata((nint)metadataBlob, metadataLength);
+        var assemblyMetadata = AssemblyMetadata.Create(moduleMetadata);
+        reference = assemblyMetadata.GetReference(
+            documentation: null,
+            aliases: ImmutableArray<string>.Empty,
+            embedInteropTypes: false,
+            filePath: filePath,
+            display: filePath);
+        return true;
+    }
+
+    private static bool ShouldReportReferenceDiagnostics(Exception exception)
+    {
+        return exception is FileNotFoundException &&
+               (exception.Message.Contains("System.Private.CoreLib", StringComparison.OrdinalIgnoreCase) ||
+                (exception as FileNotFoundException)?.FileName?.Contains("System.Private.CoreLib", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    private static string BuildReferenceDiagnostics()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Roslyn reference diagnostics:");
+
+        string runtimeDirectory;
+        try
+        {
+            runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory();
+        }
+        catch (Exception exception)
+        {
+            runtimeDirectory = $"<unavailable: {exception.GetType().Name}>";
+        }
+
+        builder.AppendLine($"  AppContext.BaseDirectory: {AppContext.BaseDirectory}");
+        builder.AppendLine($"  RuntimeDirectory: {runtimeDirectory}");
+        string? roslynRuntimeDirectory = GetRoslynRuntimeDirectory();
+        builder.AppendLine($"  RoslynRuntimeDirectory: {roslynRuntimeDirectory ?? "<unset>"}");
+
+        var trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        builder.AppendLine($"  TrustedPlatformAssemblies available: {!string.IsNullOrWhiteSpace(trustedPlatformAssemblies)}");
+
+        foreach (var assembly in GetReferenceAssemblies())
+        {
+            string name = assembly.GetName().Name ?? assembly.FullName ?? "<unknown>";
+            string? location = GetAssemblyLocation(assembly);
+            string? resolvedFilePath = TryGetAssemblyFilePath(assembly);
+            string appBaseCandidate = Path.Combine(AppContext.BaseDirectory, $"{name}.dll");
+            string runtimeCandidate = string.IsNullOrWhiteSpace(runtimeDirectory) || runtimeDirectory.StartsWith('<')
+                ? string.Empty
+                : Path.Combine(runtimeDirectory!, $"{name}.dll");
+            string roslynRuntimeCandidate = string.IsNullOrWhiteSpace(roslynRuntimeDirectory)
+                ? string.Empty
+                : Path.Combine(roslynRuntimeDirectory, $"{name}.dll");
+
+            builder.AppendLine($"  {name}:");
+            builder.AppendLine($"    Assembly.Location: {location ?? "<null>"}");
+            builder.AppendLine($"    Location exists: {!string.IsNullOrWhiteSpace(location) && File.Exists(location)}");
+            builder.AppendLine($"    Resolved reference path: {resolvedFilePath ?? "<none>"}");
+            builder.AppendLine($"    App base candidate: {appBaseCandidate} (exists: {File.Exists(appBaseCandidate)})");
+            if (!string.IsNullOrWhiteSpace(runtimeCandidate))
+            {
+                builder.AppendLine($"    Runtime candidate: {runtimeCandidate} (exists: {File.Exists(runtimeCandidate)})");
+            }
+            if (!string.IsNullOrWhiteSpace(roslynRuntimeCandidate))
+            {
+                builder.AppendLine($"    Roslyn runtime candidate: {roslynRuntimeCandidate} (exists: {File.Exists(roslynRuntimeCandidate)})");
+            }
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private sealed record ScriptRuntimeConfiguration(
+        ScriptOptions Options,
+        IReadOnlyList<Assembly> ReferenceAssemblies);
 
     #endregion
 }

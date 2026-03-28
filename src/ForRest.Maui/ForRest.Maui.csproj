@@ -25,6 +25,16 @@
 		<AndroidPackageFormats Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidPackageFormats)' == ''">apk;aab</AndroidPackageFormats>
 		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">false</PublishTrimmed>
 		<RunAOTCompilation Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">false</RunAOTCompilation>
+		<ForRestAndroidDevKeystorePath Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(ForRestAndroidDevKeystorePath)' == ''">$(MSBuildProjectDirectory)\..\..\build\android\for-rest-dev.keystore</ForRestAndroidDevKeystorePath>
+		<ForRestAndroidSigningKeyAlias Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(ForRestAndroidSigningKeyAlias)' == ''">for-rest-dev</ForRestAndroidSigningKeyAlias>
+		<ForRestAndroidSigningKeyPass Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(ForRestAndroidSigningKeyPass)' == ''">for-rest-dev</ForRestAndroidSigningKeyPass>
+		<ForRestAndroidSigningStorePass Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(ForRestAndroidSigningStorePass)' == ''">for-rest-dev</ForRestAndroidSigningStorePass>
+		<AndroidKeyStore Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidKeyStore)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">true</AndroidKeyStore>
+		<AndroidSigningKeyStore Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidSigningKeyStore)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">$(ForRestAndroidDevKeystorePath)</AndroidSigningKeyStore>
+		<AndroidSigningKeyAlias Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidSigningKeyAlias)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">$(ForRestAndroidSigningKeyAlias)</AndroidSigningKeyAlias>
+		<AndroidSigningKeyPass Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidSigningKeyPass)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">$(ForRestAndroidSigningKeyPass)</AndroidSigningKeyPass>
+		<AndroidSigningStorePass Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidSigningStorePass)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">$(ForRestAndroidSigningStorePass)</AndroidSigningStorePass>
+		<EmbedAssembliesIntoApk Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(EmbedAssembliesIntoApk)' == '' and ('$(Configuration)' == 'Release' or '$(ContinuousIntegrationBuild)' == 'true')">true</EmbedAssembliesIntoApk>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 		<ForRestBuildDateUtc Condition="'$(ForRestBuildDateUtc)' == ''">$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</ForRestBuildDateUtc>

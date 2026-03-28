@@ -105,9 +105,9 @@ public sealed class MainPageViewModelLayoutTests
 		await viewModel.InitializeAsync();
 
 		Assert.AreEqual(1, executionService.CompileCallCount);
-		Assert.AreEqual("Request document unavailable during startup.", viewModel.ExecutionStatus);
+		Assert.AreEqual("Request document unavailable.", viewModel.ExecutionStatus);
 		StringAssert.Contains(viewModel.DebugOutputText, "compile boom");
-		Assert.AreEqual("Startup recovery", viewModel.EditorDebugStateText);
+		Assert.AreEqual("Metadata recovery", viewModel.EditorDebugStateText);
 	}
 
 	[TestMethod]

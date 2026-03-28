@@ -39,12 +39,11 @@ jobs:
           $fileVersion = $now.ToString('yyyy.M.d') + '.0'
           $buildTimestampUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
+          $buildConfiguration = 'Release'
           if ('${{ github.ref_name }}' -eq 'master') {
-            $buildConfiguration = 'Release'
             $versionLabel = $dateLabel
           }
           else {
-            $buildConfiguration = 'Debug'
             $versionLabel = "$dateLabel-beta"
           }
 
@@ -99,8 +98,15 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
+          $repoKeystorePath = Join-Path $env:GITHUB_WORKSPACE 'build\android\for-rest-dev.keystore'
           if ([string]::IsNullOrWhiteSpace($env:ANDROID_KEYSTORE_BASE64)) {
-            "has_keystore=false" >> $env:GITHUB_OUTPUT
+            if (Test-Path $repoKeystorePath) {
+              "has_keystore=true" >> $env:GITHUB_OUTPUT
+              "keystore_path=$repoKeystorePath" >> $env:GITHUB_OUTPUT
+            }
+            else {
+              "has_keystore=false" >> $env:GITHUB_OUTPUT
+            }
             exit 0
           }
 
@@ -116,6 +122,9 @@ jobs:
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
+          $signingKeyAlias = if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_KEY_ALIAS)) { 'for-rest-dev' } else { $env:ANDROID_SIGNING_KEY_ALIAS }
+          $signingKeyPassword = if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_KEY_PASSWORD)) { 'for-rest-dev' } else { $env:ANDROID_SIGNING_KEY_PASSWORD }
+          $signingStorePassword = if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_STORE_PASSWORD)) { 'for-rest-dev' } else { $env:ANDROID_SIGNING_STORE_PASSWORD }
           $publishArgs = @(
             'publish',
             'src/ForRest.Maui/ForRest.Maui.csproj',
@@ -123,6 +132,7 @@ jobs:
             '-f', $env:ANDROID_TFM,
             '-p:ContinuousIntegrationBuild=true',
             '-p:AndroidPackageFormats=apk%3Baab',
+            '-p:EmbedAssembliesIntoApk=true',
             '-p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }}',
             '-p:ApplicationVersion=${{ needs.prepare.outputs.app_version }}',
             '-p:Version=${{ needs.prepare.outputs.version_label }}',
@@ -136,9 +146,9 @@ jobs:
             $publishArgs += @(
               '-p:AndroidKeyStore=true',
               '-p:AndroidSigningKeyStore=${{ steps.signing.outputs.keystore_path }}',
-              '-p:AndroidSigningKeyAlias=' + $env:ANDROID_SIGNING_KEY_ALIAS,
-              '-p:AndroidSigningKeyPass=' + $env:ANDROID_SIGNING_KEY_PASSWORD,
-              '-p:AndroidSigningStorePass=' + $env:ANDROID_SIGNING_STORE_PASSWORD
+              '-p:AndroidSigningKeyAlias=' + $signingKeyAlias,
+              '-p:AndroidSigningKeyPass=' + $signingKeyPassword,
+              '-p:AndroidSigningStorePass=' + $signingStorePassword
             )
           }
 

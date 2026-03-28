@@ -1,0 +1,46 @@
+using System;
+using ForRest.Maui.Services;
+using ForRest.Maui.ViewModels;
+
+namespace ForRest.Maui.Tests;
+
+[TestClass]
+public sealed class ResponsePaneCopyFormatterTests
+{
+	[TestMethod]
+	public void BuildHeadersText_formats_headers_as_tabular_text()
+	{
+		NameValueRowViewModel[] rows =
+		[
+			new("Content-Type", "application/json", "response"),
+			new("X-Trace", "line1\r\nline2", "response")
+		];
+
+		string text = ResponsePaneCopyFormatter.BuildHeadersText(rows);
+
+		Assert.AreEqual(
+			$"Header\tValue{Environment.NewLine}Content-Type\tapplication/json{Environment.NewLine}X-Trace\tline1\\nline2",
+			text);
+	}
+
+	[TestMethod]
+	public void BuildStashText_flattens_rows_into_tsv()
+	{
+		StashColumnViewModel[] columns =
+		[
+			new("Index"),
+			new("Token")
+		];
+		StashRowViewModel[] rows =
+		[
+			new([new StashCellViewModel("0"), new StashCellViewModel("abc\t123")]),
+			new([new StashCellViewModel("1"), new StashCellViewModel("line1\nline2")])
+		];
+
+		string text = ResponsePaneCopyFormatter.BuildStashText(columns, rows);
+
+		Assert.AreEqual(
+			$"Index\tToken{Environment.NewLine}0\tabc    123{Environment.NewLine}1\tline1\\nline2",
+			text);
+	}
+}

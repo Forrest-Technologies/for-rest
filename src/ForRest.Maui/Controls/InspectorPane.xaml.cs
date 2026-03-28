@@ -73,9 +73,34 @@ public partial class InspectorPane : ContentView
 		await ViewModel.CopyRawResponseAsync();
 	}
 
+	private async void OnCopyStashClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyStashAsync();
+	}
+
+	private async void OnCopyHeadersClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyHeadersAsync();
+	}
+
+	private async void OnCopyTraceClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyTraceAsync();
+	}
+
+	private async void OnCopyDebugClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyDebugOutputAsync();
+	}
+
 	private async void OnExportStashClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.ExportStashCsvAsync();
+	}
+
+	private void OnInlineCopyCompleted(object? sender, CopyableLabelCopiedEventArgs e)
+	{
+		ViewModel.ExecutionStatus = e.Message;
 	}
 
 	private async void OnResponseVarCopyRequested(object? sender, MonacoResponseVarRequestEventArgs e)

@@ -9,6 +9,7 @@ using ForRest.Models;
 using ForRest.Repositories;
 using ForRest.Services;
 using ForRest.Scripting;
+using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
@@ -101,6 +102,8 @@ public sealed class MainPageViewModel : ObservableObject
 	private Color _editorDebugAccentColor;
 	private CancellationTokenSource? _settingsSaveSource;
 	private CancellationTokenSource? _requestSaveSource;
+	private CancellationTokenSource? _requestMetadataRefreshSource;
+	private int _requestMetadataRefreshVersion;
 	private bool _suppressSettingsAutosave;
 	private bool _suppressRequestAutosave;
 	private bool _suppressDocumentSynchronization;
@@ -470,13 +473,25 @@ public sealed class MainPageViewModel : ObservableObject
 	public string ResponseBodyText
 	{
 		get => _responseBodyText;
-		set => SetProperty(ref _responseBodyText, value);
+		set
+		{
+			if (SetProperty(ref _responseBodyText, value))
+			{
+				OnPropertyChanged(nameof(CanCopyResponseBody));
+			}
+		}
 	}
 
 	public string ResponseRawText
 	{
 		get => _responseRawText;
-		set => SetProperty(ref _responseRawText, value);
+		set
+		{
+			if (SetProperty(ref _responseRawText, value))
+			{
+				OnPropertyChanged(nameof(CanCopyRawResponse));
+			}
+		}
 	}
 
 	public bool IsResponsePrettyPrintEnabled
@@ -497,7 +512,13 @@ public sealed class MainPageViewModel : ObservableObject
 	public string DebugOutputText
 	{
 		get => _debugOutputText;
-		set => SetProperty(ref _debugOutputText, value);
+		set
+		{
+			if (SetProperty(ref _debugOutputText, value))
+			{
+				OnPropertyChanged(nameof(CanCopyDebugOutput));
+			}
+		}
 	}
 
 	public string EditorThemeKey
@@ -845,6 +866,18 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool ShowStashEmptyState => !HasStashData;
 
+	public bool CanCopyResponseBody => !string.IsNullOrWhiteSpace(ResponseBodyText);
+
+	public bool CanCopyRawResponse => !string.IsNullOrWhiteSpace(ResponseRawText);
+
+	public bool CanCopyDebugOutput => !string.IsNullOrWhiteSpace(DebugOutputText);
+
+	public bool CanCopyHeaders => ResponseHeaderRows.Count > 0;
+
+	public bool CanCopyTrace => TraceEntries.Count > 0;
+
+	public bool CanCopyStash => HasStashData;
+
 	public bool CanExportStashCsv => HasStashData;
 
 	public string StashEmptyStateText => "No stash rows were captured for the current run. Flow code must execute stash writes before the run ends; lines skipped by break, continue, or return do not contribute rows.";
@@ -1007,6 +1040,7 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
 			}
+			OnPropertyChanged(nameof(CanCopyHeaders));
 
 			ApplyStashTable(latestRun?.Stash ?? outcome.Execution?.Stash ?? new());
 
@@ -1024,6 +1058,7 @@ public sealed class MainPageViewModel : ObservableObject
 				string summary = $"{outcome.Execution.Tests.Count(static item => item.State == TestOutcomeState.Passed)}/{outcome.Execution.Tests.Count} tests passed";
 				TraceEntries.Add(new TraceEntryViewModel("tests", summary, DateTime.Now.ToString("T"), outcome.Execution.Tests.All(static item => item.State == TestOutcomeState.Passed) ? _successColor : _dangerColor));
 			}
+			OnPropertyChanged(nameof(CanCopyTrace));
 
 			OutputMetrics.Clear();
 			OutputMetrics.Add(new OutputMetricViewModel("Status", ResponseState, ResponseState.StartsWith("2", StringComparison.Ordinal) ? _successColor : _dangerColor));
@@ -1054,6 +1089,7 @@ public sealed class MainPageViewModel : ObservableObject
 			ResponseRawText = string.Empty;
 			DebugOutputText = exception.ToString();
 			ResponseHeaderRows.Clear();
+			OnPropertyChanged(nameof(CanCopyHeaders));
 			ClearStashTable();
 			OutputMetrics.Clear();
 			OutputMetrics.Add(new OutputMetricViewModel("Status", "Failed", _dangerColor));
@@ -1062,6 +1098,7 @@ public sealed class MainPageViewModel : ObservableObject
 			OutputMetrics.Add(new OutputMetricViewModel("Type", "n/a", _methodNeutral));
 			TraceEntries.Clear();
 			TraceEntries.Add(new TraceEntryViewModel("error", exception.Message, DateTime.Now.ToString("T"), _dangerColor));
+			OnPropertyChanged(nameof(CanCopyTrace));
 			OnPropertyChanged(nameof(ResponseTimeStatus));
 			OnPropertyChanged(nameof(ResponseSizeStatus));
 			FocusRightPaneTab("debug");
@@ -1576,7 +1613,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public async Task CopyResponseBodyAsync()
 	{
-		if (string.IsNullOrWhiteSpace(ResponseBodyText))
+		if (!CanCopyResponseBody)
 		{
 			ExecutionStatus = "No response body available to copy.";
 			return;
@@ -1588,7 +1625,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public async Task CopyRawResponseAsync()
 	{
-		if (string.IsNullOrWhiteSpace(ResponseRawText))
+		if (!CanCopyRawResponse)
 		{
 			ExecutionStatus = "No raw exchange available to copy.";
 			return;
@@ -1596,6 +1633,57 @@ public sealed class MainPageViewModel : ObservableObject
 
 		await Clipboard.Default.SetTextAsync(ResponseRawText);
 		ExecutionStatus = "Copied raw exchange.";
+	}
+
+	public async Task CopyHeadersAsync()
+	{
+		if (!CanCopyHeaders)
+		{
+			ExecutionStatus = "No response headers available to copy.";
+			return;
+		}
+
+		string text = ResponsePaneCopyFormatter.BuildHeadersText(ResponseHeaderRows);
+		await Clipboard.Default.SetTextAsync(text);
+		ExecutionStatus = "Copied response headers.";
+	}
+
+	public async Task CopyTraceAsync()
+	{
+		if (!CanCopyTrace)
+		{
+			ExecutionStatus = "No trace entries available to copy.";
+			return;
+		}
+
+		string text = ResponsePaneCopyFormatter.BuildTraceText(TraceEntries);
+		await Clipboard.Default.SetTextAsync(text);
+		ExecutionStatus = "Copied execution trace.";
+	}
+
+	public async Task CopyDebugOutputAsync()
+	{
+		if (!CanCopyDebugOutput)
+		{
+			ExecutionStatus = "No debug output available to copy.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(DebugOutputText);
+		ExecutionStatus = "Copied debug output.";
+	}
+
+	public async Task CopyStashAsync()
+	{
+		if (!CanCopyStash)
+		{
+			ExecutionStatus = "No stash data available to copy.";
+			return;
+		}
+
+		string text = ResponsePaneCopyFormatter.BuildStashText(StashColumns, StashRows);
+		await Clipboard.Default.SetTextAsync(text);
+		ExecutionStatus = "Copied stash table.";
 	}
 
 	public async Task ExportStashCsvAsync()
@@ -1697,6 +1785,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		OnPropertyChanged(nameof(HasStashData));
 		OnPropertyChanged(nameof(ShowStashEmptyState));
+		OnPropertyChanged(nameof(CanCopyStash));
 		OnPropertyChanged(nameof(CanExportStashCsv));
 	}
 
@@ -2124,6 +2213,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ResponseBodyText = string.Empty;
 		ResponseRawText = string.Empty;
 		ResponseHeaderRows.Clear();
+		OnPropertyChanged(nameof(CanCopyHeaders));
 		ClearStashTable();
 		OutputMetrics.Clear();
 		OutputMetrics.Add(new OutputMetricViewModel("Status", "Blocked", _dangerColor));
@@ -2132,6 +2222,7 @@ public sealed class MainPageViewModel : ObservableObject
 		OutputMetrics.Add(new OutputMetricViewModel("Type", "n/a", _methodNeutral));
 		TraceEntries.Clear();
 		TraceEntries.Add(new TraceEntryViewModel("license", ActivationStatus, DateTime.Now.ToString("T"), _dangerColor));
+		OnPropertyChanged(nameof(CanCopyTrace));
 		OnPropertyChanged(nameof(ResponseTimeStatus));
 		OnPropertyChanged(nameof(ResponseSizeStatus));
 		FocusRightPaneTab("debug");
@@ -2388,12 +2479,105 @@ public sealed class MainPageViewModel : ObservableObject
 		_requestEditorText = NormalizeLineEndings(value);
 		SyncSupportEditorsFromRequestSource();
 
-		UpdateRequestMetadataFromSource();
+		RequestMetadataRefresh();
 		MarkCurrentDocumentDirty();
 		if (!_suppressRequestAutosave)
 		{
 			ScheduleRequestAutosave();
 		}
+	}
+
+	private void RequestMetadataRefresh()
+	{
+		if (!ShouldDebounceRequestMetadataRefresh())
+		{
+			CancelPendingRequestMetadataRefresh();
+			UpdateRequestMetadataFromSource();
+			return;
+		}
+
+		int refreshVersion = Interlocked.Increment(ref _requestMetadataRefreshVersion);
+		string source = _requestEditorText;
+		Guid workspaceId = GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId;
+		string requestName = RequestName;
+		string workspaceName = SelectedWorkspace;
+		string environmentName = SelectedEnvironment;
+		string fallbackTarget = BuildDefaultRequestUrl(RequestLocation);
+
+		CancellationTokenSource refreshSource = new();
+		CancellationTokenSource? previousSource = Interlocked.Exchange(ref _requestMetadataRefreshSource, refreshSource);
+		previousSource?.Cancel();
+		previousSource?.Dispose();
+
+		_ = Task.Run(
+			async () =>
+			{
+				try
+				{
+					await Task.Delay(450, refreshSource.Token);
+					ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(
+						source,
+						workspaceId,
+						requestName);
+					await MainThread.InvokeOnMainThreadAsync(
+						() =>
+						{
+							if (refreshSource.IsCancellationRequested ||
+							    refreshVersion != Volatile.Read(ref _requestMetadataRefreshVersion) ||
+							    !string.Equals(_requestEditorText, source, StringComparison.Ordinal))
+							{
+								return;
+							}
+
+							ApplyRequestMetadataCompilation(
+								compilation,
+								source,
+								workspaceName,
+								environmentName,
+								requestName,
+								fallbackTarget);
+						});
+				}
+				catch (OperationCanceledException)
+				{
+				}
+				catch (Exception exception)
+				{
+					await MainThread.InvokeOnMainThreadAsync(
+						() =>
+						{
+							if (refreshSource.IsCancellationRequested ||
+							    refreshVersion != Volatile.Read(ref _requestMetadataRefreshVersion))
+							{
+								return;
+							}
+
+							HandleRequestMetadataFailure(exception);
+						});
+				}
+				finally
+				{
+					if (ReferenceEquals(Volatile.Read(ref _requestMetadataRefreshSource), refreshSource))
+					{
+						Interlocked.CompareExchange(ref _requestMetadataRefreshSource, null, refreshSource);
+					}
+
+					refreshSource.Dispose();
+				}
+			});
+	}
+
+	private bool ShouldDebounceRequestMetadataRefresh()
+	{
+		return OperatingSystem.IsAndroid() &&
+		       IsActiveRequestEditor;
+	}
+
+	private void CancelPendingRequestMetadataRefresh()
+	{
+		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _requestMetadataRefreshSource, null);
+		pendingSource?.Cancel();
+		pendingSource?.Dispose();
 	}
 
 	private void SyncSupportEditorsFromRequestSource()
@@ -2442,48 +2626,73 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void UpdateRequestMetadataFromSource()
 	{
+		CancelPendingRequestMetadataRefresh();
+		Interlocked.Increment(ref _requestMetadataRefreshVersion);
+
 		try
 		{
 			ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(
 				_requestEditorText,
 				GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId,
 				RequestName);
-			ApplyEditorDebugSnapshot(
-				ForRestEditorDebugSnapshotFactory.Create(
-					_requestEditorText,
-					compilation,
-					SelectedWorkspace,
-					SelectedEnvironment,
-					RequestName,
-					BuildDefaultRequestUrl(RequestLocation)));
-
-			if (!compilation.Succeeded || compilation.Payload is null)
-			{
-				ExecutionStatus = compilation.Diagnostics.Count == 0
-					? "Editing request document"
-					: string.Join("  ", compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
-				RequestTarget = BuildDefaultRequestUrl(RequestLocation);
-				return;
-			}
-
-			RequestName = compilation.Payload.Request.Name;
-			SelectedMethod = compilation.Payload.Request.Method.ToString().ToUpperInvariant();
-			RequestTarget = compilation.Payload.Request.UrlTemplate;
-			RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
-			ExecutionStatus = "Request document ready";
-			UpdateCurrentDocumentMetadata();
+			ApplyRequestMetadataCompilation(
+				compilation,
+				_requestEditorText,
+				SelectedWorkspace,
+				SelectedEnvironment,
+				RequestName,
+				BuildDefaultRequestUrl(RequestLocation));
 		}
 		catch (Exception exception)
 		{
-			RequestTarget = BuildDefaultRequestUrl(RequestLocation);
-			ExecutionStatus = "Request document unavailable during startup.";
-			EditorDebugStateText = "Startup recovery";
-			EditorDebugSummaryText = "Request metadata unavailable";
-			EditorDebugDetailText = "ForRest recovered from a startup-time request metadata failure.";
-			EditorDebugAccentColor = _dangerColor;
-			DebugOutputText = exception.ToString();
-			AppLaunchGuard.RecordException("Request metadata update failed.", exception);
+			HandleRequestMetadataFailure(exception);
 		}
+	}
+
+	private void ApplyRequestMetadataCompilation(
+		ForRestScriptCompilationResult compilation,
+		string source,
+		string workspaceName,
+		string environmentName,
+		string fallbackRequestName,
+		string fallbackTarget)
+	{
+		ApplyEditorDebugSnapshot(
+			ForRestEditorDebugSnapshotFactory.Create(
+				source,
+				compilation,
+				workspaceName,
+				environmentName,
+				fallbackRequestName,
+				fallbackTarget));
+
+		if (!compilation.Succeeded || compilation.Payload is null)
+		{
+			ExecutionStatus = compilation.Diagnostics.Count == 0
+				? "Editing request document"
+				: string.Join("  ", compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
+			RequestTarget = fallbackTarget;
+			return;
+		}
+
+		RequestName = compilation.Payload.Request.Name;
+		SelectedMethod = compilation.Payload.Request.Method.ToString().ToUpperInvariant();
+		RequestTarget = compilation.Payload.Request.UrlTemplate;
+		RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
+		ExecutionStatus = "Request document ready";
+		UpdateCurrentDocumentMetadata();
+	}
+
+	private void HandleRequestMetadataFailure(Exception exception)
+	{
+		RequestTarget = BuildDefaultRequestUrl(RequestLocation);
+		ExecutionStatus = "Request document unavailable.";
+		EditorDebugStateText = "Metadata recovery";
+		EditorDebugSummaryText = "Request metadata unavailable";
+		EditorDebugDetailText = "ForRest recovered from a request metadata failure.";
+		EditorDebugAccentColor = _dangerColor;
+		DebugOutputText = exception.ToString();
+		AppLaunchGuard.RecordException("Request metadata update failed.", exception);
 	}
 
 	private void MarkCurrentDocumentDirty()
@@ -2625,8 +2834,10 @@ public sealed class MainPageViewModel : ObservableObject
 			? "Request document failed to compile"
 			: diagnostics[0].Message;
 		ResponseHeaderRows.Clear();
+		OnPropertyChanged(nameof(CanCopyHeaders));
 		TraceEntries.Clear();
 		TraceEntries.Add(new TraceEntryViewModel("compile", ExecutionStatus, DateTime.Now.ToString("T"), _dangerColor));
+		OnPropertyChanged(nameof(CanCopyTrace));
 		ClearStashTable();
 		OutputMetrics.Clear();
 		OutputMetrics.Add(new OutputMetricViewModel("Status", "Compile error", _dangerColor));
@@ -3108,6 +3319,7 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
 		}
+		OnPropertyChanged(nameof(CanCopyHeaders));
 		ApplyStashTable(run.Stash);
 
 		TraceEntries.Clear();
@@ -3127,6 +3339,7 @@ public sealed class MainPageViewModel : ObservableObject
 			string summary = $"{run.Tests.Count(static item => item.State == TestOutcomeState.Passed)}/{run.Tests.Count} tests passed";
 			TraceEntries.Add(new TraceEntryViewModel("tests", summary, (run.CompletedUtc ?? run.StartedUtc).ToLocalTime().ToString("T"), run.Tests.All(static item => item.State == TestOutcomeState.Passed) ? _successColor : _dangerColor));
 		}
+		OnPropertyChanged(nameof(CanCopyTrace));
 
 		OutputMetrics.Clear();
 		OutputMetrics.Add(new OutputMetricViewModel("Status", ResponseState, response is not null && response.StatusCode is >= 200 and < 300 ? _successColor : _dangerColor));

@@ -47,6 +47,11 @@ public partial class MonacoEditorSurface : ContentView
       text-rendering: optimizeLegibility;
     }
 
+    body.android-host {
+      -webkit-font-smoothing: auto;
+      text-rendering: auto;
+    }
+
     .editable-span {
       background: var(--editable-span-bg);
       border-bottom: 1px solid var(--editable-span-border);
@@ -535,6 +540,7 @@ public partial class MonacoEditorSurface : ContentView
         pendingLanguage: "forrest",
         pendingTheme: "forrest-azure",
         pendingReadOnly: false,
+        isAndroid: /Android/i.test(navigator.userAgent || ""),
         pendingEditableRanges: [],
         pendingDiagnostics: [],
         pendingLanguageHelp: [],
@@ -547,6 +553,8 @@ public partial class MonacoEditorSurface : ContentView
         lastContextPosition: null,
         isApplyingProtectedEdit: false,
         layoutRefreshHandle: null,
+        androidFontRemeasureHandle: null,
+        textSyncHandle: null,
         topPadding: 8,
         baseBottomPadding: 24,
         scheduleLayoutRefresh: function () {
@@ -557,6 +565,39 @@ public partial class MonacoEditorSurface : ContentView
           this.layoutRefreshHandle = window.requestAnimationFrame(() => {
             this.layoutRefreshHandle = null;
             this.refreshViewportLayout();
+          });
+        },
+        scheduleTextSyncNotification: function () {
+          if (this.pendingReadOnly) {
+            return;
+          }
+
+          if (this.textSyncHandle) {
+            window.clearTimeout(this.textSyncHandle);
+          }
+
+          const delay = this.isAndroid ? 180 : 120;
+          this.textSyncHandle = window.setTimeout(() => {
+            this.textSyncHandle = null;
+            requestHostCommand("text-sync");
+          }, delay);
+        },
+        scheduleAndroidFontRemeasure: function () {
+          if (!this.isAndroid || !this.editor || !window.monaco || this.androidFontRemeasureHandle) {
+            return;
+          }
+
+          this.androidFontRemeasureHandle = window.requestAnimationFrame(() => {
+            this.androidFontRemeasureHandle = null;
+            if (!this.editor || !window.monaco) {
+              return;
+            }
+
+            if (window.monaco.editor && typeof window.monaco.editor.remeasureFonts === "function") {
+              window.monaco.editor.remeasureFonts();
+            }
+
+            this.editor.layout();
           });
         },
         refreshViewportLayout: function () {
@@ -584,6 +625,7 @@ public partial class MonacoEditorSurface : ContentView
               }
             });
             this.editor.layout();
+            this.scheduleAndroidFontRemeasure();
 
             const position = this.editor.getPosition();
             if (position) {
@@ -605,8 +647,12 @@ public partial class MonacoEditorSurface : ContentView
         },
         create: function (monaco) {
           registerLanguage(monaco);
+          if (this.isAndroid) {
+            document.body.classList.add("android-host");
+          }
+
           this.model = monaco.editor.createModel(this.pendingValue || "", this.pendingLanguage || "forrest");
-          this.editor = monaco.editor.create(document.getElementById("container"), {
+          const editorOptions = {
             model: this.model,
             theme: this.pendingTheme,
             automaticLayout: true,
@@ -651,7 +697,16 @@ public partial class MonacoEditorSurface : ContentView
               alwaysConsumeMouseWheel: false
             },
             padding: { top: 8, bottom: 24 }
-          });
+          };
+
+          if (this.isAndroid) {
+            delete editorOptions.fontFamily;
+            editorOptions.fontSize = 14;
+            editorOptions.lineHeight = 21;
+            editorOptions.letterSpacing = 0;
+          }
+
+          this.editor = monaco.editor.create(document.getElementById("container"), editorOptions);
 
           const domNode = this.editor.getDomNode();
           if (domNode) {
@@ -674,6 +729,7 @@ public partial class MonacoEditorSurface : ContentView
               return;
             }
 
+            this.scheduleTextSyncNotification();
             const position = this.editor.getPosition();
             if (!position) {
               return;
@@ -689,6 +745,16 @@ public partial class MonacoEditorSurface : ContentView
           this.editor.onDidChangeModelContent((event) => {
             this.handleModelContentChanged(event);
           });
+          if (this.isAndroid) {
+            this.scheduleAndroidFontRemeasure();
+            if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
+              document.fonts.ready
+                .then(() => this.scheduleAndroidFontRemeasure())
+                .catch(() => {});
+            } else {
+              window.setTimeout(() => this.scheduleAndroidFontRemeasure(), 120);
+            }
+          }
           this.ready = true;
           this.applyState({
             text: this.pendingValue,
@@ -827,6 +893,9 @@ public partial class MonacoEditorSurface : ContentView
         applyState: function (state) {
           const nextState = state || {};
           const shouldApplyText = !!nextState.applyText;
+          const previousLanguage = this.pendingLanguage;
+          const previousTheme = this.pendingTheme;
+          const previousReadOnly = this.pendingReadOnly;
           this.pendingShouldApplyText = shouldApplyText;
           if (shouldApplyText || !this.model) {
             this.pendingValue = typeof nextState.text === "string" ? nextState.text : "";
@@ -843,6 +912,10 @@ public partial class MonacoEditorSurface : ContentView
           this.pendingLanguageHelp = this.parseLanguageHelp(nextState);
           this.pendingEnableResponseActions = !!nextState.enableResponseActions;
           applyHostThemeChrome(this.pendingTheme);
+          const shouldRefreshLayout = shouldApplyText ||
+            previousLanguage !== this.pendingLanguage ||
+            previousTheme !== this.pendingTheme ||
+            previousReadOnly !== this.pendingReadOnly;
 
           if (this.model && window.monaco && this.model.getLanguageId() !== this.pendingLanguage) {
             window.monaco.editor.setModelLanguage(this.model, this.pendingLanguage);
@@ -861,7 +934,9 @@ public partial class MonacoEditorSurface : ContentView
               }
             } else {
               this.refreshEditableDecorations();
-              this.editor.layout();
+              if (shouldRefreshLayout) {
+                this.editor.layout();
+              }
             }
           }
 
@@ -873,7 +948,9 @@ public partial class MonacoEditorSurface : ContentView
           this.applyDiagnostics();
 
           this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
-          this.scheduleLayoutRefresh();
+          if (shouldRefreshLayout) {
+            this.scheduleLayoutRefresh();
+          }
 
           return JSON.stringify({
             ok: true,
@@ -1035,6 +1112,7 @@ public partial class MonacoEditorSurface : ContentView
 
           if (!this.isProtectedSettingsEditor()) {
             this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
+            this.scheduleTextSyncNotification();
             return;
           }
 
@@ -1047,6 +1125,7 @@ public partial class MonacoEditorSurface : ContentView
           this.normalizeThemeSelectionFromChange(event.changes);
           this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
           this.refreshEditableDecorations();
+          this.scheduleTextSyncNotification();
         },
         getValueAsBase64: function () {
           if (!this.editor) {
@@ -1369,6 +1448,13 @@ public partial class MonacoEditorSurface : ContentView
 		}
 
 		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "text-sync", StringComparison.OrdinalIgnoreCase))
+		{
+			_ = SyncEditorTextAsync();
+			return;
+		}
+
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
 		    string.Equals(uri.AbsolutePath.Trim('/'), "copy-response-var", StringComparison.OrdinalIgnoreCase) &&
 		    TryGetQueryValue(uri, "line", out int lineNumber) &&
 		    TryGetQueryValue(uri, "column", out int column))
@@ -1383,6 +1469,7 @@ public partial class MonacoEditorSurface : ContentView
 		    TryGetQueryValue(uri, "column", out int cursorColumn))
 		{
 			CursorPositionChanged?.Invoke(this, new MonacoCursorPositionChangedEventArgs(cursorLineNumber, cursorColumn));
+			return;
 		}
 	}
 
@@ -1602,6 +1689,11 @@ public partial class MonacoEditorSurface : ContentView
 			return;
 		}
 
+		if (OperatingSystem.IsAndroid())
+		{
+			return;
+		}
+
 		_syncTimer = Dispatcher.CreateTimer();
 		_syncTimer.Interval = TimeSpan.FromMilliseconds(450);
 		_syncTimer.Tick += async (_, _) => await SyncEditorTextAsync();
@@ -1753,6 +1845,17 @@ public partial class MonacoEditorSurface : ContentView
 		_androidPlatformWebView.FocusableInTouchMode = true;
 		_androidPlatformWebView.Clickable = true;
 		_androidPlatformWebView.LongClickable = true;
+		WebSettings? settings = _androidPlatformWebView.Settings;
+		if (settings is not null)
+		{
+			settings.TextZoom = 100;
+			settings.UseWideViewPort = false;
+			settings.LoadWithOverviewMode = false;
+			settings.BuiltInZoomControls = false;
+			settings.DisplayZoomControls = false;
+			settings.SetSupportZoom(false);
+		}
+
 		_androidPlatformWebView.Touch += OnAndroidWebViewTouch;
 	}
 

@@ -62,7 +62,7 @@ public sealed class ForRestEditorDebugSnapshotFactoryTests
 	}
 
 	[TestMethod]
-	public void Create_normalizes_locationless_diagnostics_for_editor_markers()
+	public void Create_keeps_locationless_diagnostics_out_of_editor_markers()
 	{
 		ForRestScriptCompilationResult compilation = new(
 			Document: null,
@@ -84,14 +84,10 @@ public sealed class ForRestEditorDebugSnapshotFactoryTests
 			"https://fallback.local");
 
 		JsonElement markers = JsonSerializer.Deserialize<JsonElement>(snapshot.DiagnosticsJson);
-		JsonElement marker = markers.EnumerateArray().First();
 
 		Assert.AreEqual(ForRestEditorDebugState.Error, snapshot.State);
 		Assert.AreEqual("Compile error", snapshot.StatusText);
-		Assert.AreEqual(1, marker.GetProperty("startLineNumber").GetInt32());
-		Assert.AreEqual(1, marker.GetProperty("startColumn").GetInt32());
-		Assert.IsTrue(marker.GetProperty("endColumn").GetInt32() < "name \"Broken\"".Length + 1);
-		Assert.AreEqual("Error", marker.GetProperty("severity").GetString());
+		Assert.AreEqual(0, markers.GetArrayLength());
 		StringAssert.Contains(snapshot.DetailText, "first at L1:C1");
 		StringAssert.Contains(snapshot.DebugOutputText, "[Error] L1:1 The request section must declare a URL.");
 	}

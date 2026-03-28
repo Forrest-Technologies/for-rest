@@ -54,7 +54,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IForRestScriptExecutionService, ForRestScriptExecutionService>();
 		builder.Services.AddSingleton<MainPageViewModel>();
 		builder.Services.AddSingleton<MainPage>();
-		builder.Services.AddSingleton<AndroidMainPage>();
+		builder.Services.AddSingleton(static _ => new AndroidMainPage());
 
 #if DEBUG
 		builder.Logging.AddDebug();

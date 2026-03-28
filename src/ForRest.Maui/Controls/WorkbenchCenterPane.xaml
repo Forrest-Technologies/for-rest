@@ -52,12 +52,14 @@
                     <Label Grid.Column="1"
                            Text="{Binding EditorDebugSummaryText}"
                            LineBreakMode="TailTruncation"
+                           MaxLines="1"
                            Style="{StaticResource SectionTitleStyle}" />
 
                     <Label Grid.Row="1"
                            Grid.ColumnSpan="2"
                            Text="{Binding EditorDebugDetailText}"
                            LineBreakMode="TailTruncation"
+                           MaxLines="1"
                            Style="{StaticResource PaneMetaStyle}" />
                 </Grid>
             </Border>
