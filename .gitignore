@@ -7,6 +7,25 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/Dotnet.gitignore
 
+# Repository-local state and secret material
+/.codex/
+/.codex-dotnet/
+/.dotnet-cli/
+/.dotnet-home/
+/.vs/
+/.local/
+/build/android/
+/config/settings.toml
+/.env
+/.env.*
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.snk
+secrets.json
+local.settings.json
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
@@ -61,3 +80,4 @@ nunit-*.xml
 *.obj
 */*.bin
 *.cache
+/.codex-tools
