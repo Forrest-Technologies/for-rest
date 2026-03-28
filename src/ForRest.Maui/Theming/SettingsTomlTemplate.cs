@@ -9,6 +9,15 @@ public sealed class SettingsTomlTemplate
 	public const string MaskedLicenseValue = "********";
 	public const string GeneratedLicenseInfoSectionHeader = "[license.info]";
 	private const string ThemeSectionHeader = "[appearance.theme]";
+	private const string AiSectionHeader = "[ai]";
+	private const string AiEnabledKeyName = "enabled";
+	private const string AiProviderKeyName = "provider";
+	private const string AiApiKeyName = "api";
+	private const string AiEndpointKeyName = "endpoint";
+	private const string AiModelKeyName = "model";
+	private const string AiDeploymentNameKeyName = "deployment_name";
+	private const string AiSecretKeyName = "api_key";
+	private const string AiSystemPromptKeyName = "system_prompt";
 	private static readonly Regex ThemeLinePattern = new(
 		@"^(?<indent>\s*)(?<key>[A-Za-z][\w-]*)\s*=\s*(?<value>[^\r\n#]*?)(?<suffix>\s*(#.*)?)$",
 		RegexOptions.Compiled);
@@ -24,7 +33,10 @@ public sealed class SettingsTomlTemplate
 				BuildLicenseLine(settings.LicenseKey),
 				string.Empty,
 				ThemeSectionHeader,
-				.. ThemeSupport.OrderedThemes.Select(theme => $"{theme.ToConfigName()} = {(theme == settings.Theme ? "true" : "false")}")
+				.. ThemeSupport.OrderedThemes.Select(theme => $"{theme.ToConfigName()} = {(theme == settings.Theme ? "true" : "false")}"),
+				string.Empty,
+				BuildAiComment(settings.Ai),
+				.. BuildAiSection(settings.Ai)
 			]);
 	}
 
@@ -131,11 +143,42 @@ public sealed class SettingsTomlTemplate
 		return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
 	}
 
+	private static string BuildAiComment(ForRestAiSettings ai)
+	{
+		return ai.Enabled
+			? "# AI settings are enabled."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, endpoint, model, and api key fields.";
+	}
+
+	private static IReadOnlyList<string> BuildAiSection(ForRestAiSettings ai)
+	{
+		List<string> lines =
+		[
+			AiSectionHeader,
+			$"{AiEnabledKeyName} = {(ai.Enabled ? "true" : "false")}"
+		];
+
+		if (!ai.Enabled && !ai.HasConfiguredValues)
+		{
+			return lines;
+		}
+
+		lines.Add($"{AiProviderKeyName} = \"{EscapeTomlString(ai.Provider)}\"");
+		lines.Add($"{AiApiKeyName} = \"{EscapeTomlString(ai.Api)}\"");
+		lines.Add($"{AiEndpointKeyName} = \"{EscapeTomlString(ai.Endpoint)}\"");
+		lines.Add($"{AiModelKeyName} = \"{EscapeTomlString(ai.Model)}\"");
+		lines.Add($"{AiDeploymentNameKeyName} = \"{EscapeTomlString(ai.DeploymentName)}\"");
+		lines.Add($"{AiSecretKeyName} = \"{EscapeTomlString(ai.ApiKey)}\"");
+		lines.Add($"{AiSystemPromptKeyName} = \"{EscapeTomlString(ai.SystemPrompt)}\"");
+		return lines;
+	}
+
 	public IReadOnlyList<EditorEditableRange> GetEditableRanges(string text)
 	{
 		List<EditorEditableRange> ranges = [];
 		string[] lines = text.Replace("\r\n", "\n").Split('\n');
 		bool inThemeSection = false;
+		bool inAiSection = false;
 
 		for (int index = 0; index < lines.Length; index++)
 		{
@@ -145,10 +188,11 @@ public sealed class SettingsTomlTemplate
 			if (trimmedLine.StartsWith('[') && trimmedLine.EndsWith(']'))
 			{
 				inThemeSection = string.Equals(trimmedLine, ThemeSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection)
+			if (!inThemeSection && !inAiSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -170,7 +214,14 @@ public sealed class SettingsTomlTemplate
 			}
 
 			string key = match.Groups["key"].Value;
-			if (!ThemeSupport.TryParseThemeName(key, out _))
+			if (inThemeSection)
+			{
+				if (!ThemeSupport.TryParseThemeName(key, out _))
+				{
+					continue;
+				}
+			}
+			else if (!IsKnownAiKey(key))
 			{
 				continue;
 			}
@@ -188,7 +239,9 @@ public sealed class SettingsTomlTemplate
 	{
 		string[] lines = text.Replace("\r\n", "\n").Split('\n');
 		bool inThemeSection = false;
+		bool inAiSection = false;
 		HashSet<ShellThemeName> seenThemes = [];
+		HashSet<string> seenAiKeys = [];
 
 		for (int index = 0; index < lines.Length; index++)
 		{
@@ -203,10 +256,11 @@ public sealed class SettingsTomlTemplate
 			if (trimmedLine.StartsWith('[') && trimmedLine.EndsWith(']'))
 			{
 				inThemeSection = string.Equals(trimmedLine, ThemeSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection)
+			if (!inThemeSection && !inAiSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -225,20 +279,77 @@ public sealed class SettingsTomlTemplate
 			}
 
 			string key = match.Groups["key"].Value;
-			if (!ThemeSupport.TryParseThemeName(key, out ShellThemeName theme))
-			{
-				return false;
-			}
-
 			string value = match.Groups["value"].Value.Trim();
-			if (!bool.TryParse(value, out _))
+
+			if (inThemeSection)
+			{
+				if (!ThemeSupport.TryParseThemeName(key, out ShellThemeName theme))
+				{
+					return false;
+				}
+
+				if (!bool.TryParse(value, out _))
+				{
+					return false;
+				}
+
+				seenThemes.Add(theme);
+				continue;
+			}
+
+			if (!IsKnownAiKey(key))
 			{
 				return false;
 			}
 
-			seenThemes.Add(theme);
+			if (string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) &&
+			    !bool.TryParse(value, out _))
+			{
+				return false;
+			}
+
+			seenAiKeys.Add(key.ToLowerInvariant());
 		}
 
-		return ThemeSupport.OrderedThemes.All(seenThemes.Contains);
+		if (!ThemeSupport.OrderedThemes.All(seenThemes.Contains))
+		{
+			return false;
+		}
+
+		if (seenAiKeys.Count == 0)
+		{
+			return true;
+		}
+
+		if (!seenAiKeys.Contains(AiEnabledKeyName))
+		{
+			return false;
+		}
+
+		bool hasAiDetails = seenAiKeys.Any(static key => !string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase));
+		if (!hasAiDetails)
+		{
+			return true;
+		}
+
+		return seenAiKeys.Contains(AiProviderKeyName) &&
+		       seenAiKeys.Contains(AiApiKeyName) &&
+		       seenAiKeys.Contains(AiEndpointKeyName) &&
+		       seenAiKeys.Contains(AiModelKeyName) &&
+		       seenAiKeys.Contains(AiDeploymentNameKeyName) &&
+		       seenAiKeys.Contains(AiSecretKeyName) &&
+		       seenAiKeys.Contains(AiSystemPromptKeyName);
+	}
+
+	private static bool IsKnownAiKey(string key)
+	{
+		return string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiProviderKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiApiKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiEndpointKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiModelKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiDeploymentNameKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiSecretKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiSystemPromptKeyName, StringComparison.OrdinalIgnoreCase);
 	}
 }

@@ -5,6 +5,7 @@ namespace ForRest.Maui.Theming;
 public sealed class ThemeConfigParser
 {
 	private const string ThemeSectionName = "appearance.theme";
+	private const string AiSectionName = "ai";
 	private static readonly Regex ThemeLinePattern = new(
 		@"^(?<key>[A-Za-z][\w-]*)\s*=\s*(?<value>[^\r\n#]*?)(\s*(#.*)?)$",
 		RegexOptions.Compiled);
@@ -17,6 +18,7 @@ public sealed class ThemeConfigParser
 		string[] rawLines = text.Replace("\r\n", "\n").Split('\n');
 		string? currentSection = null;
 		string licenseKey = string.Empty;
+		ForRestAiSettings ai = new();
 
 		for (int index = 0; index < rawLines.Length; index++)
 		{
@@ -77,6 +79,18 @@ public sealed class ThemeConfigParser
 				continue;
 			}
 
+			if (string.Equals(currentSection, AiSectionName, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryParseAiEntry(key!, value, ai, out ForRestAiSettings parsedAi, out string? aiMessage))
+				{
+					messages.Add(aiMessage ?? $"ignored setting entry '{key}'");
+				}
+				else
+				{
+					ai = parsedAi;
+				}
+			}
+
 			if (string.IsNullOrWhiteSpace(currentSection) &&
 			    string.Equals(key, SettingsTomlTemplate.LicenseKeyName, StringComparison.OrdinalIgnoreCase))
 			{
@@ -84,7 +98,7 @@ public sealed class ThemeConfigParser
 			}
 		}
 
-		return new ThemeConfigDocument(lines, entries, licenseKey, messages);
+		return new ThemeConfigDocument(lines, entries, licenseKey, ai, messages);
 	}
 
 	private static bool TryParseEntry(string line, out string? key, out string? value, out string? message)
@@ -103,6 +117,54 @@ public sealed class ThemeConfigParser
 		key = match.Groups["key"].Value.Trim();
 		value = match.Groups["value"].Value.Trim();
 		return true;
+	}
+
+	private static bool TryParseAiEntry(string key, string? rawValue, ForRestAiSettings current, out ForRestAiSettings parsed, out string? message)
+	{
+		parsed = current;
+		message = null;
+		string value = ParseScalarValue(rawValue);
+
+		switch (key.Trim().ToLowerInvariant())
+		{
+			case "enabled":
+				if (!bool.TryParse(value, out bool enabled))
+				{
+					return SetMessage("ignored invalid value for 'enabled'", out message);
+				}
+
+				parsed = current with { Enabled = enabled };
+				return true;
+			case "provider":
+				parsed = current with { Provider = value };
+				return true;
+			case "api":
+				parsed = current with { Api = value };
+				return true;
+			case "endpoint":
+				parsed = current with { Endpoint = value };
+				return true;
+			case "model":
+				parsed = current with { Model = value };
+				return true;
+			case "deployment_name":
+				parsed = current with { DeploymentName = value };
+				return true;
+			case "api_key":
+				parsed = current with { ApiKey = value };
+				return true;
+			case "system_prompt":
+				parsed = current with { SystemPrompt = value };
+				return true;
+			default:
+				return SetMessage($"ignored setting entry '{key}'", out message);
+		}
+	}
+
+	private static bool SetMessage(string value, out string? message)
+	{
+		message = value;
+		return false;
 	}
 
 	private static string ParseScalarValue(string? rawValue)

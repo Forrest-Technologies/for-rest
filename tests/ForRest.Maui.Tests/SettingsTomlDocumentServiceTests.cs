@@ -36,7 +36,42 @@ public sealed class SettingsTomlDocumentServiceTests
 	}
 
 	[TestMethod]
-	public void SaveRawText_preserves_hidden_license_when_mask_is_unchanged()
+	public void LoadOrCreate_masks_existing_ai_api_key_value()
+	{
+		using TestConfigScope scope = new();
+		SettingsTomlDocumentService service = CreateService();
+		File.WriteAllText(
+			scope.ConfigFilePath,
+			"""
+			license = "super-secret-license"
+
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = false
+			amber = false
+
+			[ai]
+			enabled = true
+			provider = "openai"
+			api = "responses"
+			endpoint = "https://api.example.test"
+			model = "gpt-4o-mini"
+			deployment_name = "gpt-4o-mini"
+			api_key = "secret-api-key"
+			system_prompt = "Be brief."
+			""");
+
+		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
+
+		Assert.IsFalse(editorText.Contains("secret-api-key", StringComparison.Ordinal));
+		StringAssert.Contains(editorText, $"api_key = \"{SettingsTomlTemplate.MaskedLicenseValue}\"");
+		StringAssert.Contains(editorText, "enabled = true");
+	}
+
+	[TestMethod]
+	public void LoadOrCreate_adds_ai_section_to_legacy_settings()
 	{
 		using TestConfigScope scope = new();
 		SettingsTomlDocumentService service = CreateService();
@@ -54,11 +89,52 @@ public sealed class SettingsTomlDocumentServiceTests
 			""");
 
 		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
-		service.SaveRawText(editorText.Replace("azure = true", "azure = false", StringComparison.Ordinal).Replace("light = false", "light = true", StringComparison.Ordinal));
+
+		StringAssert.Contains(editorText, "[ai]");
+		StringAssert.Contains(editorText, "enabled = false");
+		Assert.IsFalse(editorText.Contains("api_key = ", StringComparison.Ordinal));
+	}
+
+	[TestMethod]
+	public void SaveRawText_preserves_hidden_license_when_mask_is_unchanged()
+	{
+		using TestConfigScope scope = new();
+		SettingsTomlDocumentService service = CreateService();
+		File.WriteAllText(
+			scope.ConfigFilePath,
+			"""
+			license = "super-secret-license"
+
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = false
+			amber = false
+
+			[ai]
+			enabled = true
+			provider = "openai"
+			api = "responses"
+			endpoint = "https://api.example.test"
+			model = "gpt-4o-mini"
+			deployment_name = "gpt-4o-mini"
+			api_key = "secret-api-key"
+			system_prompt = "Be brief."
+			""");
+
+		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
+		string edited = editorText
+			.Replace("azure = true", "azure = false", StringComparison.Ordinal)
+			.Replace("light = false", "light = true", StringComparison.Ordinal)
+			.Replace("model = \"gpt-4o-mini\"", "model = \"gpt-4.1-mini\"", StringComparison.Ordinal);
+		service.SaveRawText(edited);
 
 		string rawText = File.ReadAllText(scope.ConfigFilePath);
 		StringAssert.Contains(rawText, "license = \"super-secret-license\"");
+		StringAssert.Contains(rawText, "api_key = \"secret-api-key\"");
 		StringAssert.Contains(rawText, "light = true");
+		StringAssert.Contains(rawText, "model = \"gpt-4.1-mini\"");
 	}
 
 	[TestMethod]
@@ -77,6 +153,16 @@ public sealed class SettingsTomlDocumentServiceTests
 			dark = false
 			black = false
 			amber = false
+
+			[ai]
+			enabled = true
+			provider = "openai"
+			api = "responses"
+			endpoint = "https://api.example.test"
+			model = "gpt-4o-mini"
+			deployment_name = "gpt-4o-mini"
+			api_key = "secret-api-key"
+			system_prompt = "Be brief."
 			""");
 
 		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
@@ -84,6 +170,42 @@ public sealed class SettingsTomlDocumentServiceTests
 
 		string rawText = File.ReadAllText(scope.ConfigFilePath);
 		StringAssert.Contains(rawText, "license = \"replacement-license\"");
+		Assert.IsFalse(rawText.Contains(SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal));
+	}
+
+	[TestMethod]
+	public void SaveRawText_replaces_ai_api_key_when_user_edits_value()
+	{
+		using TestConfigScope scope = new();
+		SettingsTomlDocumentService service = CreateService();
+		File.WriteAllText(
+			scope.ConfigFilePath,
+			"""
+			license = ""
+
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = false
+			amber = false
+
+			[ai]
+			enabled = true
+			provider = "openai"
+			api = "responses"
+			endpoint = "https://api.example.test"
+			model = "gpt-4o-mini"
+			deployment_name = "gpt-4o-mini"
+			api_key = "secret-api-key"
+			system_prompt = "Be brief."
+			""");
+
+		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
+		service.SaveRawText(editorText.Replace(SettingsTomlTemplate.MaskedLicenseValue, "replacement-api-key", StringComparison.Ordinal));
+
+		string rawText = File.ReadAllText(scope.ConfigFilePath);
+		StringAssert.Contains(rawText, "api_key = \"replacement-api-key\"");
 		Assert.IsFalse(rawText.Contains(SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal));
 	}
 

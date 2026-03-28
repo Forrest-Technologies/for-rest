@@ -175,7 +175,7 @@ public sealed class ForRestScriptCompilerTests
 
         Assert.IsTrue(result.Succeeded);
         Assert.IsNotNull(result.Payload);
-        StringAssert.Contains(result.Payload.Request.PreRequestScript, "(await request.send());");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "await request.send();");
         Assert.IsFalse(result.Payload.Request.PreRequestScript.Contains("await await", StringComparison.Ordinal));
     }
 

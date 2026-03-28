@@ -11,9 +11,33 @@ public enum ShellThemeName
 	Amber
 }
 
+public sealed record ForRestAiSettings(
+	bool Enabled = false,
+	string Provider = "openai",
+	string Api = "responses",
+	string Endpoint = "",
+	string Model = "",
+	string DeploymentName = "",
+	string ApiKey = "",
+	string SystemPrompt = "")
+{
+	public bool HasConfiguredValues =>
+		Enabled ||
+		!string.Equals(Provider, "openai", StringComparison.OrdinalIgnoreCase) ||
+		!string.Equals(Api, "responses", StringComparison.OrdinalIgnoreCase) ||
+		!string.IsNullOrWhiteSpace(Endpoint) ||
+		!string.IsNullOrWhiteSpace(Model) ||
+		!string.IsNullOrWhiteSpace(DeploymentName) ||
+		!string.IsNullOrWhiteSpace(ApiKey) ||
+		!string.IsNullOrWhiteSpace(SystemPrompt);
+}
+
 public sealed record ForRestSettings(
 	ShellThemeName Theme,
-	string LicenseKey = "");
+	string LicenseKey = "")
+{
+	public ForRestAiSettings Ai { get; init; } = new();
+}
 
 public sealed record SettingsTomlLine(
 	int LineNumber,
@@ -36,6 +60,7 @@ public sealed record ThemeConfigDocument(
 	IReadOnlyList<SettingsTomlLine> Lines,
 	IReadOnlyList<ThemeConfigEntry> Entries,
 	string LicenseKey,
+	ForRestAiSettings Ai,
 	IReadOnlyList<string> Messages);
 
 public sealed record ThemeNormalizationResult(

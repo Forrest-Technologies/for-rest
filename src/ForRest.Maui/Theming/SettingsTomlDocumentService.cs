@@ -35,7 +35,8 @@ public sealed class SettingsTomlDocumentService
 		string renderedTemplate = _settingsTomlTemplate.Build(settings);
 		_themeConfigStore.EnsureConfigFile(renderedTemplate);
 		string rawText = _themeConfigStore.ReadAllText();
-		ThemeNormalizationResult normalized = _themeConfigNormalizer.Normalize(_themeConfigParser.Parse(rawText));
+		ThemeConfigDocument parsedDocument = _themeConfigParser.Parse(rawText);
+		ThemeNormalizationResult normalized = _themeConfigNormalizer.Normalize(parsedDocument);
 		if (!string.Equals(
 			    ThemeConfigStore.NormalizeLineEndings(rawText).Trim(),
 			    ThemeConfigStore.NormalizeLineEndings(normalized.NormalizedText).Trim(),
@@ -44,7 +45,7 @@ public sealed class SettingsTomlDocumentService
 			_themeConfigStore.WriteAllText(normalized.NormalizedText);
 		}
 
-		return BuildEditorProjection(normalized.NormalizedText, normalized.Settings.LicenseKey);
+		return BuildEditorProjection(parsedDocument, normalized.Settings);
 	}
 
 	public IReadOnlyList<EditorEditableRange> GetEditableRanges(string text)
@@ -69,26 +70,39 @@ public sealed class SettingsTomlDocumentService
 		string resolvedLicense = string.Equals(editedLicense, SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal)
 			? currentNormalized.Settings.LicenseKey
 			: editedLicense;
+
+		ForRestAiSettings editedAi = editorNormalized.Settings.Ai;
+		ForRestAiSettings resolvedAi = editedAi with
+		{
+			ApiKey = string.Equals(editedAi.ApiKey, SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal)
+				? currentNormalized.Settings.Ai.ApiKey
+				: editedAi.ApiKey
+		};
+
 		ForRestSettings nextSettings = editorNormalized.Settings with
 		{
-			LicenseKey = resolvedLicense
+			LicenseKey = resolvedLicense,
+			Ai = resolvedAi
 		};
 
 		string nextRawText = _themeConfigNormalizer.Render(currentDocument, nextSettings);
 		_themeConfigStore.WriteAllText(nextRawText);
 	}
 
-	private string BuildEditorProjection(string rawText, string licenseKey)
+	private string BuildEditorProjection(ThemeConfigDocument document, ForRestSettings settings)
 	{
-		ThemeConfigDocument parsedDocument = _themeConfigParser.Parse(rawText);
-		ForRestSettings normalizedSettings = _themeConfigNormalizer.Normalize(parsedDocument).Settings;
-		ForRestSettings projectedSettings = normalizedSettings with
+		ForRestSettings projectedSettings = settings with
 		{
-			LicenseKey = string.IsNullOrWhiteSpace(licenseKey) ? string.Empty : SettingsTomlTemplate.MaskedLicenseValue
+			LicenseKey = string.IsNullOrWhiteSpace(settings.LicenseKey) ? string.Empty : SettingsTomlTemplate.MaskedLicenseValue,
+			Ai = settings.Ai with
+			{
+				ApiKey = string.IsNullOrWhiteSpace(settings.Ai.ApiKey) ? string.Empty : SettingsTomlTemplate.MaskedLicenseValue
+			}
 		};
-		string editorText = _themeConfigNormalizer.Render(parsedDocument, projectedSettings);
+
+		string editorText = _themeConfigNormalizer.Render(document, projectedSettings);
 		LicenseValidationResult validation = _licenseValidationService.Evaluate(
-			normalizedSettings.LicenseKey,
+			settings.LicenseKey,
 			_buildMetadataProvider.GetBuildDateUtc(),
 			DateTimeOffset.UtcNow);
 		return string.Join(

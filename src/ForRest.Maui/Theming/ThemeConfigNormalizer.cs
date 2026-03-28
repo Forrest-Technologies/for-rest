@@ -33,7 +33,11 @@ public sealed class ThemeConfigNormalizer
 			messages.Add("settings normalized");
 		}
 
-		ForRestSettings settings = new(selectedTheme, document.LicenseKey);
+		ForRestSettings settings = new(selectedTheme, document.LicenseKey)
+		{
+			Ai = document.Ai
+		};
+
 		string normalizedText = Render(document, settings);
 
 		return new ThemeNormalizationResult(settings, normalizedText, messages);
@@ -48,8 +52,10 @@ public sealed class ThemeConfigNormalizer
 
 		List<string> output = [];
 		bool insertedThemeSection = false;
+		bool insertedAiSection = false;
 		bool insertedLicense = false;
 		bool skippingThemeSection = false;
+		bool skippingAiSection = false;
 		int licenseInsertIndex = GetLicenseInsertionIndex(document.Lines);
 
 		foreach (SettingsTomlLine line in document.Lines)
@@ -59,6 +65,11 @@ public sealed class ThemeConfigNormalizer
 				if (skippingThemeSection)
 				{
 					skippingThemeSection = false;
+				}
+
+				if (skippingAiSection)
+				{
+					skippingAiSection = false;
 				}
 
 				if (string.Equals(line.SectionName, "appearance.theme", StringComparison.OrdinalIgnoreCase))
@@ -72,9 +83,21 @@ public sealed class ThemeConfigNormalizer
 					skippingThemeSection = true;
 					continue;
 				}
+
+				if (string.Equals(line.SectionName, "ai", StringComparison.OrdinalIgnoreCase))
+				{
+					if (!insertedAiSection)
+					{
+						AppendAiSection(output, settings.Ai);
+						insertedAiSection = true;
+					}
+
+					skippingAiSection = true;
+					continue;
+				}
 			}
 
-			if (skippingThemeSection)
+			if (skippingThemeSection || skippingAiSection)
 			{
 				continue;
 			}
@@ -116,6 +139,16 @@ public sealed class ThemeConfigNormalizer
 			AppendThemeSection(output, settings.Theme);
 		}
 
+		if (!insertedAiSection)
+		{
+			if (output.Count > 0 && !string.IsNullOrWhiteSpace(output[^1]))
+			{
+				output.Add(string.Empty);
+			}
+
+			AppendAiSection(output, settings.Ai);
+		}
+
 		return string.Join(Environment.NewLine, TrimTrailingBlankLines(output));
 	}
 
@@ -138,16 +171,32 @@ public sealed class ThemeConfigNormalizer
 
 	private static void AppendThemeSection(List<string> output, ShellThemeName selectedTheme)
 	{
-		if (output.Count > 0 && !string.IsNullOrWhiteSpace(output[^1]))
-		{
-			output.Add(string.Empty);
-		}
-
 		output.Add("[appearance.theme]");
 		foreach (ShellThemeName theme in ThemeSupport.OrderedThemes)
 		{
 			output.Add($"{theme.ToConfigName()} = {(theme == selectedTheme ? "true" : "false")}");
 		}
+	}
+
+	private static void AppendAiSection(List<string> output, ForRestAiSettings ai)
+	{
+		output.Add(ai.Enabled
+			? "# AI settings are enabled."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, endpoint, model, and api key fields.");
+		output.Add("[ai]");
+		output.Add($"enabled = {(ai.Enabled ? "true" : "false")}");
+		if (!ai.Enabled && !ai.HasConfiguredValues)
+		{
+			return;
+		}
+
+		output.Add($"provider = \"{SettingsTomlTemplate.EscapeTomlString(ai.Provider)}\"");
+		output.Add($"api = \"{SettingsTomlTemplate.EscapeTomlString(ai.Api)}\"");
+		output.Add($"endpoint = \"{SettingsTomlTemplate.EscapeTomlString(ai.Endpoint)}\"");
+		output.Add($"model = \"{SettingsTomlTemplate.EscapeTomlString(ai.Model)}\"");
+		output.Add($"deployment_name = \"{SettingsTomlTemplate.EscapeTomlString(ai.DeploymentName)}\"");
+		output.Add($"api_key = \"{SettingsTomlTemplate.EscapeTomlString(ai.ApiKey)}\"");
+		output.Add($"system_prompt = \"{SettingsTomlTemplate.EscapeTomlString(ai.SystemPrompt)}\"");
 	}
 
 	private static IReadOnlyList<string> TrimTrailingBlankLines(List<string> output)

@@ -4,6 +4,7 @@ using ForRest.Maui.Services;
 using ForRest.Maui.ViewModels;
 using ForRest.Repositories;
 using ForRest.Services;
+using ForRest.Services.AI;
 using ForRest.Services.Licensing;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ThemeConfigNormalizer>();
 		builder.Services.AddSingleton<ThemeConfigStore>();
 		builder.Services.AddSingleton<SettingsTomlDocumentService>();
+		builder.Services.AddSingleton<IWorkbenchAiSettingsProvider, WorkbenchAiSettingsProvider>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
 		builder.Services.AddSingleton(
@@ -52,6 +54,14 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IScriptEngine, RoslynScriptEngine>();
 		builder.Services.AddSingleton<IRequestExecutionService, RequestExecutionService>();
 		builder.Services.AddSingleton<IForRestScriptExecutionService, ForRestScriptExecutionService>();
+		builder.Services.AddSingleton<IAiSettingsValidator, AiSettingsValidator>();
+		builder.Services.AddSingleton<IAiToolCatalog, AiLocalToolCatalog>();
+		builder.Services.AddSingleton<IAiKnowledgeCatalog, ForRestAiKnowledgeCatalog>();
+		builder.Services.AddSingleton<IAiPromptManifestBuilder, AiPromptManifestBuilder>();
+		builder.Services.AddSingleton<IAiDocumentPatchService, AiDocumentPatchService>();
+		builder.Services.AddSingleton<IAiDocumentationSearchService>(static services =>
+			new AiDocumentationSearchService(services.GetRequiredService<IAiKnowledgeCatalog>().GetDocuments()));
+		builder.Services.AddSingleton<IAiRuntimeFactory, AgentFrameworkAiRuntimeFactory>();
 		builder.Services.AddSingleton<MainPageViewModel>();
 		builder.Services.AddSingleton<MainPage>();
 		builder.Services.AddSingleton(static _ => new AndroidMainPage());
