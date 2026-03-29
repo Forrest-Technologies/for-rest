@@ -7,7 +7,7 @@ namespace ForRest.Tests.AI;
 public sealed class AiActiveDocumentToolServiceTests
 {
     [TestMethod]
-    public void ReadActiveDocument_returns_active_document_snapshot_without_raw_text_parameters()
+    public void ReadActiveDocument_returns_active_document_snapshot_with_current_diagnostics()
     {
         AiActiveDocumentToolService service = new(new AiDocumentPatchService());
         FakeActiveDocumentHost host = new(
@@ -15,7 +15,10 @@ public sealed class AiActiveDocumentToolServiceTests
                 "request-1",
                 "Example Request",
                 "forrest",
-                "name \"Example\""));
+                "name \"Example\"",
+                [
+                    new("error", "Unexpected token 'time'.", 5, 1),
+                ]));
 
         string response = service.ReadActiveDocument(BuildSettings(), host);
 
@@ -23,6 +26,8 @@ public sealed class AiActiveDocumentToolServiceTests
         Assert.IsTrue(document.RootElement.GetProperty("succeeded").GetBoolean());
         Assert.AreEqual("request-1", document.RootElement.GetProperty("document").GetProperty("documentId").GetString());
         Assert.AreEqual("name \"Example\"", document.RootElement.GetProperty("document").GetProperty("sourceText").GetString());
+        Assert.AreEqual("error", document.RootElement.GetProperty("document").GetProperty("diagnostics")[0].GetProperty("severity").GetString());
+        Assert.AreEqual("Unexpected token 'time'.", document.RootElement.GetProperty("document").GetProperty("diagnostics")[0].GetProperty("message").GetString());
     }
 
     [TestMethod]
@@ -34,7 +39,8 @@ public sealed class AiActiveDocumentToolServiceTests
                 "request-1",
                 "Example Request",
                 "forrest",
-                "abc"));
+                "abc",
+                []));
 
         string response = service.PatchActiveDocument(
             BuildSettings(),
@@ -77,7 +83,8 @@ public sealed class AiActiveDocumentToolServiceTests
                 "request-1",
                 "Example Request",
                 "forrest",
-                "abc"));
+                "abc",
+                []));
 
         string response = service.PatchActiveDocument(
             settings,
@@ -92,6 +99,52 @@ public sealed class AiActiveDocumentToolServiceTests
         StringAssert.Contains(response, "\"succeeded\":false");
         StringAssert.Contains(response, "exceeds the configured maximum");
         Assert.AreEqual("abc", host.CurrentDocument?.SourceText);
+    }
+
+    [TestMethod]
+    public void PatchActiveDocument_returns_host_validation_failure_without_mutating_document()
+    {
+        AiActiveDocumentToolService service = new(new AiDocumentPatchService());
+        RejectingActiveDocumentHost host = new(
+            new AiActiveDocumentSnapshot(
+                "request-1",
+                "Example Request",
+                "forrest",
+                "abc",
+                []));
+
+        string response = service.PatchActiveDocument(
+            BuildSettings(),
+            host,
+            """
+            [{"startIndex":0,"length":3,"replacement":"broken"}]
+            """);
+
+        StringAssert.Contains(response, "\"succeeded\":false");
+        StringAssert.Contains(response, "left the request invalid");
+        Assert.AreEqual("abc", host.CurrentDocument?.SourceText);
+    }
+
+    [TestMethod]
+    public void ReplaceActiveDocument_updates_the_host_document_without_offset_math()
+    {
+        AiActiveDocumentToolService service = new(new AiDocumentPatchService());
+        FakeActiveDocumentHost host = new(
+            new AiActiveDocumentSnapshot(
+                "request-1",
+                "Example Request",
+                "forrest",
+                "abc",
+                []));
+
+        string response = service.ReplaceActiveDocument(
+            BuildSettings(),
+            host,
+            "name \"Post Echo\"\nmethod POST");
+
+        StringAssert.Contains(response, "\"succeeded\":true");
+        StringAssert.Contains(response, "name \\u0022Post Echo\\u0022\\nmethod POST");
+        Assert.AreEqual("name \"Post Echo\"\nmethod POST", host.CurrentDocument?.SourceText);
     }
 
     private static AiSettings BuildSettings()
@@ -128,6 +181,18 @@ public sealed class AiActiveDocumentToolServiceTests
                 SourceText = updatedText,
             };
             return AiActiveDocumentUpdateResult.Success();
+        }
+    }
+
+    private sealed class RejectingActiveDocumentHost(AiActiveDocumentSnapshot? snapshot) : IAiActiveDocumentHost
+    {
+        public AiActiveDocumentSnapshot? CurrentDocument { get; private set; } = snapshot;
+
+        public AiActiveDocumentSnapshot? GetActiveDocument() => CurrentDocument;
+
+        public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
+        {
+            return AiActiveDocumentUpdateResult.Failure("The AI edit was rejected because it left the request invalid.");
         }
     }
 }

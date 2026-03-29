@@ -61,7 +61,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             .. _toolCatalog.GetTools(settings, activeDocumentHost),
             .. _activeDocumentToolCatalog.GetTools(settings, activeDocumentHost)
         ];
-        IReadOnlyList<AiPromptTopic> topics = _knowledgeCatalog.GetTopics();
+        IReadOnlyList<AiPromptTopic> topics = BuildPromptTopics(activeDocumentHost);
         AiPromptManifest manifest = _promptManifestBuilder.Build(settings, objective, tools, topics);
         if (issues.Any(static issue => issue.Severity == AiSettingsIssueSeverity.Error) ||
             !settings.ApiKey.HasUsableValue)
@@ -87,6 +87,45 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         return new(manifest, issues, agent);
     }
 
+    private IReadOnlyList<AiPromptTopic> BuildPromptTopics(IAiActiveDocumentHost? activeDocumentHost)
+    {
+        List<AiPromptTopic> topics = [.. _knowledgeCatalog.GetTopics()];
+        AiActiveDocumentSnapshot? activeDocument = activeDocumentHost?.GetActiveDocument();
+        if (activeDocument is null)
+        {
+            return topics;
+        }
+
+        List<string> diagnostics =
+        [
+            .. activeDocument.Diagnostics.Select(
+                static diagnostic => $"{diagnostic.Severity.ToUpperInvariant()} L{diagnostic.Line}:{diagnostic.Column} {diagnostic.Message}")
+        ];
+
+        string content = string.Join(
+            Environment.NewLine,
+            [
+                $"Document id: {activeDocument.DocumentId}",
+                $"Title: {activeDocument.Title}",
+                $"Language: {activeDocument.Language}",
+                diagnostics.Count == 0
+                    ? "Diagnostics: none"
+                    : $"Diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}",
+                "Source:",
+                activeDocument.SourceText,
+            ]);
+
+        topics.Insert(
+            0,
+            new(
+                "Active document",
+                "The current request document and its latest compiler diagnostics. Use this instead of asking the user to paste the script or error list again.",
+                "active-document",
+                content));
+
+        return topics;
+    }
+
     private AITool[] BuildRuntimeTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost)
     {
         List<AITool> tools = [];
@@ -99,6 +138,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         {
             tools.Add(AIFunctionFactory.Create((Func<string>)ReadActiveDocument));
             tools.Add(AIFunctionFactory.Create((Func<string, string>)PatchActiveDocument));
+            tools.Add(AIFunctionFactory.Create((Func<string, string>)ReplaceActiveDocument));
         }
         else if (settings.Tools.EnableDocumentPatch)
         {
@@ -168,7 +208,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             });
         }
 
-        [Description("Read the current active document from the host canvas.")] 
+        [Description("Read the current active document and its compiler diagnostics from the host canvas.")] 
         string ReadActiveDocument()
         {
             return _activeDocumentToolService.ReadActiveDocument(settings, activeDocumentHost);
@@ -179,6 +219,13 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             [Description("A JSON array of edits with startIndex, length, and replacement fields.")] string editsJson)
         {
             return _activeDocumentToolService.PatchActiveDocument(settings, activeDocumentHost, editsJson);
+        }
+
+        [Description("Replace the entire active document with new source text when a full rewrite is safer than targeted edits.")]
+        string ReplaceActiveDocument(
+            [Description("The complete replacement source text for the active document.")] string updatedSourceText)
+        {
+            return _activeDocumentToolService.ReplaceActiveDocument(settings, activeDocumentHost, updatedSourceText);
         }
     }
 

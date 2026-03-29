@@ -109,9 +109,15 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
 
         Assert.IsNotNull(runtime.Agent);
         CollectionAssert.AreEquivalent(
-            new[] { "search_docs", "read_active_document", "patch_active_document" },
+            new[] { "search_docs", "read_active_document", "patch_active_document", "replace_active_document" },
             runtime.PromptManifest.Tools.Select(static tool => tool.Name).ToArray());
         Assert.IsFalse(runtime.PromptManifest.Tools.Any(static tool => tool.Name == "patch_document"));
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Do not ask the user to paste working syntax");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Do not use `//` comments");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "`expect` statements are top-level assertions");
+        Assert.AreEqual("Active document", runtime.PromptManifest.Topics[0].Title);
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Unexpected token 'time'.");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "name \"Example\"");
     }
 
     private static IAiRuntimeFactory CreateFactory()
@@ -134,7 +140,10 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
                 "request-1",
                 "Example Request",
                 "forrest",
-                "name \"Example\"");
+                "name \"Example\"",
+                [
+                    new("error", "Unexpected token 'time'.", 5, 1),
+                ]);
         }
 
         public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)

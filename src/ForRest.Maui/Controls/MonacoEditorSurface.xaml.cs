@@ -549,6 +549,22 @@ public partial class MonacoEditorSurface : ContentView
         }
       }
 
+      function getCursorPayload(editor) {
+        if (!editor) {
+          return {};
+        }
+
+        const position = editor.getPosition();
+        if (!position) {
+          return {};
+        }
+
+        return {
+          line: position.lineNumber,
+          column: position.column
+        };
+      }
+
       function normalizeEditorFontSize(value, fallback) {
         const candidate = Number(value);
         if (!Number.isFinite(candidate)) {
@@ -579,6 +595,10 @@ public partial class MonacoEditorSurface : ContentView
         pendingDiagnostics: [],
         pendingLanguageHelp: [],
         pendingEnableResponseActions: false,
+        pendingCursorLineNumber: 0,
+        pendingCursorColumn: 0,
+        pendingCursorRequestVersion: 0,
+        lastAppliedCursorRequestVersion: 0,
         pendingShouldApplyText: true,
         editableDecorations: [],
         currentEditableRanges: [],
@@ -776,17 +796,27 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function () {
-            requestHostCommand("send");
+            requestHostCommand("send", getCursorPayload(window.forRestHost && window.forRestHost.editor));
           });
           this.editor.addCommand(monaco.KeyCode.F5, function () {
-            requestHostCommand("send");
+            requestHostCommand("send", getCursorPayload(window.forRestHost && window.forRestHost.editor));
           });
           this.editor.onKeyDown((event) => {
             if (this.shouldSubmitInlineAiPromptOnEnter(event, monaco)) {
               event.preventDefault();
               event.stopPropagation();
-              requestHostCommand("send");
+              requestHostCommand("send", getCursorPayload(this.editor));
             }
+          });
+          this.editor.onDidChangeCursorPosition((event) => {
+            if (!event || !event.position) {
+              return;
+            }
+
+            requestHostCommand("cursor-position", {
+              line: event.position.lineNumber,
+              column: event.position.column
+            });
           });
           this.editor.onContextMenu((event) => {
             this.lastContextPosition = event.target && event.target.position
@@ -932,6 +962,39 @@ public partial class MonacoEditorSurface : ContentView
 
           return [];
         },
+        applyPendingCursorMove: function () {
+          if (!this.editor || !this.model) {
+            return;
+          }
+
+          if (!Number.isInteger(this.pendingCursorRequestVersion) ||
+              this.pendingCursorRequestVersion <= this.lastAppliedCursorRequestVersion ||
+              !Number.isInteger(this.pendingCursorLineNumber) ||
+              this.pendingCursorLineNumber < 1) {
+            return;
+          }
+
+          const lineCount = Math.max(1, this.model.getLineCount());
+          const lineNumber = Math.min(Math.max(1, this.pendingCursorLineNumber), lineCount);
+          const maxColumn = Math.max(1, this.model.getLineMaxColumn(lineNumber));
+          const column = Math.min(Math.max(1, this.pendingCursorColumn || 1), maxColumn);
+          const position = { lineNumber, column };
+          this.editor.setPosition(position);
+          this.editor.setSelection({
+            startLineNumber: lineNumber,
+            startColumn: column,
+            endLineNumber: lineNumber,
+            endColumn: column
+          });
+          if (typeof this.editor.revealPositionInCenterIfOutsideViewport === "function") {
+            this.editor.revealPositionInCenterIfOutsideViewport(position);
+          } else if (typeof this.editor.revealPositionInCenter === "function") {
+            this.editor.revealPositionInCenter(position);
+          }
+
+          this.editor.focus();
+          this.lastAppliedCursorRequestVersion = this.pendingCursorRequestVersion;
+        },
         applyDiagnostics: function () {
           if (!this.model || !window.monaco) {
             return;
@@ -983,6 +1046,9 @@ public partial class MonacoEditorSurface : ContentView
           this.pendingDiagnostics = this.parseDiagnostics(nextState);
           this.pendingLanguageHelp = this.parseLanguageHelp(nextState);
           this.pendingEnableResponseActions = !!nextState.enableResponseActions;
+          this.pendingCursorLineNumber = Number.isInteger(nextState.requestedCursorLineNumber) ? nextState.requestedCursorLineNumber : 0;
+          this.pendingCursorColumn = Number.isInteger(nextState.requestedCursorColumn) ? nextState.requestedCursorColumn : 0;
+          this.pendingCursorRequestVersion = Number.isInteger(nextState.requestedCursorVersion) ? nextState.requestedCursorVersion : 0;
           applyHostThemeChrome(this.pendingTheme);
           const shouldRefreshLayout = shouldApplyText ||
             previousLanguage !== this.pendingLanguage ||
@@ -1023,6 +1089,7 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           this.applyDiagnostics();
+          this.applyPendingCursorMove();
 
           this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
           if (shouldRefreshLayout) {
@@ -1305,6 +1372,27 @@ public partial class MonacoEditorSurface : ContentView
 		false,
 		propertyChanged: OnEnableResponseActionsChanged);
 
+	public static readonly BindableProperty RequestedCursorLineNumberProperty = BindableProperty.Create(
+		nameof(RequestedCursorLineNumber),
+		typeof(int),
+		typeof(MonacoEditorSurface),
+		0,
+		propertyChanged: OnRequestedCursorLineNumberChanged);
+
+	public static readonly BindableProperty RequestedCursorColumnProperty = BindableProperty.Create(
+		nameof(RequestedCursorColumn),
+		typeof(int),
+		typeof(MonacoEditorSurface),
+		0,
+		propertyChanged: OnRequestedCursorColumnChanged);
+
+	public static readonly BindableProperty RequestedCursorVersionProperty = BindableProperty.Create(
+		nameof(RequestedCursorVersion),
+		typeof(int),
+		typeof(MonacoEditorSurface),
+		0,
+		propertyChanged: OnRequestedCursorVersionChanged);
+
 	private bool _isEditorReady;
 	private bool _isWaitingForReady;
 	private bool _isPullingEditorText;
@@ -1324,6 +1412,9 @@ public partial class MonacoEditorSurface : ContentView
 	private string _pendingLanguageHelpJson = "[]";
 	private bool _pendingIsReadOnly;
 	private bool _pendingEnableResponseActions;
+	private int _pendingRequestedCursorLineNumber;
+	private int _pendingRequestedCursorColumn;
+	private int _pendingRequestedCursorVersion;
 	private bool _contentHydrated;
 	private bool _shouldApplyTextToEditor = true;
 #if ANDROID
@@ -1406,6 +1497,24 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		get => (bool)GetValue(EnableResponseActionsProperty);
 		set => SetValue(EnableResponseActionsProperty, value);
+	}
+
+	public int RequestedCursorLineNumber
+	{
+		get => (int)GetValue(RequestedCursorLineNumberProperty);
+		set => SetValue(RequestedCursorLineNumberProperty, value);
+	}
+
+	public int RequestedCursorColumn
+	{
+		get => (int)GetValue(RequestedCursorColumnProperty);
+		set => SetValue(RequestedCursorColumnProperty, value);
+	}
+
+	public int RequestedCursorVersion
+	{
+		get => (int)GetValue(RequestedCursorVersionProperty);
+		set => SetValue(RequestedCursorVersionProperty, value);
 	}
 
 	private void OnLoaded(object? sender, EventArgs e)
@@ -1523,6 +1632,27 @@ public partial class MonacoEditorSurface : ContentView
 		editor.RequestStateApply();
 	}
 
+	private static void OnRequestedCursorLineNumberChanged(BindableObject bindable, object? oldValue, object? newValue)
+	{
+		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
+		editor._pendingRequestedCursorLineNumber = newValue is int lineNumber ? lineNumber : 0;
+		editor.RequestStateApply();
+	}
+
+	private static void OnRequestedCursorColumnChanged(BindableObject bindable, object? oldValue, object? newValue)
+	{
+		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
+		editor._pendingRequestedCursorColumn = newValue is int column ? column : 0;
+		editor.RequestStateApply();
+	}
+
+	private static void OnRequestedCursorVersionChanged(BindableObject bindable, object? oldValue, object? newValue)
+	{
+		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
+		editor._pendingRequestedCursorVersion = newValue is int version ? version : 0;
+		editor.RequestStateApply();
+	}
+
 	private async void OnEditorWebViewNavigated(object? sender, WebNavigatedEventArgs e)
 	{
 		await EnsureEditorReadyAsync();
@@ -1541,6 +1671,12 @@ public partial class MonacoEditorSurface : ContentView
 		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
 		    string.Equals(uri.AbsolutePath.Trim('/'), "send", StringComparison.OrdinalIgnoreCase))
 		{
+			if (TryGetQueryValue(uri, "line", out int sendLine) &&
+			    TryGetQueryValue(uri, "column", out int sendColumn))
+			{
+				CursorPositionChanged?.Invoke(this, new MonacoCursorPositionChangedEventArgs(sendLine, sendColumn));
+			}
+
 			await SyncEditorTextAsync();
 			SendRequested?.Invoke(this, EventArgs.Empty);
 			return;
@@ -1605,6 +1741,9 @@ public partial class MonacoEditorSurface : ContentView
 				_pendingLanguageHelpJson = LanguageHelpJson;
 				_pendingIsReadOnly = IsReadOnly;
 				_pendingEnableResponseActions = EnableResponseActions;
+				_pendingRequestedCursorLineNumber = RequestedCursorLineNumber;
+				_pendingRequestedCursorColumn = RequestedCursorColumn;
+				_pendingRequestedCursorVersion = RequestedCursorVersion;
 				_pendingText = Text;
 				_shouldApplyTextToEditor = true;
 				_contentHydrated = string.IsNullOrWhiteSpace(_pendingText);
@@ -1706,7 +1845,10 @@ public partial class MonacoEditorSurface : ContentView
 			DiagnosticsJson: string.IsNullOrWhiteSpace(_pendingDiagnosticsJson) ? "[]" : _pendingDiagnosticsJson,
 			LanguageHelpJson: string.IsNullOrWhiteSpace(_pendingLanguageHelpJson) ? "[]" : _pendingLanguageHelpJson,
 			EnableResponseActions: _pendingEnableResponseActions,
-			ApplyText: _shouldApplyTextToEditor);
+			ApplyText: _shouldApplyTextToEditor,
+			RequestedCursorLineNumber: _pendingRequestedCursorLineNumber,
+			RequestedCursorColumn: _pendingRequestedCursorColumn,
+			RequestedCursorVersion: _pendingRequestedCursorVersion);
 	}
 
 	private async Task ApplyEditorStateAsync(EditorStatePayload state)
@@ -1873,6 +2015,34 @@ public partial class MonacoEditorSurface : ContentView
 	public Task FlushTextSyncAsync()
 	{
 		return SyncEditorTextAsync();
+	}
+
+	public async Task MoveCursorToAsync(int lineNumber, int column)
+	{
+		await EnsureEditorReadyAsync();
+		if (!_isEditorReady)
+		{
+			return;
+		}
+
+		int targetLine = Math.Max(1, lineNumber);
+		int targetColumn = Math.Max(1, column);
+		string script =
+			$"window.forRestHost && window.forRestHost.editor && window.forRestHost.model ? (function() {{ " +
+			$"const maxLine = Math.max(1, window.forRestHost.model.getLineCount()); " +
+			$"const nextLine = Math.min({targetLine}, maxLine); " +
+			$"const maxColumn = Math.max(1, window.forRestHost.model.getLineMaxColumn(nextLine)); " +
+			$"const nextColumn = Math.min({targetColumn}, maxColumn); " +
+			$"const position = {{ lineNumber: nextLine, column: nextColumn }}; " +
+			$"window.forRestHost.editor.setPosition(position); " +
+			$"window.forRestHost.editor.revealPositionInCenterIfOutsideViewport(position); " +
+			$"window.forRestHost.editor.focus(); " +
+			$"return JSON.stringify(position); " +
+			$"}})() : null;";
+		await EvaluateOptionalAsync(script);
+#if ANDROID
+		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: false);
+#endif
 	}
 
 	private static string ParseJavascriptBase64Result(string result)
@@ -2076,7 +2246,10 @@ public partial class MonacoEditorSurface : ContentView
 		string DiagnosticsJson,
 		string LanguageHelpJson,
 		bool EnableResponseActions,
-		bool ApplyText);
+		bool ApplyText,
+		int RequestedCursorLineNumber,
+		int RequestedCursorColumn,
+		int RequestedCursorVersion);
 }
 
 public sealed class MonacoResponseVarRequestEventArgs(int lineNumber, int column) : EventArgs

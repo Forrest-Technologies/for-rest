@@ -303,6 +303,31 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_requests_follow_up_cursor_move_after_inline_ai_reply()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText: "name \"demo\"\n## tighten this request\n#> Done.\n## \nmethod GET",
+				StatusText: "AI replied.",
+				DebugText: "ai debug",
+				SuggestedCursorLineNumber: 4,
+				SuggestedCursorColumn: 4));
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+
+		viewModel.ActiveEditorText = "name \"demo\"\n## tighten this request\nmethod GET";
+		viewModel.UpdateActiveEditorCursor(2, 4);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorLineNumber);
+		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorColumn);
+		Assert.AreEqual(1, viewModel.ActiveEditorRequestedCursorVersion);
+	}
+
+	[TestMethod]
 	public async Task SendAsync_keeps_regular_request_send_when_cursor_is_not_on_ai_prompt()
 	{
 		using TestHarness harness = new();
@@ -318,6 +343,107 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual(1, aiService.CallCount);
 		Assert.AreEqual(1, executionService.ExecuteCallCount);
 		Assert.AreEqual("200 OK", viewModel.ResponseState);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_keeps_regular_request_send_when_trailing_ai_prompt_is_blank()
+	{
+		using TestHarness harness = new();
+		FakeExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService,
+			new AiInlineConversationService(new ThrowingTurnExecutor()));
+
+		viewModel.ActiveEditorText = "name \"demo\"\nmethod GET\n\n## ";
+		viewModel.UpdateActiveEditorCursor(4, 4);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual(1, executionService.ExecuteCallCount);
+		Assert.AreEqual("200 OK", viewModel.ResponseState);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_rebases_request_location_when_ai_rewrites_request_identity()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText:
+				"""
+				name "Post Echo"
+				method POST
+				url "https://httpbin.org/headers"
+				timeout 15000
+				max_send_iterations 3
+				redirects true
+				ssl true
+				history true
+
+				runtime trace_id = guid()
+
+				header "Accept" = "application/json"
+				header "X-Workspace" = "{{workspace_name}}"
+				header "X-Environment" = "{{environment_name}}"
+				header "X-Correlation-Id" = "{{trace_id}}"
+
+				request.send()
+
+				expect status == 200 "returns 200"
+				expect header "Content-Type" contains "json" "json response"
+				""",
+				StatusText: "AI replied.",
+				DebugText: "ai debug"));
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: new SourceAwareExecutionService(),
+			aiInlineConversationService: aiService);
+		NavigationItemViewModel getUuidItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.Title, "Get UUID", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(getUuidItem);
+		viewModel.ActiveEditorText = $"{viewModel.ActiveEditorText}\n\n## rewrite this script from scratch";
+		viewModel.UpdateActiveEditorCursor(viewModel.ActiveEditorText.Split('\n').Length, 4);
+
+		await viewModel.SendAsync();
+
+		StringAssert.Contains(viewModel.RequestLocation, "/post-echo");
+		Assert.IsFalse(viewModel.RequestLocation.Contains("get-uuid", StringComparison.OrdinalIgnoreCase));
+		Assert.AreEqual("POST httpbin.org/headers", viewModel.RequestSummary);
+		NavigationItemViewModel selectedItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.Single(item => item.IsSelected);
+		StringAssert.Contains(selectedItem.Context, "/post-echo");
+		Assert.AreEqual("Post Echo", selectedItem.Title);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_exposes_script_validation_diagnostics_to_inline_ai()
+	{
+		using TestHarness harness = new();
+		AiActiveDocumentSnapshot? capturedDocument = null;
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: false,
+				UpdatedText: "name \"demo\"\n## fix this",
+				StatusText: "AI could not complete the request.",
+				DebugText: "ai debug"),
+			onTryHandle: request => capturedDocument = request.ActiveDocumentHost.GetActiveDocument());
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: new ValidationAwareExecutionService(),
+			aiInlineConversationService: aiService,
+			scriptEngine: new FailingScriptEngine("(35,20): error CS1002: ; expected"));
+
+		viewModel.ActiveEditorText = "name \"demo\"\nmethod GET\nurl \"https://example.test\"\n\n## fix this";
+		viewModel.UpdateActiveEditorCursor(5, 4);
+
+		await viewModel.SendAsync();
+
+		Assert.IsNotNull(capturedDocument);
+		Assert.IsTrue(capturedDocument.Diagnostics.Any(static diagnostic => diagnostic.Line == 35 && diagnostic.Message.Contains("; expected", StringComparison.Ordinal)));
 	}
 
 	private sealed class TestHarness : IDisposable
@@ -339,7 +465,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		public string StateFilePath { get; }
 
-		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null, IAiInlineConversationService? aiInlineConversationService = null)
+		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null, IAiInlineConversationService? aiInlineConversationService = null, IScriptEngine? scriptEngine = null)
 		{
 			ThemeConfigStore themeConfigStore = new();
 			SettingsTomlTemplate template = new();
@@ -359,6 +485,7 @@ public sealed class MainPageViewModelLayoutTests
 				settingsService,
 				new RequestWorkbenchStateStore(StateFilePath),
 				executionService ?? new FakeExecutionService(),
+				scriptEngine ?? new FakeScriptEngine(),
 				new InMemoryExecutionHistoryRepository(),
 				new ForRestScriptDocumentTextService(),
 				new FakeAppActivationService(),
@@ -518,10 +645,12 @@ public sealed class MainPageViewModelLayoutTests
 	private sealed class FakeAiInlineConversationService : IAiInlineConversationService
 	{
 		private readonly AiInlineConversationResult _result;
+		private readonly Action<AiInlineConversationRequest>? _onTryHandle;
 
-		public FakeAiInlineConversationService(AiInlineConversationResult result)
+		public FakeAiInlineConversationService(AiInlineConversationResult result, Action<AiInlineConversationRequest>? onTryHandle = null)
 		{
 			_result = result;
+			_onTryHandle = onTryHandle;
 		}
 
 		public int CallCount { get; private set; }
@@ -529,10 +658,148 @@ public sealed class MainPageViewModelLayoutTests
 		public Task<AiInlineConversationResult> TryHandleAsync(AiInlineConversationRequest request, CancellationToken cancellationToken = default)
 		{
 			CallCount++;
+			_onTryHandle?.Invoke(request);
 			string updatedText = _result.Handled && string.IsNullOrWhiteSpace(_result.UpdatedText)
 				? request.SourceText
 				: _result.UpdatedText;
 			return Task.FromResult(_result with { UpdatedText = updatedText });
+		}
+	}
+
+	private sealed class SourceAwareExecutionService : IForRestScriptExecutionService
+	{
+		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
+		{
+			string normalized = source.Replace("\r\n", "\n", StringComparison.Ordinal);
+			string name = ExtractQuotedValue(normalized, "name") ?? defaultRequestName ?? "Untitled Request";
+			string methodText = ExtractTokenValue(normalized, "method") ?? "GET";
+			string url = ExtractQuotedValue(normalized, "url") ?? "https://example.test/mobile";
+			HttpMethodKind method = Enum.TryParse<HttpMethodKind>(methodText, true, out HttpMethodKind parsedMethod)
+				? parsedMethod
+				: HttpMethodKind.Get;
+
+			return new(
+				null,
+				new ForRestExecutionPayload
+				{
+					SourceText = source,
+					Request = new RequestDefinition
+					{
+						WorkspaceId = workspaceId,
+						Name = name,
+						Method = method,
+						UrlTemplate = url,
+					},
+				},
+				[]);
+		}
+
+		public Task<ForRestScriptExecutionOutcome> Execute(
+			AppProfile profile,
+			WorkspaceSnapshot workspace,
+			string source,
+			EnvironmentDefinition? environment,
+			string? defaultRequestName = null,
+			string? preRequestScriptOverride = null,
+			CancellationToken cancellationToken = default)
+		{
+			throw new NotSupportedException("Execution is not used in this metadata test.");
+		}
+
+		private static string? ExtractQuotedValue(string source, string keyword)
+		{
+			string prefix = $"{keyword} \"";
+			string? line = source.Split('\n').FirstOrDefault(item => item.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+			if (line is null)
+			{
+				return null;
+			}
+
+			int startIndex = line.IndexOf('"');
+			int endIndex = line.LastIndexOf('"');
+			return startIndex >= 0 && endIndex > startIndex
+				? line[(startIndex + 1)..endIndex]
+				: null;
+		}
+
+		private static string? ExtractTokenValue(string source, string keyword)
+		{
+			string prefix = $"{keyword} ";
+			string? line = source.Split('\n').FirstOrDefault(item => item.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+			return line is null ? null : line[prefix.Length..].Trim();
+		}
+	}
+
+	private sealed class FakeScriptEngine : IScriptEngine
+	{
+		public Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
+		{
+			return Task.FromResult(new ScriptExecutionResult
+			{
+				PreparedRequest = request.PreparedRequest,
+				Response = request.Response,
+				SentResponse = request.Response,
+				RuntimeVariables = [.. request.RuntimeVariables],
+			});
+		}
+	}
+
+	private sealed class FailingScriptEngine(string errorMessage) : IScriptEngine
+	{
+		public Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
+		{
+			return Task.FromResult(new ScriptExecutionResult
+			{
+				PreparedRequest = request.PreparedRequest,
+				Response = request.Response,
+				SentResponse = request.Response,
+				RuntimeVariables = [.. request.RuntimeVariables],
+				ErrorMessage = errorMessage,
+			});
+		}
+	}
+
+	private sealed class ValidationAwareExecutionService : IForRestScriptExecutionService
+	{
+		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
+		{
+			return new(
+				null,
+				new ForRestExecutionPayload
+				{
+					SourceText = source,
+					Request = new RequestDefinition
+					{
+						WorkspaceId = workspaceId,
+						Name = defaultRequestName ?? "Demo",
+						Method = HttpMethodKind.Get,
+						UrlTemplate = "https://example.test",
+						Headers = [],
+						Variables = [],
+						TestsScript = "expect status == 200 \"returns 200\"",
+					},
+				},
+				[]);
+		}
+
+		public Task<ForRestScriptExecutionOutcome> Execute(
+			AppProfile profile,
+			WorkspaceSnapshot workspace,
+			string source,
+			EnvironmentDefinition? environment,
+			string? defaultRequestName = null,
+			string? preRequestScriptOverride = null,
+			CancellationToken cancellationToken = default)
+		{
+			throw new NotSupportedException("Execution is not used in this AI diagnostics test.");
+		}
+	}
+
+	private sealed class ThrowingTurnExecutor : IAiTurnExecutor
+	{
+		public Task<AiTurnExecutionResult> ExecuteAsync(AiTurnExecutionRequest request, CancellationToken cancellationToken = default)
+		{
+			throw new InvalidOperationException("Blank AI prompts should never reach the turn executor.");
 		}
 	}
 

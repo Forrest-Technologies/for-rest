@@ -3,6 +3,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using ForRest.Domain;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
 using ForRest.Models;
@@ -44,6 +46,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private readonly SettingsTomlDocumentService _settingsTomlDocumentService;
 	private readonly RequestWorkbenchStateStore _requestWorkbenchStateStore;
 	private readonly IForRestScriptExecutionService _scriptExecutionService;
+	private readonly IScriptEngine _scriptEngine;
 	private readonly IExecutionHistoryRepository _executionHistoryRepository;
 	private readonly ForRestScriptDocumentTextService _documentTextService;
 	private readonly IAppActivationService _appActivationService;
@@ -128,12 +131,19 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _selectedLanguageHelpDocumentation;
 	private string _selectedLanguageHelpExample;
 	private int _activeEditorLineNumber = 1;
+	private int _activeEditorColumnNumber = 1;
+	private int _pendingEditorCursorLineNumber;
+	private int _pendingEditorCursorColumnNumber;
+	private int _activeEditorRequestedCursorLineNumber;
+	private int _activeEditorRequestedCursorColumn;
+	private int _activeEditorRequestedCursorVersion;
 
 	public MainPageViewModel(
 		IThemeService themeService,
 		SettingsTomlDocumentService settingsTomlDocumentService,
 		RequestWorkbenchStateStore requestWorkbenchStateStore,
 		IForRestScriptExecutionService scriptExecutionService,
+		IScriptEngine scriptEngine,
 		IExecutionHistoryRepository executionHistoryRepository,
 		ForRestScriptDocumentTextService documentTextService,
 		IAppActivationService appActivationService,
@@ -144,6 +154,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_settingsTomlDocumentService = settingsTomlDocumentService;
 		_requestWorkbenchStateStore = requestWorkbenchStateStore;
 		_scriptExecutionService = scriptExecutionService;
+		_scriptEngine = scriptEngine;
 		_executionHistoryRepository = executionHistoryRepository;
 		_documentTextService = documentTextService;
 		_appActivationService = appActivationService;
@@ -616,6 +627,24 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		get => _activeEditorDiagnosticsJson;
 		set => SetProperty(ref _activeEditorDiagnosticsJson, value);
+	}
+
+	public int ActiveEditorRequestedCursorLineNumber
+	{
+		get => _activeEditorRequestedCursorLineNumber;
+		private set => SetProperty(ref _activeEditorRequestedCursorLineNumber, value);
+	}
+
+	public int ActiveEditorRequestedCursorColumn
+	{
+		get => _activeEditorRequestedCursorColumn;
+		private set => SetProperty(ref _activeEditorRequestedCursorColumn, value);
+	}
+
+	public int ActiveEditorRequestedCursorVersion
+	{
+		get => _activeEditorRequestedCursorVersion;
+		private set => SetProperty(ref _activeEditorRequestedCursorVersion, value);
 	}
 
 	public string LanguageHelpCatalogJson => _languageHelpCatalogJson;
@@ -1851,6 +1880,16 @@ public sealed class MainPageViewModel : ObservableObject
 	public void UpdateActiveEditorCursor(int lineNumber, int column)
 	{
 		_activeEditorLineNumber = Math.Max(1, lineNumber);
+		_activeEditorColumnNumber = Math.Max(1, column);
+	}
+
+	public bool TryConsumePendingEditorCursorRequest(out int lineNumber, out int column)
+	{
+		lineNumber = _pendingEditorCursorLineNumber;
+		column = _pendingEditorCursorColumnNumber;
+		_pendingEditorCursorLineNumber = 0;
+		_pendingEditorCursorColumnNumber = 0;
+		return lineNumber > 0 && column > 0;
 	}
 
 	private void ApplyWorkspaceSelection(Guid workspaceId)
@@ -2805,7 +2844,15 @@ public sealed class MainPageViewModel : ObservableObject
 				return false;
 			}
 
-			ApplyAiConversationText(result.UpdatedText);
+			ApplyAiConversationText(
+				result.UpdatedText,
+				result.SuggestedCursorLineNumber,
+				result.SuggestedCursorColumn);
+			if (result.SuggestedCursorLineNumber is int suggestedCursorLineNumber)
+			{
+				RequestActiveEditorCursorMove(suggestedCursorLineNumber, result.SuggestedCursorColumn);
+			}
+
 			await PersistCurrentRequestAsync();
 			ExecutionStatus = result.StatusText;
 			DebugOutputText = result.DebugText;
@@ -2897,9 +2944,15 @@ public sealed class MainPageViewModel : ObservableObject
 		return normalized;
 	}
 
-	private void ApplyAiConversationText(string updatedText)
+	private void ApplyAiConversationText(string updatedText, int? suggestedCursorLineNumber = null, int? suggestedCursorColumn = null)
 	{
+		string previousRequestName = RequestName;
+		string previousRequestMethod = SelectedMethod;
+		string previousRequestTarget = RequestTarget;
+		string previousRequestSummary = RequestSummary;
+		string previousRequestLocation = RequestLocation;
 		string normalized = NormalizeLineEndings(updatedText);
+		QueuePendingEditorCursorRequest(suggestedCursorLineNumber, suggestedCursorColumn);
 		if (string.Equals(_requestEditorText, normalized, StringComparison.Ordinal))
 		{
 			return;
@@ -2907,7 +2960,22 @@ public sealed class MainPageViewModel : ObservableObject
 
 		if (IsActiveRequestEditor)
 		{
-			ActiveEditorText = normalized;
+			_requestEditorText = normalized;
+			OnPropertyChanged(nameof(RequestEditorText));
+			if (!string.Equals(_activeEditorText, normalized, StringComparison.Ordinal))
+			{
+				SetActiveEditorTextInternal(normalized);
+				ForceActiveEditorRefresh();
+			}
+			SyncSupportEditorsFromRequestSource();
+			UpdateRequestMetadataFromSource();
+			ReconcileRequestIdentityAfterAiEdit(
+				previousRequestName,
+				previousRequestMethod,
+				previousRequestTarget,
+				previousRequestSummary,
+				previousRequestLocation);
+			MarkCurrentDocumentDirty();
 			return;
 		}
 
@@ -2915,7 +2983,309 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(RequestEditorText));
 		SyncSupportEditorsFromRequestSource();
 		UpdateRequestMetadataFromSource();
+		ReconcileRequestIdentityAfterAiEdit(
+			previousRequestName,
+			previousRequestMethod,
+			previousRequestTarget,
+			previousRequestSummary,
+			previousRequestLocation);
 		MarkCurrentDocumentDirty();
+	}
+
+	private void QueuePendingEditorCursorRequest(int? lineNumber, int? column)
+	{
+		_pendingEditorCursorLineNumber = Math.Max(0, lineNumber ?? 0);
+		_pendingEditorCursorColumnNumber = Math.Max(1, column ?? 4);
+	}
+
+	private void ReconcileRequestIdentityAfterAiEdit(
+		string previousRequestName,
+		string previousRequestMethod,
+		string previousRequestTarget,
+		string previousRequestSummary,
+		string previousRequestLocation)
+	{
+		bool identityChanged =
+			!string.Equals(previousRequestName, RequestName, StringComparison.OrdinalIgnoreCase) ||
+			!string.Equals(previousRequestMethod, SelectedMethod, StringComparison.OrdinalIgnoreCase) ||
+			!string.Equals(previousRequestTarget, RequestTarget, StringComparison.Ordinal);
+
+		if (identityChanged &&
+			string.Equals(RequestSummary, previousRequestSummary, StringComparison.Ordinal))
+		{
+			RequestSummary = BuildGeneratedRequestSummary(SelectedMethod, RequestTarget);
+		}
+
+		string rebasedLocation = BuildRebasedRequestLocation(previousRequestLocation, RequestName);
+		if (!string.Equals(rebasedLocation, RequestLocation, StringComparison.OrdinalIgnoreCase))
+		{
+			RebaseActiveRequestLocation(previousRequestLocation, rebasedLocation);
+		}
+	}
+
+	private void RebaseActiveRequestLocation(string previousLocation, string nextLocation)
+	{
+		if (string.IsNullOrWhiteSpace(previousLocation) ||
+			string.IsNullOrWhiteSpace(nextLocation) ||
+			string.Equals(previousLocation, nextLocation, StringComparison.OrdinalIgnoreCase))
+		{
+			return;
+		}
+
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		RequestWorkbenchDocumentState currentState = BuildCurrentDocumentState() with
+		{
+			Location = nextLocation,
+		};
+
+		_suppressRequestAutosave = true;
+		try
+		{
+			RequestLocation = nextLocation;
+		}
+		finally
+		{
+			_suppressRequestAutosave = false;
+		}
+
+		if (workspace is null)
+		{
+			return;
+		}
+
+		List<RequestWorkbenchDocumentState> updatedDocuments = [];
+		bool replaced = false;
+		foreach (RequestWorkbenchDocumentState document in workspace.Documents)
+		{
+			if (string.Equals(document.Location, previousLocation, StringComparison.OrdinalIgnoreCase))
+			{
+				updatedDocuments.Add(currentState);
+				replaced = true;
+				continue;
+			}
+
+			updatedDocuments.Add(document);
+		}
+
+		if (!replaced)
+		{
+			updatedDocuments.Add(currentState);
+		}
+
+		RequestWorkbenchWorkspaceState updatedWorkspace = workspace with
+		{
+			SelectedEnvironment = SelectedEnvironment,
+			SelectedDocumentLocation = nextLocation,
+			Documents = updatedDocuments,
+		};
+		_workspaceStates[updatedWorkspace.Id] = updatedWorkspace;
+		RebuildWorkspaceCollections(updatedWorkspace);
+		SelectDocumentByLocation(nextLocation);
+		SelectExplorerItemByContext(nextLocation);
+	}
+
+	private string BuildRebasedRequestLocation(string currentLocation, string title)
+	{
+		if (string.IsNullOrWhiteSpace(currentLocation))
+		{
+			return currentLocation;
+		}
+
+		string[] segments = NormalizeExplorerLocation(currentLocation)
+			.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		if (segments.Length == 0)
+		{
+			return currentLocation;
+		}
+
+		string requestSlug = BuildSlug(title, "request");
+		string[] candidateSegments = [.. segments.Take(Math.Max(0, segments.Length - 1)), requestSlug];
+		string baseLocation = "/" + string.Join('/', candidateSegments);
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return baseLocation;
+		}
+
+		HashSet<string> existingLocations = workspace.Documents
+			.Select(static document => document.Location)
+			.Where(static location => !string.IsNullOrWhiteSpace(location))
+			.Where(location => !string.Equals(location, currentLocation, StringComparison.OrdinalIgnoreCase))
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		if (!existingLocations.Contains(baseLocation))
+		{
+			return baseLocation;
+		}
+
+		int suffix = 2;
+		string candidate = $"{baseLocation}-{suffix}";
+		while (existingLocations.Contains(candidate))
+		{
+			suffix++;
+			candidate = $"{baseLocation}-{suffix}";
+		}
+
+		return candidate;
+	}
+
+	private static string BuildGeneratedRequestSummary(string method, string target)
+	{
+		string normalizedMethod = string.IsNullOrWhiteSpace(method) ? "REQUEST" : method.Trim().ToUpperInvariant();
+		if (Uri.TryCreate(target, UriKind.Absolute, out Uri? uri))
+		{
+			string route = string.IsNullOrWhiteSpace(uri.AbsolutePath) || string.Equals(uri.AbsolutePath, "/", StringComparison.Ordinal)
+				? uri.Host
+				: $"{uri.Host}{uri.AbsolutePath}";
+			return $"{normalizedMethod} {route}";
+		}
+
+		return $"{normalizedMethod} request";
+	}
+
+	private bool TryValidateCompiledRequestScripts(ForRestExecutionPayload payload, out string detail)
+	{
+		ResponseSnapshot defaultResponse = BuildValidationResponse();
+		PreparedRequest preparedRequest = BuildValidationPreparedRequest(payload.Request);
+		WorkspaceDefinition workspace = new()
+		{
+			Id = _selectedWorkspaceId,
+			Name = SelectedWorkspace,
+		};
+
+		try
+		{
+			ScriptExecutionResult preRequestResult = _scriptEngine.Run(
+				new()
+				{
+					Script = payload.Request.PreRequestScript,
+					PreparedRequest = preparedRequest,
+					Response = defaultResponse,
+					Workspace = workspace,
+					RequestVariables = [.. payload.Request.Variables],
+					RuntimeVariables = [],
+					SendAsync = static _ => Task.FromResult<ResponseSnapshot?>(BuildValidationResponse()),
+					ExecuteWorkspaceRequestAsync = static (_, callerRuntimeVariables) => Task.FromResult(new ScriptExecutionResult
+					{
+						Response = BuildValidationResponse(),
+						SentResponse = BuildValidationResponse(),
+						RuntimeVariables = [.. callerRuntimeVariables],
+					}),
+					MaxSendIterations = payload.Request.MaxSendIterations,
+				}).GetAwaiter().GetResult();
+			if (!string.IsNullOrWhiteSpace(preRequestResult.ErrorMessage))
+			{
+				detail = NormalizeScriptValidationError(preRequestResult.ErrorMessage);
+				return false;
+			}
+
+			ScriptExecutionResult testsResult = _scriptEngine.Run(
+				new()
+				{
+					Script = payload.Request.TestsScript,
+					PreparedRequest = preRequestResult.PreparedRequest,
+					Response = preRequestResult.SentResponse ?? preRequestResult.Response ?? defaultResponse,
+					Workspace = workspace,
+					RequestVariables = [.. payload.Request.Variables],
+					RuntimeVariables = [.. preRequestResult.RuntimeVariables],
+					SendAsync = static _ => Task.FromResult<ResponseSnapshot?>(BuildValidationResponse()),
+					ExecuteWorkspaceRequestAsync = static (_, callerRuntimeVariables) => Task.FromResult(new ScriptExecutionResult
+					{
+						Response = BuildValidationResponse(),
+						SentResponse = BuildValidationResponse(),
+						RuntimeVariables = [.. callerRuntimeVariables],
+					}),
+					MaxSendIterations = payload.Request.MaxSendIterations,
+				}).GetAwaiter().GetResult();
+			if (!string.IsNullOrWhiteSpace(testsResult.ErrorMessage))
+			{
+				detail = NormalizeScriptValidationError(testsResult.ErrorMessage);
+				return false;
+			}
+		}
+		catch (Exception exception)
+		{
+			detail = exception.Message;
+			return false;
+		}
+
+		detail = string.Empty;
+		return true;
+	}
+
+	private static PreparedRequest BuildValidationPreparedRequest(RequestDefinition request)
+	{
+		Uri uri = Uri.TryCreate(request.UrlTemplate, UriKind.Absolute, out Uri? parsedUri)
+			? parsedUri
+			: new Uri("https://localhost");
+
+		return new()
+		{
+			Method = request.Method,
+			Uri = uri,
+			Headers = [.. request.Headers],
+			Body = request.Body,
+			Auth = request.Auth,
+			TimeoutMilliseconds = request.TimeoutMilliseconds,
+			FollowRedirects = request.FollowRedirects,
+			ValidateSsl = request.ValidateSsl,
+			RawRequest = $"{request.Method.ToString().ToUpperInvariant()} {uri}",
+		};
+	}
+
+	private static ResponseSnapshot BuildValidationResponse()
+	{
+		return new()
+		{
+			StatusCode = 200,
+			ReasonPhrase = "OK",
+			ContentType = "application/json",
+			Body = "{\"ok\":true}",
+			RawResponse = "HTTP/1.1 200 OK",
+			Headers =
+			[
+				new KeyValueDefinition
+				{
+					Key = "Content-Type",
+					Value = "application/json",
+				},
+			],
+		};
+	}
+
+	private static string NormalizeScriptValidationError(string errorMessage)
+	{
+		string[] lines = (errorMessage ?? string.Empty)
+			.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		if (lines.Length == 0)
+		{
+			return "The generated script would not compile.";
+		}
+
+		return string.Join("  ", lines.Take(4));
+	}
+
+	private static IReadOnlyList<AiActiveDocumentDiagnostic> ParseScriptValidationDiagnostics(string detail)
+	{
+		List<AiActiveDocumentDiagnostic> diagnostics = [];
+		string[] entries = (detail ?? string.Empty)
+			.Split(["\r\n", "\n", "  "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+		foreach (string entry in entries)
+		{
+			Match match = Regex.Match(entry, @"^\((?<line>\d+),(?<column>\d+)\):\s*error\s+\w+\s*:\s*(?<message>.+)$");
+			if (match.Success &&
+			    int.TryParse(match.Groups["line"].Value, out int lineNumber) &&
+			    int.TryParse(match.Groups["column"].Value, out int columnNumber))
+			{
+				diagnostics.Add(new AiActiveDocumentDiagnostic("error", match.Groups["message"].Value.Trim(), lineNumber, columnNumber));
+				continue;
+			}
+
+			diagnostics.Add(new AiActiveDocumentDiagnostic("error", entry.Trim(), 1, 1));
+		}
+
+		return diagnostics;
 	}
 
 	private void UpdateCurrentDocumentMetadata()
@@ -3194,6 +3564,13 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(ActiveEditorLanguage));
 		OnPropertyChanged(nameof(ActiveEditorEditableRangesJson));
 		OnPropertyChanged(nameof(ActiveEditorText));
+	}
+
+	private void RequestActiveEditorCursorMove(int lineNumber, int column)
+	{
+		ActiveEditorRequestedCursorLineNumber = Math.Max(1, lineNumber);
+		ActiveEditorRequestedCursorColumn = Math.Max(1, column);
+		ActiveEditorRequestedCursorVersion++;
 	}
 
 	private void ScheduleSettingsAutosave()
@@ -4053,11 +4430,13 @@ public sealed class MainPageViewModel : ObservableObject
 				return null;
 			}
 
+			string sourceText = MainPageViewModel.NormalizeLineEndings(_owner.RequestEditorText);
 			return new(
 				DocumentId: _owner.RequestLocation,
 				Title: _owner.RequestName,
 				Language: _owner.ActiveEditorLanguage,
-				SourceText: _owner.RequestEditorText);
+				SourceText: sourceText,
+				Diagnostics: BuildDiagnostics(sourceText));
 		}
 
 		public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
@@ -4072,9 +4451,33 @@ public sealed class MainPageViewModel : ObservableObject
 				return AiActiveDocumentUpdateResult.Failure("The active request changed before the AI patch could be applied.");
 			}
 
+			string normalizedText = NormalizeLineEndings(
+				RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(
+					updatedText,
+					preRequestScript: string.Empty,
+					string.IsNullOrWhiteSpace(_owner.RequestName) ? "Untitled Request" : _owner.RequestName));
+			ForRestScriptCompilationResult compilation = _owner._scriptExecutionService.Compile(
+				normalizedText,
+				_owner._selectedWorkspaceId,
+				_owner.RequestName);
+			if (!compilation.Succeeded || compilation.Payload is null)
+			{
+				string detail = compilation.Diagnostics.Count == 0
+					? "The AI edit introduced a request syntax error."
+					: string.Join(
+						"  ",
+						compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
+				return AiActiveDocumentUpdateResult.Failure($"The AI edit was rejected because it left the request invalid. {detail} Read the active document again and use the current diagnostics to repair it.");
+			}
+
+			if (!_owner.TryValidateCompiledRequestScripts(compilation.Payload, out string scriptValidationDetail))
+			{
+				return AiActiveDocumentUpdateResult.Failure($"The AI edit was rejected because its generated script would not run. {scriptValidationDetail} Read the active document again and keep `expect` statements top-level.");
+			}
+
 			void apply()
 			{
-				_owner.ApplyAiConversationText(updatedText);
+				_owner.ApplyAiConversationText(normalizedText);
 			}
 
 			try
@@ -4094,6 +4497,58 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 
 			return AiActiveDocumentUpdateResult.Success();
+		}
+
+		private IReadOnlyList<AiActiveDocumentDiagnostic> BuildDiagnostics(string sourceText)
+		{
+			try
+			{
+				ForRestScriptCompilationResult compilation = _owner._scriptExecutionService.Compile(
+					sourceText,
+					_owner._selectedWorkspaceId,
+					_owner.RequestName);
+
+				List<AiActiveDocumentDiagnostic> diagnostics =
+				[
+					.. compilation.Diagnostics
+						.OrderByDescending(static diagnostic => diagnostic.Severity == ForRestScriptDiagnosticSeverity.Error)
+						.ThenBy(static diagnostic => diagnostic.Line)
+						.ThenBy(static diagnostic => diagnostic.Column)
+						.Select(
+							static diagnostic => new AiActiveDocumentDiagnostic(
+								diagnostic.Severity == ForRestScriptDiagnosticSeverity.Error ? "error" : "warning",
+								diagnostic.Message,
+								Math.Max(1, diagnostic.Line),
+								Math.Max(1, diagnostic.Column)))
+				];
+
+				if (compilation.Succeeded &&
+				    compilation.Payload is not null &&
+				    !_owner.TryValidateCompiledRequestScripts(compilation.Payload, out string scriptValidationDetail))
+				{
+					diagnostics.AddRange(ParseScriptValidationDiagnostics(scriptValidationDetail));
+				}
+
+				return
+				[
+					.. diagnostics
+						.OrderByDescending(static diagnostic => string.Equals(diagnostic.Severity, "error", StringComparison.OrdinalIgnoreCase))
+						.ThenBy(static diagnostic => diagnostic.Line)
+						.ThenBy(static diagnostic => diagnostic.Column)
+						.Take(12)
+				];
+			}
+			catch (Exception exception)
+			{
+				return
+				[
+					new(
+						"error",
+						$"Unable to compile the active document: {exception.Message}",
+						1,
+						1)
+				];
+			}
 		}
 	}
 }

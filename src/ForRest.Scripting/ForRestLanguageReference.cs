@@ -252,12 +252,27 @@ internal static class ForRestLanguageReference
             "expect",
             "Assertions",
             "Assert on status, headers, body content, or JSON selectors.",
-            "Use `expect` to keep scripts self-checking. Failed expectations are surfaced in the debug pane and history.",
+            "Use `expect` to keep scripts self-checking. Failed expectations are surfaced in the debug pane and history. `expect` is a top-level assertion form, not a flow statement, so keep it outside `if`, `else`, `foreach`, and `while` blocks.",
             "expect status == 200 \"returns 200\"",
             ["assert", "test", "status", "json"],
             ["expect"],
             "Keyword",
             "expect status == ${1:200} \"${2:returns 200}\"",
+            true),
+        new(
+            "comments",
+            "# comments",
+            "Flow",
+            "Write comments with leading `#` lines only.",
+            "ForRest treats lines starting with `#` as comments. `//` comments are not part of the language, and trailing inline comments after code are not supported.",
+            """
+            # Explain the next flow block.
+            request.headers["X-Trace"] = trace_id
+            """,
+            ["comment", "comments", "#", "//"],
+            ["comments", "#"],
+            "Snippet",
+            "# ${1:comment}",
             true),
         new(
             "if",

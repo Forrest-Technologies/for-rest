@@ -14,7 +14,9 @@ public sealed record AiInlineConversationResult(
     bool Succeeded,
     string UpdatedText,
     string StatusText,
-    string DebugText)
+    string DebugText,
+    int? SuggestedCursorLineNumber = null,
+    int SuggestedCursorColumn = 4)
 {
     public static AiInlineConversationResult NotHandled(string sourceText)
     {
@@ -58,16 +60,16 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             cancellationToken);
 
         string latestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
-        int promptLineNumber = ResolvePromptLineNumber(latestSource, prompt);
-        string updatedText = AiInlineConversationFormatter.ApplyResponse(latestSource, promptLineNumber, turn.ResponseText);
-        updatedText = FadeOlderResponses(updatedText, request.Settings.Conversation.MaxHistoryTurns);
+        ConversationUpdate updatedDocument = BuildUpdatedDocument(request.SourceText, latestSource, prompt, turn);
 
         return new(
             Handled: true,
             Succeeded: turn.Succeeded,
-            UpdatedText: updatedText,
+            UpdatedText: updatedDocument.Text,
             StatusText: turn.Succeeded ? "AI replied." : "AI could not complete the request.",
-            DebugText: BuildDebugText(prompt, turn));
+            DebugText: BuildDebugText(prompt, turn),
+            SuggestedCursorLineNumber: updatedDocument.SuggestedCursorLineNumber,
+            SuggestedCursorColumn: updatedDocument.SuggestedCursorColumn);
     }
 
     private static AiInlineConversationPrompt? ResolvePrompt(AiInlineConversationDocument document, int cursorLineNumber)
@@ -82,7 +84,8 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             AiInlineConversationLine cursorLine = document.Lines[cursorLineNumber - 1];
             if (cursorLine.IsConversationLine)
             {
-                return document.FindLatestPrompt(cursorLineNumber);
+                AiInlineConversationPrompt? prompt = document.FindLatestPrompt(cursorLineNumber);
+                return IsActionablePrompt(prompt) ? prompt : null;
             }
         }
 
@@ -90,10 +93,34 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             static line => line.Kind is not AiInlineConversationLineKind.Blank);
         if (lastContentLine?.Kind == AiInlineConversationLineKind.Prompt)
         {
-            return document.FindLatestPrompt(lastContentLine.LineNumber);
+            AiInlineConversationPrompt? prompt = document.FindLatestPrompt(lastContentLine.LineNumber);
+            return IsActionablePrompt(prompt) ? prompt : null;
         }
 
         return null;
+    }
+
+    private static bool IsActionablePrompt(AiInlineConversationPrompt? prompt)
+    {
+        return prompt is not null && !string.IsNullOrWhiteSpace(prompt.PromptText);
+    }
+
+    private static ConversationUpdate BuildUpdatedDocument(
+        string originalSource,
+        string latestSource,
+        AiInlineConversationPrompt originalPrompt,
+        AiTurnExecutionResult turn)
+    {
+        if (turn.Succeeded && HasDocumentChanged(originalSource, latestSource))
+        {
+            string cleaned = RemoveConversationBlocks(latestSource);
+            return InsertFreshPromptNearLine(cleaned, originalPrompt.LineNumber);
+        }
+
+        int promptLineNumber = ResolvePromptLineNumber(latestSource, originalPrompt);
+        string withResponse = AiInlineConversationFormatter.ApplyResponse(latestSource, promptLineNumber, turn.ResponseText);
+        string latestOnly = KeepOnlyPromptBlock(withResponse, promptLineNumber);
+        return InsertFreshPromptAfterConversation(latestOnly, promptLineNumber);
     }
 
     private static int ResolvePromptLineNumber(string sourceText, AiInlineConversationPrompt originalPrompt)
@@ -111,25 +138,133 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         return match?.LineNumber ?? current.FindLatestPrompt(originalPrompt.LineNumber)?.LineNumber ?? originalPrompt.LineNumber;
     }
 
-    private static string FadeOlderResponses(string sourceText, int maxHistoryTurns)
+    private static bool HasDocumentChanged(string originalSource, string latestSource)
     {
-        int maxTurns = Math.Max(1, maxHistoryTurns);
+        return !string.Equals(
+            NormalizeLineEndings(originalSource).Trim(),
+            NormalizeLineEndings(latestSource).Trim(),
+            StringComparison.Ordinal);
+    }
+
+    private static string RemoveConversationBlocks(string sourceText)
+    {
         AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
-        List<AiInlineConversationPrompt> activePrompts = document.Prompts
-            .Where(static prompt => prompt.HasActiveResponse)
+        List<string> lines = document.Lines
+            .Where(static line => line.Kind is not AiInlineConversationLineKind.Prompt
+                and not AiInlineConversationLineKind.Response
+                and not AiInlineConversationLineKind.StaleResponse)
+            .Select(static line => line.Text)
             .ToList();
-        if (activePrompts.Count <= maxTurns)
+        return JoinLines(lines, document.LineEnding);
+    }
+
+    private static string KeepOnlyPromptBlock(string sourceText, int promptLineNumber)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        AiInlineConversationPrompt? keptPrompt = document.FindLatestPrompt(promptLineNumber);
+        if (keptPrompt is null)
         {
-            return sourceText;
+            return RemoveConversationBlocks(sourceText);
         }
 
-        string updated = sourceText;
-        foreach (AiInlineConversationPrompt stalePrompt in activePrompts.Take(activePrompts.Count - maxTurns))
+        HashSet<int> keptLineNumbers = new([keptPrompt.LineNumber, .. keptPrompt.BlockLines.Select(static line => line.LineNumber)]);
+        List<string> lines = document.Lines
+            .Where(line =>
+                line.Kind is not AiInlineConversationLineKind.Prompt
+                and not AiInlineConversationLineKind.Response
+                and not AiInlineConversationLineKind.StaleResponse
+                || keptLineNumbers.Contains(line.LineNumber))
+            .Select(static line => line.Text)
+            .ToList();
+        return JoinLines(lines, document.LineEnding);
+    }
+
+    private static ConversationUpdate InsertFreshPromptAfterConversation(string sourceText, int promptLineNumber)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        List<string> lines = document.Lines.Select(static line => line.Text).ToList();
+        int promptIndex = FindPromptIndex(document, promptLineNumber);
+        if (promptIndex < 0)
         {
-            updated = AiInlineConversationFormatter.FadePromptResponses(updated, stalePrompt.LineNumber);
+            return InsertFreshPromptNearLine(sourceText, document.Lines.Count + 1);
         }
 
-        return updated;
+        int insertIndex = promptIndex + 1;
+        while (insertIndex < document.Lines.Count &&
+               document.Lines[insertIndex].Kind is AiInlineConversationLineKind.Response or AiInlineConversationLineKind.StaleResponse)
+        {
+            insertIndex++;
+        }
+
+        bool needsLeadingSpacer = insertIndex > 0 && !string.IsNullOrWhiteSpace(lines[insertIndex - 1]);
+        if (needsLeadingSpacer)
+        {
+            lines.Insert(insertIndex, string.Empty);
+            insertIndex++;
+        }
+
+        lines.Insert(insertIndex, "## ");
+
+        bool needsTrailingSpacer = insertIndex + 1 < lines.Count && !string.IsNullOrWhiteSpace(lines[insertIndex + 1]);
+        if (needsTrailingSpacer)
+        {
+            lines.Insert(insertIndex + 1, string.Empty);
+        }
+
+        return new(JoinLines(lines, document.LineEnding), insertIndex + 1, 4);
+    }
+
+    private static ConversationUpdate InsertFreshPromptNearLine(string sourceText, int targetLineNumber)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        List<string> lines = document.Lines.Select(static line => line.Text).ToList();
+        int insertIndex = Math.Clamp(targetLineNumber - 1, 0, lines.Count);
+
+        bool needsLeadingSpacer = insertIndex > 0 && !string.IsNullOrWhiteSpace(lines[insertIndex - 1]);
+        if (needsLeadingSpacer)
+        {
+            lines.Insert(insertIndex, string.Empty);
+            insertIndex++;
+        }
+
+        lines.Insert(insertIndex, "## ");
+
+        bool needsTrailingSpacer = insertIndex + 1 < lines.Count && !string.IsNullOrWhiteSpace(lines[insertIndex + 1]);
+        if (needsTrailingSpacer)
+        {
+            lines.Insert(insertIndex + 1, string.Empty);
+        }
+
+        return new(JoinLines(lines, document.LineEnding), insertIndex + 1, 4);
+    }
+
+    private static string JoinLines(IReadOnlyList<string> lines, string lineEnding)
+    {
+        return string.Join(lineEnding, lines);
+    }
+
+    private static int FindPromptIndex(AiInlineConversationDocument document, int promptLineNumber)
+    {
+        if (promptLineNumber < 1 || promptLineNumber > document.Lines.Count)
+        {
+            return -1;
+        }
+
+        for (int index = 0; index < document.Lines.Count; index++)
+        {
+            if (document.Lines[index].LineNumber == promptLineNumber &&
+                document.Lines[index].Kind == AiInlineConversationLineKind.Prompt)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string NormalizeLineEndings(string? value)
+    {
+        return (value ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
     private static string BuildObjective(AiInlineConversationRequest request)
@@ -155,4 +290,6 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
 
         return string.Join(Environment.NewLine, lines);
     }
+
+    private readonly record struct ConversationUpdate(string Text, int SuggestedCursorLineNumber, int SuggestedCursorColumn);
 }
