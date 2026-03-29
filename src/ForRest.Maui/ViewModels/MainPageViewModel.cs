@@ -117,6 +117,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private bool _suppressRequestAutosave;
 	private bool _suppressDocumentSynchronization;
 	private bool _isInitialized;
+	private bool _isShuttingDown;
 	private bool _isSending;
 	private RequestBodyMode _requestBodyMode = RequestBodyMode.Json;
 	private Guid _selectedWorkspaceId;
@@ -1031,6 +1032,43 @@ public sealed class MainPageViewModel : ObservableObject
 		await ReloadHistoryAsync();
 		RefreshActivationStatus();
 		_isInitialized = true;
+	}
+
+	public async Task PrepareForShutdownAsync()
+	{
+		if (_isShuttingDown)
+		{
+			return;
+		}
+
+		_isShuttingDown = true;
+		CancelPendingRequestMetadataRefresh();
+		CancelPendingRequestAutosave();
+		CancelPendingSettingsAutosave();
+
+		try
+		{
+			if (!string.IsNullOrWhiteSpace(RequestLocation))
+			{
+				await PersistCurrentRequestAsync();
+			}
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Request shutdown persistence failed.", exception);
+		}
+
+		try
+		{
+			if (_settingsTomlDocumentService.CanAutoSave(_themeConfigText))
+			{
+				_settingsTomlDocumentService.SaveRawText(_themeConfigText);
+			}
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Settings shutdown persistence failed.", exception);
+		}
 	}
 
 	public async Task SendAsync()
@@ -2575,6 +2613,11 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void RequestMetadataRefresh()
 	{
+		if (_isShuttingDown)
+		{
+			return;
+		}
+
 		if (!ShouldDebounceRequestMetadataRefresh())
 		{
 			CancelPendingRequestMetadataRefresh();
@@ -2663,6 +2706,20 @@ public sealed class MainPageViewModel : ObservableObject
 	private void CancelPendingRequestMetadataRefresh()
 	{
 		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _requestMetadataRefreshSource, null);
+		pendingSource?.Cancel();
+		pendingSource?.Dispose();
+	}
+
+	private void CancelPendingRequestAutosave()
+	{
+		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _requestSaveSource, null);
+		pendingSource?.Cancel();
+		pendingSource?.Dispose();
+	}
+
+	private void CancelPendingSettingsAutosave()
+	{
+		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _settingsSaveSource, null);
 		pendingSource?.Cancel();
 		pendingSource?.Dispose();
 	}
@@ -3107,6 +3164,11 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void ScheduleRequestAutosave()
 	{
+		if (_isShuttingDown)
+		{
+			return;
+		}
+
 		CancellationTokenSource saveSource = new();
 		CancellationTokenSource? previousSource = Interlocked.Exchange(ref _requestSaveSource, saveSource);
 		previousSource?.Cancel();
@@ -3122,6 +3184,15 @@ public sealed class MainPageViewModel : ObservableObject
 				}
 				catch (OperationCanceledException)
 				{
+				}
+				finally
+				{
+					if (ReferenceEquals(Volatile.Read(ref _requestSaveSource), saveSource))
+					{
+						Interlocked.CompareExchange(ref _requestSaveSource, null, saveSource);
+					}
+
+					saveSource.Dispose();
 				}
 			});
 	}
@@ -3561,7 +3632,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void PersistActiveRequestInBackground()
 	{
-		if (!_isInitialized || !IsActiveRequestEditor || string.IsNullOrWhiteSpace(RequestLocation))
+		if (_isShuttingDown || !_isInitialized || !IsActiveRequestEditor || string.IsNullOrWhiteSpace(RequestLocation))
 		{
 			return;
 		}
@@ -3799,6 +3870,11 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void ScheduleSettingsAutosave()
 	{
+		if (_isShuttingDown)
+		{
+			return;
+		}
+
 		if (!_settingsTomlDocumentService.CanAutoSave(_themeConfigText))
 		{
 			return;
@@ -3825,6 +3901,15 @@ public sealed class MainPageViewModel : ObservableObject
 			catch (OperationCanceledException)
 			{
 			}
+			finally
+			{
+				if (ReferenceEquals(Volatile.Read(ref _settingsSaveSource), saveSource))
+				{
+					Interlocked.CompareExchange(ref _settingsSaveSource, null, saveSource);
+				}
+
+				saveSource.Dispose();
+			}
 		});
 	}
 
@@ -3832,7 +3917,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		void refresh()
 		{
-			if (!IsActiveSettingsEditor)
+			if (_isShuttingDown || !IsActiveSettingsEditor)
 			{
 				return;
 			}

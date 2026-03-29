@@ -15,6 +15,7 @@ public partial class MainPage : ContentPage
 	private double _leftPaneWidthOnDragStart;
 	private double _rightPaneWidthOnDragStart;
 	private bool _isInitialized;
+	private bool _isPreparingForShutdown;
 #if WINDOWS
 	private UIElement? _leftSplitterNativeView;
 	private UIElement? _rightSplitterNativeView;
@@ -34,6 +35,32 @@ public partial class MainPage : ContentPage
 	}
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
+
+	public async Task PrepareForShutdownAsync()
+	{
+		if (_isPreparingForShutdown)
+		{
+			return;
+		}
+
+		_isPreparingForShutdown = true;
+
+		try
+		{
+			await CenterPane.PrepareForShutdownAsync();
+			await ViewModel.PrepareForShutdownAsync();
+		}
+		finally
+		{
+#if WINDOWS
+			if (_pageNativeView is not null)
+			{
+				_pageNativeView.KeyDown -= OnNativeKeyDown;
+				_pageNativeView = null;
+			}
+#endif
+		}
+	}
 
 	private void OnWorkbenchHostSizeChanged(object? sender, EventArgs e)
 	{

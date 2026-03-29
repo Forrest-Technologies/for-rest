@@ -8,6 +8,7 @@ public partial class App : Application
 {
 	private readonly IServiceProvider _services;
 	private readonly IThemeService _themeService;
+	private int _shutdownState;
 
 	public App(IServiceProvider services, IThemeService themeService)
 	{
@@ -67,9 +68,58 @@ public partial class App : Application
 #endif
 
 		window.HandlerChanged += (_, _) => WindowChromeStyler.Apply(window, _themeService.CurrentTheme);
+		window.Destroying += OnWindowDestroying;
 		WindowChromeStyler.Apply(window, _themeService.CurrentTheme);
 
 		return window;
+	}
+
+	private async void OnWindowDestroying(object? sender, EventArgs e)
+	{
+		if (Interlocked.Exchange(ref _shutdownState, 1) != 0)
+		{
+			return;
+		}
+
+		try
+		{
+			if (sender is Window window &&
+			    window.Page is MainPage mainPage)
+			{
+				await mainPage.PrepareForShutdownAsync();
+			}
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Window shutdown preparation failed.", exception);
+		}
+		finally
+		{
+			_themeService.ThemeChanged -= OnThemeChanged;
+
+			try
+			{
+				if (_services is IDisposable disposable)
+				{
+					disposable.Dispose();
+				}
+			}
+			catch (Exception exception)
+			{
+				AppLaunchGuard.RecordException("Application service disposal failed during shutdown.", exception);
+			}
+
+#if WINDOWS
+			try
+			{
+				Microsoft.UI.Xaml.Application.Current?.Exit();
+			}
+			catch (Exception exception)
+			{
+				AppLaunchGuard.RecordException("WinUI application exit failed during shutdown.", exception);
+			}
+#endif
+		}
 	}
 
 	private void OnThemeChanged(object? sender, ThemeChangedEventArgs e)

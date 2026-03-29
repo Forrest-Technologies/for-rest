@@ -258,6 +258,58 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task PrepareForShutdownAsync_persists_latest_request_state()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(new SourceAwareExecutionService());
+
+		viewModel.ActiveEditorText = """
+			name "shutdown demo"
+			method PUT
+			url "https://example.test/shutdown"
+			""";
+
+		await viewModel.PrepareForShutdownAsync();
+
+		string stateJson = await File.ReadAllTextAsync(harness.StateFilePath);
+		RequestWorkbenchState? state = System.Text.Json.JsonSerializer.Deserialize<RequestWorkbenchState>(
+			stateJson,
+			new System.Text.Json.JsonSerializerOptions
+			{
+				PropertyNameCaseInsensitive = true
+			});
+
+		Assert.IsNotNull(state);
+		RequestWorkbenchWorkspaceState workspace = state!.Workspaces.Single(item => item.Id == state.SelectedWorkspaceId);
+		RequestWorkbenchDocumentState document = workspace.Documents.Single(
+			item => string.Equals(item.Location, workspace.SelectedDocumentLocation, StringComparison.OrdinalIgnoreCase));
+		Assert.AreEqual("shutdown demo", document.Title);
+		Assert.AreEqual("PUT", document.Method);
+		StringAssert.Contains(document.RequestSource, "url \"https://example.test/shutdown\"");
+	}
+
+	[TestMethod]
+	public async Task PrepareForShutdownAsync_persists_pending_settings_text()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		viewModel.ActiveEditorText = viewModel.ActiveEditorText
+			.Replace("azure = true", "azure = false", StringComparison.Ordinal)
+			.Replace("dark = false", "dark = true", StringComparison.Ordinal);
+
+		await viewModel.PrepareForShutdownAsync();
+
+		string savedConfig = await File.ReadAllTextAsync(harness.ConfigFilePath);
+		StringAssert.Contains(savedConfig, "azure = false");
+		StringAssert.Contains(savedConfig, "dark = true");
+	}
+
+	[TestMethod]
 	public async Task ActiveEditorText_refreshes_settings_projection_after_ai_toggle_autosave()
 	{
 		using TestHarness harness = new();
@@ -301,6 +353,40 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual(0, executionService.ExecuteCallCount);
 		StringAssert.Contains(viewModel.ActiveEditorText, "#> Done.");
 		Assert.AreEqual("AI replied.", viewModel.ExecutionStatus);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_handles_reset_inline_ai_command_without_invoking_turn_executor()
+	{
+		using TestHarness harness = new();
+		IAiInlineConversationService aiService = new AiInlineConversationService(new ThrowingTurnExecutor());
+		FakeExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(executionService, aiService);
+
+		viewModel.ActiveEditorText = """
+			name "demo"
+			## first task
+			#> first answer
+			method GET
+			## reset
+			""";
+		viewModel.UpdateActiveEditorCursor(5, 4);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual(0, executionService.ExecuteCallCount);
+		Assert.AreEqual("AI history reset.", viewModel.ExecutionStatus);
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("## first task", StringComparison.Ordinal));
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("#> first answer", StringComparison.Ordinal));
+		CollectionAssert.AreEqual(
+			new[]
+			{
+				"name \"demo\"",
+				"method GET",
+				string.Empty,
+				"## "
+			},
+			viewModel.ActiveEditorText.Split('\n'));
 	}
 
 	[TestMethod]

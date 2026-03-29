@@ -120,6 +120,51 @@ public sealed class AiInlineConversationServiceTests
     }
 
     [TestMethod]
+    public async Task TryHandleAsync_handles_reset_command_without_invoking_ai_turn_executor()
+    {
+        StubTurnExecutor executor = new("Should not run.");
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## first task",
+                "#> first answer",
+                "method GET",
+                "## reset",
+            ]);
+        StubActiveDocumentHost host = new(source);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 5,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual("AI history reset.", result.StatusText);
+        StringAssert.Contains(result.DebugText, "Command: reset");
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "method GET",
+                string.Empty,
+                "## "
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+        Assert.AreEqual(4, result.SuggestedCursorLineNumber);
+        Assert.AreEqual(4, result.SuggestedCursorColumn);
+    }
+
+    [TestMethod]
     public async Task TryHandleAsync_cleans_chat_from_document_after_agent_applies_edits()
     {
         StubActiveDocumentHost host = new("name \"demo\"\n## tighten this request");

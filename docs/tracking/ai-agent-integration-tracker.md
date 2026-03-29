@@ -26,6 +26,7 @@ Wire a source-driven AI foundation into For-Rest using Microsoft Agent Framework
 - `done` AI-edited requests now pass both ForRest compilation and Roslyn script validation before the edit is accepted, which blocks invalid generated flow like `expect` inside control-flow blocks
 - `done` Inline AI now reopens a fresh `## ` near the active conversation instead of forcing the next prompt to the bottom of the document
 - `done` After inline AI updates, the editor can move the caret back to the fresh `## ` prompt so the user stays in the same working area
+- `done` Inline AI prompt commands can now run locally before the AI runtime; the first command is `## reset`, which clears inline chat history and reopens a fresh prompt
 
 ## Decisions
 
@@ -37,6 +38,7 @@ Wire a source-driven AI foundation into For-Rest using Microsoft Agent Framework
 - Use `##` for inline AI prompts, `#>` for active AI responses, and `#~` for faded historical AI responses inside request documents.
 - Route `Send` to the AI when the cursor is on an inline AI conversation block or when a trailing `##` prompt is the last meaningful line in the document.
 - Submit inline AI directly from the editor when the user presses `Enter` on a `##` prompt line, and flush Monaco text to the viewmodel before any send action to avoid stale-editor races on Android.
+- Handle shorthand inline prompt commands in the inline conversation service before the AI turn executor runs, so commands like `## reset` stay deterministic and do not consume model tokens.
 - Treat the active document plus its current diagnostics as the primary repair context; the agent should use docs and diagnostics before asking the user for grammar clarification.
 - Treat inline IDE mode as action-first: the agent should pick reasonable defaults, preserve working `expect` syntax when present, and avoid turning simple rewrite/fix requests into questionnaires.
 

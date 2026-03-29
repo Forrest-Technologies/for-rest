@@ -148,6 +148,27 @@ public partial class WorkbenchCenterPane : ContentView
 		}
 	}
 
+	public async Task PrepareForShutdownAsync()
+	{
+		await FlushActiveEditorAsync();
+
+		if (EditorHost.Content is MonacoEditorSurface monacoEditor)
+		{
+			monacoEditor.SendRequested -= OnEditorSendRequested;
+			monacoEditor.CursorPositionChanged -= OnEditorCursorPositionChanged;
+		}
+
+		if (_viewModelNotifier is not null)
+		{
+			_viewModelNotifier.PropertyChanged -= OnViewModelPropertyChanged;
+			_viewModelNotifier = null;
+		}
+
+		EditorHost.Content = null;
+		InlineLanguageHelpExampleHost.Content = null;
+		CompactLanguageHelpExampleHost.Content = null;
+	}
+
 	private async Task SendActiveDocumentAsync()
 	{
 		await FlushActiveEditorAsync();

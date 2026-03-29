@@ -93,6 +93,12 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             return AiInlineConversationResult.NotHandled(request.SourceText);
         }
 
+        AiInlineConversationResult? commandResult = TryHandlePromptCommand(request.SourceText, prompt);
+        if (commandResult is not null)
+        {
+            return commandResult;
+        }
+
         AiTurnExecutionResult turn = await ExecuteTurnWithAutonomousRecoveryAsync(request, prompt, cancellationToken);
 
         string latestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
@@ -106,6 +112,32 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             DebugText: BuildDebugText(prompt, turn),
             ResponseText: turn.ResponseText,
             PromptLineNumber: prompt.LineNumber,
+            UpdateKind: updatedDocument.Kind,
+            SuggestedCursorLineNumber: updatedDocument.SuggestedCursorLineNumber,
+            SuggestedCursorColumn: updatedDocument.SuggestedCursorColumn);
+    }
+
+    private static AiInlineConversationResult? TryHandlePromptCommand(string sourceText, AiInlineConversationPrompt prompt)
+    {
+        if (!string.Equals(prompt.PromptText.Trim(), "reset", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string cleanedSource = RemoveConversationBlocks(sourceText);
+        ConversationUpdate updatedDocument = InsertFreshPromptNearOriginalConversation(
+            cleanedSource,
+            sourceText,
+            prompt.LineNumber,
+            AiInlineConversationUpdateKind.DocumentChanged);
+
+        return new(
+            Handled: true,
+            Succeeded: true,
+            UpdatedText: updatedDocument.Text,
+            StatusText: "AI history reset.",
+            DebugText: BuildCommandDebugText(prompt, "reset"),
+            PromptLineNumber: updatedDocument.SuggestedCursorLineNumber,
             UpdateKind: updatedDocument.Kind,
             SuggestedCursorLineNumber: updatedDocument.SuggestedCursorLineNumber,
             SuggestedCursorColumn: updatedDocument.SuggestedCursorColumn);
@@ -483,6 +515,19 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildCommandDebugText(AiInlineConversationPrompt prompt, string commandName)
+    {
+        return string.Join(
+            Environment.NewLine,
+            [
+                $"AI prompt line: {prompt.LineNumber}",
+                $"Prompt: {prompt.PromptText}",
+                $"Command: {commandName}",
+                "Succeeded: True",
+                "Session reset: False",
+            ]);
     }
 
     private readonly record struct ConversationUpdate(

@@ -89,6 +89,16 @@ Examples:
 #> Add `auth.mode = bearer` and set `auth.token`.
 ```
 
+### Agent Prompt CMD
+
+Inline AI also supports local shorthand commands that run without sending a turn to the AI runtime.
+
+Currently supported:
+
+- `## reset`
+
+`## reset` clears all inline AI prompt and response lines from the active request document, then reopens a fresh blank `## ` prompt near the current working area so the user can start a new inline thread with no carried history.
+
 Current editor behavior:
 
 - pressing `Enter` on a `##` prompt line submits that AI prompt

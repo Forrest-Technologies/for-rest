@@ -1537,8 +1537,17 @@ public partial class MonacoEditorSurface : ContentView
 		}
 	}
 
-	private void OnUnloaded(object? sender, EventArgs e)
+	private async void OnUnloaded(object? sender, EventArgs e)
 	{
+		try
+		{
+			await SyncEditorTextAsync();
+		}
+		catch (Exception exception)
+		{
+			Debug.WriteLine($"[MonacoEditorSurface] Failed to sync editor text during unload.{Environment.NewLine}{exception}");
+		}
+
 		StopSyncTimer();
 		_isEditorReady = false;
 		_isWaitingForReady = false;
@@ -1949,7 +1958,7 @@ public partial class MonacoEditorSurface : ContentView
 
 		_syncTimer = Dispatcher.CreateTimer();
 		_syncTimer.Interval = TimeSpan.FromMilliseconds(450);
-		_syncTimer.Tick += async (_, _) => await SyncEditorTextAsync();
+		_syncTimer.Tick += OnSyncTimerTick;
 		_syncTimer.Start();
 	}
 
@@ -1960,8 +1969,14 @@ public partial class MonacoEditorSurface : ContentView
 			return;
 		}
 
+		_syncTimer.Tick -= OnSyncTimerTick;
 		_syncTimer.Stop();
 		_syncTimer = null;
+	}
+
+	private async void OnSyncTimerTick(object? sender, EventArgs e)
+	{
+		await SyncEditorTextAsync();
 	}
 
 	private async Task SyncEditorTextAsync()
