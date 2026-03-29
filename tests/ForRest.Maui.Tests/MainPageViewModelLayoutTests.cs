@@ -460,6 +460,70 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_streaming_reply_preserves_follow_up_prompt_after_ai_reply()
+	{
+		using TestHarness harness = new();
+		File.WriteAllText(
+			harness.ConfigFilePath,
+			"""
+			license = ""
+
+			[appearance.theme]
+			light = true
+			azure = false
+			dark = false
+			black = false
+			amber = false
+
+			[ai]
+			enabled = true
+			stream_responses = true
+			provider = "openai"
+			api = "responses"
+			model = "gpt-4.1-mini"
+			api_key = "workbench-api-key"
+			system_prompt = "Use terse answers."
+			""");
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText:
+				"""
+				name "demo"
+				## explain this request
+				#> This reply used to stop without a fresh prompt.
+				method GET
+				""",
+				StatusText: "AI replied.",
+				DebugText: "ai debug",
+				ResponseText: "This reply used to stop without a fresh prompt.",
+				PromptLineNumber: 2,
+				UpdateKind: AiInlineConversationUpdateKind.ResponseOnly));
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+
+		viewModel.ActiveEditorText = "name \"demo\"\n## explain this request\nmethod GET";
+		viewModel.UpdateActiveEditorCursor(2, 4);
+
+		await viewModel.SendAsync();
+
+		CollectionAssert.AreEqual(
+			new[]
+			{
+				"name \"demo\"",
+				"## explain this request",
+				"#> This reply used to stop without a fresh prompt.",
+				string.Empty,
+				"## ",
+				string.Empty,
+				"method GET",
+			},
+			viewModel.ActiveEditorText.Split('\n'));
+		Assert.AreEqual(5, viewModel.ActiveEditorRequestedCursorLineNumber);
+		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorColumn);
+	}
+
+	[TestMethod]
 	public async Task SendAsync_keeps_regular_request_send_when_cursor_is_not_on_ai_prompt()
 	{
 		using TestHarness harness = new();

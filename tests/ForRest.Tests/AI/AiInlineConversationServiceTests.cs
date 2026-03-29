@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ForRest.Services.AI;
 
 namespace ForRest.Tests.AI;
@@ -310,21 +311,166 @@ public sealed class AiInlineConversationServiceTests
         Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
     }
 
+    [TestMethod]
+    public async Task TryHandleAsync_retries_edit_requests_when_the_agent_only_returns_a_stuck_reply()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## rewrite this request\nmethod GET");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText: "I can't safely rewrite this yet without knowing which exact syntax you want.",
+                        Issues: [],
+                        SessionReset: false);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"demo\"\nmethod POST");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Updated the request to POST while keeping it valid.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "autonomous repair pass");
+        Assert.IsTrue(result.Succeeded);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method POST",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_does_not_retry_informational_prompts_that_do_not_need_document_edits()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## explain this request\nmethod GET");
+        StubTurnExecutor executor = new("It sends the current request exactly as written.");
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(1, executor.CallCount);
+        Assert.IsTrue(result.Succeeded);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## explain this request",
+                "#> It sends the current request exactly as written.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_retries_multiple_choice_refusals_for_enumerate_and_stash_edits()
+    {
+        StubActiveDocumentHost host = new("name \"todo\"\n## Enumerate over 1 through 20, stash completed todos\nmethod GET");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText:
+                            "I can\u2019t apply the change yet.\n\n### What I need from you\nAre you trying to:\n1) replace the current request?\n2) create a second request?\nReply \"1\" or \"2\".",
+                        Issues: [],
+                        SessionReset: false);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"todo\"\nmethod GET\nmax_send_iterations 20\n\nforeach todoId in [1..20] {\n  request.url = $\"https://jsonplaceholder.typicode.com/todos/{todoId}\"\n  let sent = request.send()\n  if sent.completed {\n    stash.UserId = sent.userId\n    stash.TodoId = sent.id\n    stash.Title = sent.title\n    stash.Commit()\n  }\n}");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Updated the active request in place.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-2",
+                DocumentTitle: "Todo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "autonomous repair pass");
+        StringAssert.Contains(executor.PromptHistory[1], "transform the current request in place");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "max_send_iterations 20");
+        StringAssert.Contains(result.UpdatedText, "stash.Title = sent.title");
+    }
+
     private sealed class StubTurnExecutor : IAiTurnExecutor
     {
-        private readonly string _responseText;
-        private readonly Action<AiTurnExecutionRequest>? _onExecute;
+        private readonly Func<AiTurnExecutionRequest, int, AiTurnExecutionResult> _onExecute;
 
         public StubTurnExecutor(string responseText = "Done.", Action<AiTurnExecutionRequest>? onExecute = null)
         {
-            _responseText = responseText;
+            _onExecute = (request, _) =>
+            {
+                onExecute?.Invoke(request);
+                return new AiTurnExecutionResult(true, responseText, [], SessionReset: false);
+            };
+        }
+
+        public StubTurnExecutor(Func<AiTurnExecutionRequest, int, AiTurnExecutionResult> onExecute)
+        {
             _onExecute = onExecute;
         }
 
+        public int CallCount { get; private set; }
+
+        public List<string> PromptHistory { get; } = [];
+
         public Task<AiTurnExecutionResult> ExecuteAsync(AiTurnExecutionRequest request, CancellationToken cancellationToken = default)
         {
-            _onExecute?.Invoke(request);
-            return Task.FromResult(new AiTurnExecutionResult(true, _responseText, [], SessionReset: false));
+            CallCount++;
+            PromptHistory.Add(request.Prompt);
+            return Task.FromResult(_onExecute(request, CallCount));
         }
     }
 

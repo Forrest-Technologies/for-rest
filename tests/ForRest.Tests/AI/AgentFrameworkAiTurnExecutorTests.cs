@@ -65,6 +65,86 @@ public sealed class AgentFrameworkAiTurnExecutorTests
         Assert.IsTrue(agent.Calls[1].HasContinuationToken);
     }
 
+    [TestMethod]
+    public async Task ExecuteAsync_retries_internally_when_an_edit_request_leaves_the_active_document_unchanged()
+    {
+        MutableActiveDocumentHost host = new("name \"Example\"\nmethod GET");
+        StubAgent agent = new(
+            (_, _) => CreateResponse("I can't safely update the script until I know the exact syntax.", ChatFinishReason.Stop),
+            (_, _) =>
+            {
+                host.SourceText = "name \"Example\"\nmethod POST";
+                return CreateResponse("Updated the request to use POST.", ChatFinishReason.Stop);
+            });
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(new StubRuntimeFactory(agent));
+
+        AiTurnExecutionResult result = await executor.ExecuteAsync(
+            new(
+                ConversationId: "doc-3",
+                Objective: "Update the active request.",
+                Prompt: "Rewrite this request to use POST.",
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual("Updated the request to use POST.", result.ResponseText);
+        Assert.AreEqual(2, agent.Calls.Count);
+        Assert.AreEqual("name \"Example\"\nmethod POST", host.SourceText);
+        StringAssert.Contains(agent.Calls[1].MessageText, "The previous turn did not modify the active document");
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_treats_enumerate_and_stash_prompt_as_an_in_place_edit_request()
+    {
+        MutableActiveDocumentHost host = new("name \"Get Todo\"\nmethod GET\nurl \"https://jsonplaceholder.typicode.com/todos/1\"");
+        StubAgent agent = new(
+            (_, _) => CreateResponse("I need to know whether to replace this request or create a second one.", ChatFinishReason.Stop),
+            (_, _) =>
+            {
+                host.SourceText =
+                    "name \"Get Todo\"\nmethod GET\nurl \"https://jsonplaceholder.typicode.com/todos/1\"\nmax_send_iterations 20\n\nforeach todoId in [1..20] {\n  request.url = $\"https://jsonplaceholder.typicode.com/todos/{todoId}\"\n  let sent = request.send()\n  if sent.completed {\n    stash.UserId = sent.userId\n    stash.TodoId = sent.id\n    stash.Title = sent.title\n    stash.Commit()\n  }\n}\n\nexpect status == 200 \"returns 200\"";
+                return CreateResponse("Updated the active request to iterate todos and stash completed rows.", ChatFinishReason.Stop);
+            });
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(new StubRuntimeFactory(agent));
+
+        AiTurnExecutionResult result = await executor.ExecuteAsync(
+            new(
+                ConversationId: "doc-3b",
+                Objective: "Update the active request.",
+                Prompt: "Enumerate over 1 through 20, for the completed ones, stash the user ID and the Id and the Message.",
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(2, agent.Calls.Count);
+        StringAssert.Contains(agent.Calls[1].MessageText, "Modify the current active request in place.");
+        StringAssert.Contains(agent.Calls[1].MessageText, "foreach/request.send/request.url/max_send_iterations pattern");
+        StringAssert.Contains(host.SourceText, "max_send_iterations 20");
+        StringAssert.Contains(host.SourceText, "foreach todoId in [1..20]");
+        StringAssert.Contains(host.SourceText, "stash.Title = sent.title");
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_does_not_force_internal_repair_for_non_edit_prompts()
+    {
+        MutableActiveDocumentHost host = new("name \"Example\"\nmethod GET");
+        StubAgent agent = new(
+            (_, _) => CreateResponse("This request sends a GET request.", ChatFinishReason.Stop));
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(new StubRuntimeFactory(agent));
+
+        AiTurnExecutionResult result = await executor.ExecuteAsync(
+            new(
+                ConversationId: "doc-4",
+                Objective: "Explain the active request.",
+                Prompt: "Explain what this request does.",
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual("This request sends a GET request.", result.ResponseText);
+        Assert.AreEqual(1, agent.Calls.Count);
+    }
+
     private static AgentResponse CreateResponse(
         string text,
         ChatFinishReason? finishReason = null,
@@ -135,6 +215,27 @@ public sealed class AgentFrameworkAiTurnExecutorTests
 
     private sealed class StubSession : AgentSession
     {
+    }
+
+    private sealed class MutableActiveDocumentHost(string sourceText) : IAiActiveDocumentHost
+    {
+        public string SourceText { get; set; } = sourceText;
+
+        public AiActiveDocumentSnapshot? GetActiveDocument()
+        {
+            return new(
+                "request-1",
+                "Example Request",
+                "forrest",
+                SourceText,
+                []);
+        }
+
+        public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
+        {
+            SourceText = updatedText;
+            return AiActiveDocumentUpdateResult.Success(updatedText);
+        }
     }
 
     private sealed record CallInfo(IEnumerable<string> MessageTexts, bool HasContinuationToken)

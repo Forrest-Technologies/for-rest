@@ -46,6 +46,12 @@ public sealed class AiPromptManifestBuilderTests
         StringAssert.Contains(manifest.SystemPrompt, "Ask at most 2 clarification turn");
         StringAssert.Contains(manifest.SystemPrompt, "read_all_docs or the built-in full-corpus fallback");
         StringAssert.Contains(manifest.SystemPrompt, "Treat inline editor chat markers");
+        StringAssert.Contains(manifest.SystemPrompt, "batch-stash-loop");
+        StringAssert.Contains(manifest.SystemPrompt, "request-url");
+        StringAssert.Contains(manifest.SystemPrompt, "closest valid field");
+        StringAssert.Contains(manifest.SystemPrompt, "retryWithRead");
+        StringAssert.Contains(manifest.SystemPrompt, "retryWithReplace");
+        StringAssert.Contains(manifest.SystemPrompt, "docHints");
         Assert.IsFalse(manifest.SystemPrompt.Contains("super-secret", StringComparison.Ordinal));
         Assert.AreEqual(3, manifest.Tools.Count);
         Assert.AreEqual(1, manifest.Topics.Count);

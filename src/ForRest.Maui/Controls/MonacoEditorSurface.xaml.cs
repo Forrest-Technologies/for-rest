@@ -1404,6 +1404,7 @@ public partial class MonacoEditorSurface : ContentView
 	private readonly SemaphoreSlim _stateApplyLock = new(1, 1);
 	private int _requestedStateVersion;
 	private int _appliedStateVersion;
+	private int _pendingTextVersion;
 	private string _lastNonEmptySettingsText = string.Empty;
 	private string _pendingText = string.Empty;
 	private string _pendingLanguage = "forrest";
@@ -1575,6 +1576,7 @@ public partial class MonacoEditorSurface : ContentView
 		}
 
 		editor._shouldApplyTextToEditor = true;
+		Interlocked.Increment(ref editor._pendingTextVersion);
 		editor.RequestStateApply();
 	}
 
@@ -1849,6 +1851,7 @@ public partial class MonacoEditorSurface : ContentView
 			LanguageHelpJson: string.IsNullOrWhiteSpace(_pendingLanguageHelpJson) ? "[]" : _pendingLanguageHelpJson,
 			EnableResponseActions: _pendingEnableResponseActions,
 			ApplyText: _shouldApplyTextToEditor,
+			TextVersion: Volatile.Read(ref _pendingTextVersion),
 			RequestedCursorLineNumber: _pendingRequestedCursorLineNumber,
 			RequestedCursorColumn: _pendingRequestedCursorColumn,
 			RequestedCursorVersion: _pendingRequestedCursorVersion);
@@ -1883,7 +1886,11 @@ public partial class MonacoEditorSurface : ContentView
 			if (state.ApplyText)
 			{
 				await EnsureTextAppliedAsync(state);
-				_shouldApplyTextToEditor = false;
+				if (state.TextVersion == Volatile.Read(ref _pendingTextVersion) &&
+				    string.Equals(_pendingText, state.Text, StringComparison.Ordinal))
+				{
+					_shouldApplyTextToEditor = false;
+				}
 			}
 		}
 		finally
@@ -2250,6 +2257,7 @@ public partial class MonacoEditorSurface : ContentView
 		string LanguageHelpJson,
 		bool EnableResponseActions,
 		bool ApplyText,
+		int TextVersion,
 		int RequestedCursorLineNumber,
 		int RequestedCursorColumn,
 		int RequestedCursorVersion);

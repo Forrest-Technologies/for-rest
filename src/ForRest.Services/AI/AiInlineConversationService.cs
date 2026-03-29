@@ -40,6 +40,40 @@ public interface IAiInlineConversationService
 
 public sealed class AiInlineConversationService : IAiInlineConversationService
 {
+    private const int MaxAutonomousRepairAttempts = 2;
+    private static readonly string[] StuckResponsePhrases =
+    [
+        "can't apply",
+        "cannot apply",
+        "can't safely",
+        "cannot safely",
+        "can't update",
+        "cannot update",
+        "can't rewrite",
+        "cannot rewrite",
+        "the runtime rejected",
+        "runtime rejected",
+        "diagnostics indicate",
+        "one quick detail",
+        "without knowing",
+        "need to know",
+        "which exact",
+        "if you're good with that",
+        "if you want me to",
+        "not sure",
+        "unclear",
+        "i can't",
+        "i cannot",
+        "i tried to rewrite",
+        "can't parse",
+        "cannot parse",
+        "what i need from you",
+        "are you trying to",
+        "reply 1",
+        "reply 2",
+        "reply \"1\"",
+        "reply \"2\"",
+    ];
     private readonly IAiTurnExecutor _turnExecutor;
 
     public AiInlineConversationService(IAiTurnExecutor turnExecutor)
@@ -59,14 +93,7 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             return AiInlineConversationResult.NotHandled(request.SourceText);
         }
 
-        AiTurnExecutionResult turn = await _turnExecutor.ExecuteAsync(
-            new(
-                ConversationId: request.DocumentId,
-                Objective: BuildObjective(request),
-                Prompt: prompt.PromptText,
-                Settings: request.Settings,
-                ActiveDocumentHost: request.ActiveDocumentHost),
-            cancellationToken);
+        AiTurnExecutionResult turn = await ExecuteTurnWithAutonomousRecoveryAsync(request, prompt, cancellationToken);
 
         string latestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
         ConversationUpdate updatedDocument = BuildUpdatedDocument(request.SourceText, latestSource, prompt, turn);
@@ -82,6 +109,58 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             UpdateKind: updatedDocument.Kind,
             SuggestedCursorLineNumber: updatedDocument.SuggestedCursorLineNumber,
             SuggestedCursorColumn: updatedDocument.SuggestedCursorColumn);
+    }
+
+    private async Task<AiTurnExecutionResult> ExecuteTurnWithAutonomousRecoveryAsync(
+        AiInlineConversationRequest request,
+        AiInlineConversationPrompt prompt,
+        CancellationToken cancellationToken)
+    {
+        AiTurnExecutionResult turn = await ExecuteTurnAsync(request, prompt.PromptText, cancellationToken);
+        bool sessionReset = turn.SessionReset;
+
+        for (int attempt = 0; attempt < MaxAutonomousRepairAttempts; attempt++)
+        {
+            string latestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
+            if (!ShouldAttemptAutonomousRepair(prompt.PromptText, request.SourceText, latestSource, turn))
+            {
+                return turn with { SessionReset = sessionReset };
+            }
+
+            AiTurnExecutionResult repairTurn = await ExecuteTurnAsync(
+                request,
+                BuildAutonomousRepairPrompt(prompt.PromptText),
+                cancellationToken);
+            sessionReset |= repairTurn.SessionReset;
+            turn = repairTurn with { SessionReset = sessionReset };
+        }
+
+        string finalSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
+        if (ShouldAttemptAutonomousRepair(prompt.PromptText, request.SourceText, finalSource, turn))
+        {
+            return turn with
+            {
+                Succeeded = false,
+                SessionReset = sessionReset,
+            };
+        }
+
+        return turn with { SessionReset = sessionReset };
+    }
+
+    private Task<AiTurnExecutionResult> ExecuteTurnAsync(
+        AiInlineConversationRequest request,
+        string promptText,
+        CancellationToken cancellationToken)
+    {
+        return _turnExecutor.ExecuteAsync(
+            new(
+                ConversationId: request.DocumentId,
+                Objective: BuildObjective(request),
+                Prompt: promptText,
+                Settings: request.Settings,
+                ActiveDocumentHost: request.ActiveDocumentHost),
+            cancellationToken);
     }
 
     private static ConversationUpdate BuildUpdatedDocument(
@@ -133,6 +212,80 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             NormalizeLineEndings(AiInlineConversationFormatter.RemoveConversationLines(originalSource)).Trim(),
             NormalizeLineEndings(AiInlineConversationFormatter.RemoveConversationLines(latestSource)).Trim(),
             StringComparison.Ordinal);
+    }
+
+    private static bool ShouldAttemptAutonomousRepair(
+        string promptText,
+        string originalSource,
+        string latestSource,
+        AiTurnExecutionResult turn)
+    {
+        if (HasDocumentChanged(originalSource, latestSource))
+        {
+            return false;
+        }
+
+        if (turn.ResponseText.StartsWith("AI request failed:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (LooksLikeStuckResponse(turn.ResponseText))
+        {
+            return true;
+        }
+
+        return !turn.Succeeded && AiPromptIntentClassifier.IsLikelyEditPrompt(promptText);
+    }
+
+    private static bool LooksLikeStuckResponse(string responseText)
+    {
+        string normalized = NormalizeSearchText(responseText);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return normalized.EndsWith("?", StringComparison.Ordinal) ||
+               ContainsAnyPhrase(normalized, StuckResponsePhrases) ||
+               LooksLikeMultipleChoiceResponse(normalized);
+    }
+
+    private static bool LooksLikeMultipleChoiceResponse(string normalizedResponse)
+    {
+        bool hasFirstChoice = normalizedResponse.Contains("1)", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("1.", StringComparison.Ordinal);
+        bool hasSecondChoice = normalizedResponse.Contains("2)", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("2.", StringComparison.Ordinal);
+        return hasFirstChoice &&
+               hasSecondChoice &&
+               (normalizedResponse.Contains("reply", StringComparison.Ordinal) ||
+                normalizedResponse.Contains("choose", StringComparison.Ordinal) ||
+                normalizedResponse.Contains("which", StringComparison.Ordinal));
+    }
+
+    private static bool ContainsAnyPhrase(string sourceText, IReadOnlyList<string> phrases)
+    {
+        foreach (string phrase in phrases)
+        {
+            if (sourceText.Contains(phrase, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeSearchText(string? value)
+    {
+        return NormalizeLineEndings(value)
+            .Replace('’', '\'')
+            .Replace('‘', '\'')
+            .Replace('“', '"')
+            .Replace('”', '"')
+            .Trim()
+            .ToLowerInvariant();
     }
 
     private static string RemoveConversationBlocks(string sourceText)
@@ -292,7 +445,25 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
 
     private static string BuildObjective(AiInlineConversationRequest request)
     {
-        return $"Help with the active ForRest request document '{request.DocumentTitle}'. Use the local docs and active document tools before guessing. Active document tools expose the request script without inline chat markers. Keep clarification short and, once a reasonable default exists, prefer editing over more back-and-forth. If a targeted patch fails, prefer replacing the full request instead of asking the user for confirmation.";
+        return $"Help with the active ForRest request document '{request.DocumentTitle}'. Use the local docs and active document tools before guessing. Active document tools expose the request script without inline chat markers. Keep clarification short and, once a reasonable default exists, prefer editing over more back-and-forth. If the user asks to iterate, enumerate, batch, or stash values, default to modifying the current request in place. If a requested field name appears misspelled but the closest valid field is obvious, choose the closest valid field and state that assumption after the edit. If a targeted patch fails, prefer replacing the full request instead of asking the user for confirmation. If an edit is rejected or leaves the document unchanged, read the active document again, use the returned diagnostics, and retry internally instead of surfacing the failed attempt.";
+    }
+
+    private static string BuildAutonomousRepairPrompt(string originalPrompt)
+    {
+        return
+            $"""
+            Your previous turn did not leave the active ForRest request updated.
+            Treat this as an autonomous repair pass.
+            Do not ask the user for clarification unless a real product decision is still missing.
+            Read the active document again, inspect the latest diagnostics, use local docs if needed, and apply a valid edit now.
+            If the user asked to iterate, enumerate, batch, or stash values, transform the current request in place instead of asking whether to replace it or create another request.
+            If a requested field name is slightly wrong but the closest valid field is obvious, choose the closest valid field and note the assumption after the edit.
+            If a full rewrite is rejected, reduce the change, fix the syntax, and retry with a valid document.
+            Prefer a smaller valid improvement over an explanatory refusal or plan.
+            After the document has been updated, reply briefly with what you changed.
+
+            Original user request: {originalPrompt}
+            """;
     }
 
     private static string BuildDebugText(AiInlineConversationPrompt prompt, AiTurnExecutionResult turn)

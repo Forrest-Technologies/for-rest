@@ -15,16 +15,25 @@ public sealed record AiActiveDocumentSnapshot(
     string SourceText,
     IReadOnlyList<AiActiveDocumentDiagnostic> Diagnostics);
 
-public sealed record AiActiveDocumentUpdateResult(bool Succeeded, string Message)
+public sealed record AiActiveDocumentUpdateResult(
+    bool Succeeded,
+    string Message,
+    string UpdatedText,
+    IReadOnlyList<AiActiveDocumentDiagnostic> Diagnostics,
+    bool RetryWithReplace)
 {
-    public static AiActiveDocumentUpdateResult Success()
+    public static AiActiveDocumentUpdateResult Success(string updatedText = "")
     {
-        return new(true, string.Empty);
+        return new(true, string.Empty, updatedText ?? string.Empty, [], false);
     }
 
-    public static AiActiveDocumentUpdateResult Failure(string message)
+    public static AiActiveDocumentUpdateResult Failure(
+        string message,
+        string updatedText = "",
+        IReadOnlyList<AiActiveDocumentDiagnostic>? diagnostics = null,
+        bool retryWithReplace = false)
     {
-        return new(false, message);
+        return new(false, message, updatedText ?? string.Empty, diagnostics ?? [], retryWithReplace);
     }
 }
 
@@ -188,7 +197,9 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
                 succeeded = false,
                 documentId = document.DocumentId,
                 patchedText = document.SourceText,
+                retryWithRead = true,
                 retryWithReplace = true,
+                docHints = BuildDocHints(string.Join(Environment.NewLine, patchResult.Errors), document.Diagnostics, document.SourceText),
                 errors = patchResult.Errors,
             });
         }
@@ -200,9 +211,12 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             {
                 succeeded = false,
                 documentId = document.DocumentId,
-                patchedText = patchResult.PatchedText,
-                retryWithReplace = true,
+                patchedText = string.IsNullOrWhiteSpace(updateResult.UpdatedText) ? patchResult.PatchedText : updateResult.UpdatedText,
+                retryWithRead = true,
+                retryWithReplace = updateResult.RetryWithReplace,
+                docHints = BuildDocHints(updateResult.Message, updateResult.Diagnostics, patchResult.PatchedText),
                 errors = new[] { updateResult.Message },
+                diagnostics = updateResult.Diagnostics,
             });
         }
 
@@ -243,7 +257,17 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
         AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, updatedSourceText ?? string.Empty);
         if (!updateResult.Succeeded)
         {
-            return SerializeFailure(updateResult.Message);
+            return Serialize(new
+            {
+                succeeded = false,
+                documentId = document.DocumentId,
+                patchedText = string.IsNullOrWhiteSpace(updateResult.UpdatedText) ? updatedSourceText ?? string.Empty : updateResult.UpdatedText,
+                retryWithRead = true,
+                retryWithReplace = updateResult.RetryWithReplace,
+                docHints = BuildDocHints(updateResult.Message, updateResult.Diagnostics, updatedSourceText),
+                errors = new[] { updateResult.Message },
+                diagnostics = updateResult.Diagnostics,
+            });
         }
 
         return Serialize(new
@@ -267,5 +291,59 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             succeeded = false,
             errors,
         });
+    }
+
+    private static string[] BuildDocHints(
+        string? message,
+        IReadOnlyList<AiActiveDocumentDiagnostic>? diagnostics,
+        string? candidateText)
+    {
+        string normalized = NormalizeSearchText(
+            string.Join(
+                Environment.NewLine,
+                [
+                    message ?? string.Empty,
+                    candidateText ?? string.Empty,
+                    .. (diagnostics ?? []).Select(static diagnostic => diagnostic.Message)
+                ]));
+        HashSet<string> hints = new(StringComparer.OrdinalIgnoreCase);
+
+        if (normalized.Contains("expect", StringComparison.Ordinal) ||
+            normalized.Contains("top-level", StringComparison.Ordinal) ||
+            normalized.Contains("request.send", StringComparison.Ordinal) ||
+            normalized.Contains("send()", StringComparison.Ordinal) ||
+            normalized.Contains("foreach", StringComparison.Ordinal) ||
+            normalized.Contains("while", StringComparison.Ordinal))
+        {
+            hints.Add("batch-stash-loop");
+            hints.Add("request-url");
+            hints.Add("max-send-iterations");
+            hints.Add("stash");
+        }
+
+        if (normalized.Contains("url", StringComparison.Ordinal) ||
+            normalized.Contains("request.url", StringComparison.Ordinal))
+        {
+            hints.Add("request-url");
+        }
+
+        if (normalized.Contains("stash", StringComparison.Ordinal))
+        {
+            hints.Add("stash");
+        }
+
+        return [.. hints];
+    }
+
+    private static string NormalizeSearchText(string? value)
+    {
+        return (value ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('’', '\'')
+            .Replace('‘', '\'')
+            .Replace('“', '"')
+            .Replace('”', '"')
+            .Trim()
+            .ToLowerInvariant();
     }
 }

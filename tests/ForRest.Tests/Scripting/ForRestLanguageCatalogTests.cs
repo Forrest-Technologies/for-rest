@@ -23,9 +23,11 @@ public sealed class ForRestLanguageCatalogTests
         Assert.IsTrue(entries.Any(static entry => entry.Key == "auth-client-credentials"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "auth-negotiate"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "stash"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "request-url"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "extract-regex"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "range-literal"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "range-function"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "batch-stash-loop"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "workspace-execute"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "logic-aliases"));
         Assert.AreEqual(entries.Count, entries.Select(static entry => entry.Key).Distinct(StringComparer.Ordinal).Count());
@@ -41,6 +43,8 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(json, "\"label\":\"ssl\"");
         StringAssert.Contains(json, "\"label\":\"history\"");
         StringAssert.Contains(json, "\"label\":\"stash\"");
+        StringAssert.Contains(json, "\"label\":\"request.url\"");
+        StringAssert.Contains(json, "\"key\":\"batch-stash-loop\"");
         StringAssert.Contains(json, "\"label\":\"workspace.execute()\"");
         StringAssert.Contains(json, "\"label\":\"expect ... regex\"");
         StringAssert.Contains(json, "\"label\":\"[0..9]\"");
@@ -58,6 +62,8 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(markdown, "| `history` | Persist the run to history |");
         StringAssert.Contains(markdown, "| `max_send_iterations` | Bound `request.send()` loops |");
         StringAssert.Contains(markdown, "request.ssl");
+        StringAssert.Contains(markdown, "request.url");
+        StringAssert.Contains(markdown, "loop + stash pattern");
         StringAssert.Contains(markdown, "oauth_integrated_windows");
         StringAssert.Contains(markdown, "workspace.execute(\"Request Name\")");
         StringAssert.Contains(markdown, "`switch` / `case` / `default` are not currently part of the flow compiler");
@@ -76,6 +82,8 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(prompt, "oauth_client_credentials");
         StringAssert.Contains(prompt, "workspace.execute()");
         StringAssert.Contains(prompt, "stash");
+        StringAssert.Contains(prompt, "max_send_iterations");
+        StringAssert.Contains(prompt, "loop + stash pattern");
         StringAssert.Contains(prompt, "If a requested feature is not listed, treat it as unsupported");
     }
 }

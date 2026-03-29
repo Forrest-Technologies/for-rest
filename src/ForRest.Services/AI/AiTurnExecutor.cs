@@ -27,6 +27,7 @@ public interface IAiTurnExecutor
 public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 {
     private const int MaxAutomaticContinuationAttempts = 4;
+    private const int MaxAutonomousEditRecoveryAttempts = 2;
     private const string AutomaticContinuationPrompt = "Continue the previous answer from exactly where it stopped. Do not repeat prior text, do not add a preamble, and do not ask a follow-up question. Output only the remaining continuation.";
     private const string IncompleteResponseNote = "The AI response ended before completion after multiple automatic continuation attempts.";
     private readonly IAiRuntimeFactory _runtimeFactory;
@@ -60,13 +61,18 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 
         try
         {
-            TurnResponse turnResponse = await RunAgentWithAutomaticContinuationAsync(
+            AiActiveDocumentSnapshot? initialDocument = request.ActiveDocumentHost?.GetActiveDocument();
+            TurnResponse turnResponse = await RunAgentWithAutonomousEditRecoveryAsync(
                 runtime.Agent,
-                request.Prompt,
+                request,
                 session,
                 cancellationToken);
+            bool editCompleted = !ShouldAttemptAutonomousEditRecovery(
+                request,
+                initialDocument,
+                request.ActiveDocumentHost?.GetActiveDocument());
             return new(
-                Succeeded: turnResponse.Completed,
+                Succeeded: turnResponse.Completed && editCompleted,
                 ResponseText: BuildFinalResponseText(turnResponse.Text, turnResponse.Response),
                 Issues: runtime.Issues,
                 SessionReset: sessionReset);
@@ -176,6 +182,46 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         return new(response, accumulatedText, Completed: !ShouldAutomaticallyContinue(response));
     }
 
+    private static async Task<TurnResponse> RunAgentWithAutonomousEditRecoveryAsync(
+        AIAgent agent,
+        AiTurnExecutionRequest request,
+        AgentSession session,
+        CancellationToken cancellationToken)
+    {
+        AiActiveDocumentSnapshot? initialDocument = request.ActiveDocumentHost?.GetActiveDocument();
+        TurnResponse response = await RunAgentWithAutomaticContinuationAsync(
+            agent,
+            request.Prompt,
+            session,
+            cancellationToken);
+
+        if (!ShouldAttemptAutonomousEditRecovery(
+                request,
+                initialDocument,
+                request.ActiveDocumentHost?.GetActiveDocument()))
+        {
+            return response;
+        }
+
+        for (int attempt = 0; attempt < MaxAutonomousEditRecoveryAttempts; attempt++)
+        {
+            response = await RunAgentWithAutomaticContinuationAsync(
+                agent,
+                BuildAutonomousEditRecoveryPrompt(request.Prompt),
+                session,
+                cancellationToken);
+            if (!ShouldAttemptAutonomousEditRecovery(
+                    request,
+                    initialDocument,
+                    request.ActiveDocumentHost?.GetActiveDocument()))
+            {
+                break;
+            }
+        }
+
+        return response;
+    }
+
     private static Task<AgentResponse> ContinueResponseAsync(
         AIAgent agent,
         AgentSession session,
@@ -249,6 +295,57 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         return overlapLength <= 0
             ? currentText + continuationText
             : currentText + continuationText[overlapLength..];
+    }
+
+    private static bool ShouldAttemptAutonomousEditRecovery(
+        AiTurnExecutionRequest request,
+        AiActiveDocumentSnapshot? initialDocument,
+        AiActiveDocumentSnapshot? latestDocument)
+    {
+        return request.ActiveDocumentHost is not null &&
+               initialDocument is not null &&
+               latestDocument is not null &&
+               IsLikelyEditPrompt(request.Prompt) &&
+               !HasActiveDocumentChanged(initialDocument.SourceText, latestDocument.SourceText);
+    }
+
+    private static bool IsLikelyEditPrompt(string prompt)
+    {
+        return AiPromptIntentClassifier.IsLikelyEditPrompt(prompt);
+    }
+
+    private static bool HasActiveDocumentChanged(string? initialSource, string? latestSource)
+    {
+        return !string.Equals(
+            NormalizeComparisonText(initialSource),
+            NormalizeComparisonText(latestSource),
+            StringComparison.Ordinal);
+    }
+
+    private static string NormalizeComparisonText(string? sourceText)
+    {
+        return (sourceText ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Trim();
+    }
+
+    private static string BuildAutonomousEditRecoveryPrompt(string originalPrompt)
+    {
+        return
+            "The previous turn did not modify the active document, but the user asked for an edit." + Environment.NewLine +
+            Environment.NewLine +
+            "Do not explain the failed intermediate attempt." + Environment.NewLine +
+            "Do not ask the user a clarification question unless a real product decision is impossible to infer." + Environment.NewLine +
+            "Read the active document again, inspect any returned diagnostics or tool errors, consult local docs if needed, and apply a working change now." + Environment.NewLine +
+            "Modify the current active request in place. Do not ask whether to create a second request unless the user explicitly asked for an additional request." + Environment.NewLine +
+            "If the user asked to iterate, enumerate, batch, or stash values, use the documented foreach/request.send/request.url/max_send_iterations pattern instead of asking how to structure it." + Environment.NewLine +
+            "If a requested field name looks misspelled but the nearest valid field is obvious, choose the closest valid field and mention that assumption only after the edit succeeds." + Environment.NewLine +
+            "If patch_active_document fails or the structure is brittle, use replace_active_document with the full corrected request." + Environment.NewLine +
+            "If replace_active_document is rejected, repair the full source and try replace_active_document again." + Environment.NewLine +
+            "Finish with a brief statement of what you changed only after the document has actually been updated." + Environment.NewLine +
+            Environment.NewLine +
+            "Original user request:" + Environment.NewLine +
+            originalPrompt.Trim();
     }
 
     private static int FindOverlapLength(string existingText, string continuationText)

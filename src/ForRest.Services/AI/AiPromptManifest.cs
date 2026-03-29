@@ -69,8 +69,12 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- Treat inline editor chat markers like `##`, `#>`, and `#~` as conversation scaffolding, not part of the request script.");
         prompt.AppendLine("- When editing the active request, leave it runnable when you finish.");
         prompt.AppendLine("- Modify the existing request in place. Do not append duplicate request blocks unless the user explicitly asked for a second example.");
+        prompt.AppendLine("- If the user asks to iterate, enumerate, batch, or stash results, treat that as a request to modify the current active request in place unless they explicitly asked for an additional request.");
+        prompt.AppendLine("- For iterate/enumerate/batch/stash transformations, search the local docs for `batch-stash-loop` and `request-url` before asking the user how to structure the script.");
+        prompt.AppendLine("- Do not ask whether to keep the current request or create a new one when the user asked to transform the active request. Default to updating the active request.");
         prompt.AppendLine("- Once the request is actionable, prefer making the edit over continuing the chat.");
         prompt.AppendLine("- Inline IDE mode is not a questionnaire. If the user asked you to fix, rewrite, or improve the request, choose a reasonable default and do the work.");
+        prompt.AppendLine("- If the user names a field or value with a small typo but the nearest valid field is obvious from the request, diagnostics, or docs, choose the closest valid option and proceed. Mention the assumption briefly after the edit instead of blocking on a question.");
         prompt.AppendLine("- Use only documented ForRest syntax. If a construct is not in the local docs, do not invent it.");
         prompt.AppendLine("- Use only `#` comments on their own lines. Do not use `//` comments and do not append trailing inline comments after code.");
         prompt.AppendLine("- `expect` statements are top-level assertions. Do not put `expect` inside `if`, `else`, `foreach`, or `while` blocks.");
@@ -79,12 +83,15 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- Do not ask multiple-choice follow-up questions unless the request is truly blocked on a real product decision the user must make.");
         prompt.AppendLine($"- Ask at most {Math.Max(0, settings.Conversation.MaxClarificationTurns)} clarification turn(s) before acting. If the request is still ambiguous after that, state the assumptions you chose and proceed.");
         prompt.AppendLine("- Do not ask for confirmation before using local docs, reading the active document, or applying an obviously requested fix.");
+        prompt.AppendLine("- If a tool response includes `retryWithRead`, `retryWithReplace`, or `docHints`, treat that as a direct instruction to continue autonomously: re-read the active document, consult the hinted docs, and retry without asking the user what to do next.");
         if (toolList.Any(static tool => string.Equals(tool.Name, "replace_active_document", StringComparison.Ordinal)))
         {
             prompt.AppendLine("- If patch_active_document fails or the active document looks garbled, do not ask the user what to do next. Read the active document again if needed and use replace_active_document with the full corrected request.");
+            prompt.AppendLine("- If replace_active_document is rejected, inspect the returned diagnostics, repair the full source, and submit another replace_active_document call instead of asking the user to resolve the syntax for you.");
         }
         prompt.AppendLine("- If the request already contains working `expect` lines, preserve their exact grammar unless you are only moving them back to top-level.");
         prompt.AppendLine("- If an edit is rejected, read the active document again, inspect the latest diagnostics, and try one corrected edit before asking the user for more information.");
+        prompt.AppendLine("- If the user asked for an edit and the active document is still unchanged after a failed attempt, treat that as intermediate work. Retry internally with docs and diagnostics instead of surfacing the failed attempt.");
         prompt.AppendLine("- If an active document topic is present below, treat its source and diagnostics as the current truth. Do not ask the user to paste them again.");
         prompt.AppendLine();
 

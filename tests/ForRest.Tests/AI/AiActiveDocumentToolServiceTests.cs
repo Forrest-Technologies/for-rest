@@ -121,9 +121,44 @@ public sealed class AiActiveDocumentToolServiceTests
             """);
 
         StringAssert.Contains(response, "\"succeeded\":false");
+        StringAssert.Contains(response, "\"retryWithRead\":true");
         StringAssert.Contains(response, "\"retryWithReplace\":true");
         StringAssert.Contains(response, "\"patchedText\":\"broken\"");
+        StringAssert.Contains(response, "\"docHints\"");
+        StringAssert.Contains(response, "batch-stash-loop");
+        StringAssert.Contains(response, "request-url");
         StringAssert.Contains(response, "left the request invalid");
+        StringAssert.Contains(response, "\"diagnostics\"");
+        StringAssert.Contains(response, "Unexpected token \\u0027expect\\u0027.");
+        Assert.AreEqual("abc", host.CurrentDocument?.SourceText);
+    }
+
+    [TestMethod]
+    public void ReplaceActiveDocument_returns_host_validation_failure_with_candidate_diagnostics()
+    {
+        AiActiveDocumentToolService service = new(new AiDocumentPatchService());
+        RejectingActiveDocumentHost host = new(
+            new AiActiveDocumentSnapshot(
+                "request-1",
+                "Example Request",
+                "forrest",
+                "abc",
+                []));
+
+        string response = service.ReplaceActiveDocument(
+            BuildSettings(),
+            host,
+            "broken");
+
+        StringAssert.Contains(response, "\"succeeded\":false");
+        StringAssert.Contains(response, "\"retryWithRead\":true");
+        StringAssert.Contains(response, "\"retryWithReplace\":true");
+        StringAssert.Contains(response, "\"patchedText\":\"broken\"");
+        StringAssert.Contains(response, "\"docHints\"");
+        StringAssert.Contains(response, "batch-stash-loop");
+        StringAssert.Contains(response, "request-url");
+        StringAssert.Contains(response, "left the request invalid");
+        StringAssert.Contains(response, "Unexpected token \\u0027expect\\u0027.");
         Assert.AreEqual("abc", host.CurrentDocument?.SourceText);
     }
 
@@ -194,7 +229,13 @@ public sealed class AiActiveDocumentToolServiceTests
 
         public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
         {
-            return AiActiveDocumentUpdateResult.Failure("The AI edit was rejected because it left the request invalid.");
+            return AiActiveDocumentUpdateResult.Failure(
+                "The AI edit was rejected because it left the request invalid.",
+                updatedText,
+                [
+                    new("error", "Unexpected token 'expect'.", 4, 1),
+                ],
+                retryWithReplace: true);
         }
     }
 }

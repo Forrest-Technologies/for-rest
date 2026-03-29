@@ -393,6 +393,24 @@ internal static class ForRestLanguageReference
             "request.headers[\"${1:Header-Name}\"] = ${2:\"value\"}",
             true),
         new(
+            "request-url",
+            "request.url",
+            "Request",
+            "Mutate the outgoing request URL from flow code before calling `request.send()`.",
+            "Use `request.url` when you need to iterate ids, paginate, or probe multiple endpoints from one bounded request script. The rendered value still needs to be an absolute URL.",
+            """
+            foreach todoId in [1..3] {
+              request.url = $"https://jsonplaceholder.typicode.com/todos/{todoId}"
+              let sent = request.send()
+              log sent.id
+            }
+            """,
+            ["request url", "mutate url", "paginate", "iterate ids", "todos", "batch url"],
+            ["request.url", "request.Url"],
+            "Property",
+            "request.url = \"${1:https://api.example.test/items/1}\"",
+            true),
+        new(
             "response",
             "response",
             "Response",
@@ -449,6 +467,33 @@ internal static class ForRestLanguageReference
             ["range"],
             "Function",
             "range(${1:0}, ${2:3})",
+            true),
+        new(
+            "batch-stash-loop",
+            "loop + stash pattern",
+            "Flow",
+            "Iterate request variants, send each one, and stash selected rows while keeping `expect` top-level.",
+            "For batched probes, raise `max_send_iterations`, mutate `request.url` or headers inside `foreach`, call `request.send()`, and only `stash.Commit()` when the branch matches your condition. Leave `expect` statements after the flow block.",
+            """
+            max_send_iterations 20
+
+            foreach todoId in [1..20] {
+              request.url = $"https://jsonplaceholder.typicode.com/todos/{todoId}"
+              let sent = request.send()
+              if sent.completed {
+                stash.UserId = sent.userId
+                stash.TodoId = sent.id
+                stash.Title = sent.title
+                stash.Commit()
+              }
+            }
+
+            expect status == 200 "returns 200"
+            """,
+            ["enumerate", "iterate", "batch", "stash rows", "completed todos", "userId", "title", "request.url"],
+            ["foreach", "stash", "request.send", "request.url", "max_send_iterations"],
+            "Snippet",
+            "max_send_iterations 20\n\nforeach ${1:todoId} in [1..20] {\n  request.url = $\"https://jsonplaceholder.typicode.com/todos/{todoId}\"\n  let sent = request.send()\n  if sent.completed {\n    stash.UserId = sent.userId\n    stash.TodoId = sent.id\n    stash.Title = sent.title\n    stash.Commit()\n  }\n}\n\nexpect status == 200 \"returns 200\"",
             true),
         new(
             "count-alias",

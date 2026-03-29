@@ -4692,12 +4692,20 @@ public sealed class MainPageViewModel : ObservableObject
 					: string.Join(
 						"  ",
 						compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
-				return AiActiveDocumentUpdateResult.Failure($"The AI edit was rejected because it left the request invalid. {detail} Read the active document again and use the current diagnostics to repair it.");
+				return AiActiveDocumentUpdateResult.Failure(
+					$"The AI edit was rejected because it left the request invalid. {detail} Read the active document again and use the current diagnostics to repair it.",
+					normalizedText,
+					BuildDiagnostics(normalizedText),
+					retryWithReplace: true);
 			}
 
 			if (!_owner.TryValidateCompiledRequestScripts(compilation.Payload, out string scriptValidationDetail))
 			{
-				return AiActiveDocumentUpdateResult.Failure($"The AI edit was rejected because its generated script would not run. {scriptValidationDetail} Read the active document again and keep `expect` statements top-level.");
+				return AiActiveDocumentUpdateResult.Failure(
+					$"The AI edit was rejected because its generated script would not run. {scriptValidationDetail} Read the active document again and keep `expect` statements top-level.",
+					normalizedText,
+					BuildDiagnostics(normalizedText),
+					retryWithReplace: true);
 			}
 
 			void apply()
@@ -4718,11 +4726,11 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 			catch (Exception exception)
 			{
-				return AiActiveDocumentUpdateResult.Failure(exception.Message);
+				return AiActiveDocumentUpdateResult.Failure(exception.Message, normalizedText);
 			}
 
 			_sourceText = normalizedText;
-			return AiActiveDocumentUpdateResult.Success();
+			return AiActiveDocumentUpdateResult.Success(normalizedText);
 		}
 
 		private IReadOnlyList<AiActiveDocumentDiagnostic> BuildDiagnostics(string sourceText)
