@@ -1,4 +1,8 @@
+#pragma warning disable MEAI001
+#pragma warning disable OPENAI001
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using OpenAI.Responses;
 
 namespace ForRest.Services.AI;
 
@@ -22,6 +26,9 @@ public interface IAiTurnExecutor
 
 public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 {
+    private const int MaxAutomaticContinuationAttempts = 4;
+    private const string AutomaticContinuationPrompt = "Continue the previous answer from exactly where it stopped. Do not repeat prior text, do not add a preamble, and do not ask a follow-up question. Output only the remaining continuation.";
+    private const string IncompleteResponseNote = "The AI response ended before completion after multiple automatic continuation attempts.";
     private readonly IAiRuntimeFactory _runtimeFactory;
     private readonly SemaphoreSlim _sessionGate = new(1, 1);
     private readonly Dictionary<string, ConversationSessionEntry> _sessions = new(StringComparer.OrdinalIgnoreCase);
@@ -53,11 +60,14 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 
         try
         {
-            AgentResponse response = await runtime.Agent.RunAsync(request.Prompt, session, cancellationToken: cancellationToken);
-            string responseText = ExtractResponseText(response);
+            TurnResponse turnResponse = await RunAgentWithAutomaticContinuationAsync(
+                runtime.Agent,
+                request.Prompt,
+                session,
+                cancellationToken);
             return new(
-                Succeeded: true,
-                ResponseText: responseText,
+                Succeeded: turnResponse.Completed,
+                ResponseText: BuildFinalResponseText(turnResponse.Text, turnResponse.Response),
                 Issues: runtime.Issues,
                 SessionReset: sessionReset);
         }
@@ -147,11 +157,129 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             issues.Select(issue => issue.Message));
     }
 
+    private static async Task<TurnResponse> RunAgentWithAutomaticContinuationAsync(
+        AIAgent agent,
+        string prompt,
+        AgentSession session,
+        CancellationToken cancellationToken)
+    {
+        AgentResponse response = await agent.RunAsync(prompt, session, cancellationToken: cancellationToken);
+        string accumulatedText = ExtractResponseText(response);
+
+        for (int attempt = 0; attempt < MaxAutomaticContinuationAttempts && ShouldAutomaticallyContinue(response); attempt++)
+        {
+            response = await ContinueResponseAsync(agent, session, response, cancellationToken);
+            string nextText = ExtractResponseText(response);
+            accumulatedText = MergeContinuationText(accumulatedText, nextText);
+        }
+
+        return new(response, accumulatedText, Completed: !ShouldAutomaticallyContinue(response));
+    }
+
+    private static Task<AgentResponse> ContinueResponseAsync(
+        AIAgent agent,
+        AgentSession session,
+        AgentResponse response,
+        CancellationToken cancellationToken)
+    {
+        if (response.ContinuationToken is not null)
+        {
+            return agent.RunAsync(
+                session,
+                new AgentRunOptions
+                {
+                    ContinuationToken = response.ContinuationToken,
+                },
+                cancellationToken);
+        }
+
+        return agent.RunAsync(AutomaticContinuationPrompt, session, cancellationToken: cancellationToken);
+    }
+
+    private static bool ShouldAutomaticallyContinue(AgentResponse response)
+    {
+        if (response.FinishReason == ChatFinishReason.Length)
+        {
+            return true;
+        }
+
+        return response.RawRepresentation is ResponseResult rawResponse &&
+               rawResponse.Status == ResponseStatus.Incomplete &&
+               rawResponse.IncompleteStatusDetails?.Reason == ResponseIncompleteStatusReason.MaxOutputTokens;
+    }
+
     private static string ExtractResponseText(AgentResponse response)
     {
-        return string.IsNullOrWhiteSpace(response.Text)
+        if (!string.IsNullOrEmpty(response.Text))
+        {
+            return response.Text;
+        }
+
+        if (response.RawRepresentation is ResponseResult rawResponse)
+        {
+            return rawResponse.GetOutputText() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static string MergeContinuationText(string currentText, string continuationText)
+    {
+        if (string.IsNullOrEmpty(currentText))
+        {
+            return continuationText ?? string.Empty;
+        }
+
+        if (string.IsNullOrEmpty(continuationText))
+        {
+            return currentText;
+        }
+
+        if (continuationText.StartsWith(currentText, StringComparison.Ordinal))
+        {
+            return continuationText;
+        }
+
+        if (currentText.StartsWith(continuationText, StringComparison.Ordinal))
+        {
+            return currentText;
+        }
+
+        int overlapLength = FindOverlapLength(currentText, continuationText);
+        return overlapLength <= 0
+            ? currentText + continuationText
+            : currentText + continuationText[overlapLength..];
+    }
+
+    private static int FindOverlapLength(string existingText, string continuationText)
+    {
+        int maxOverlap = Math.Min(Math.Min(existingText.Length, continuationText.Length), 240);
+        for (int overlapLength = maxOverlap; overlapLength > 0; overlapLength--)
+        {
+            if (existingText.AsSpan(existingText.Length - overlapLength).SequenceEqual(continuationText.AsSpan(0, overlapLength)))
+            {
+                return overlapLength;
+            }
+        }
+
+        return 0;
+    }
+
+    private static string BuildFinalResponseText(string responseText, AgentResponse response)
+    {
+        string normalizedText = string.IsNullOrWhiteSpace(responseText)
+            ? string.Empty
+            : responseText.Trim();
+        if (ShouldAutomaticallyContinue(response))
+        {
+            normalizedText = string.IsNullOrWhiteSpace(normalizedText)
+                ? IncompleteResponseNote
+                : normalizedText + Environment.NewLine + Environment.NewLine + $"[{IncompleteResponseNote}]";
+        }
+
+        return string.IsNullOrWhiteSpace(normalizedText)
             ? "Done."
-            : response.Text.Trim();
+            : normalizedText;
     }
 
     private sealed class ConversationSessionEntry
@@ -169,4 +297,8 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 
         public string SessionKey { get; }
     }
+
+    private sealed record TurnResponse(AgentResponse Response, string Text, bool Completed);
 }
+#pragma warning restore MEAI001
+#pragma warning restore OPENAI001

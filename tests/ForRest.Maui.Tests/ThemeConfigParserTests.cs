@@ -27,6 +27,7 @@ public sealed class ThemeConfigParserTests
 
 			[ai]
 			enabled = true
+			stream_responses = false
 			provider = "azure_openai"
 			api = "responses"
 			endpoint = "https://example.test"
@@ -46,6 +47,7 @@ public sealed class ThemeConfigParserTests
 		Assert.AreEqual("gpt-4o-mini", document.Ai.Model);
 		Assert.AreEqual("gpt-4o-mini", document.Ai.DeploymentName);
 		Assert.AreEqual("secret-api-key", document.Ai.ApiKey);
+		Assert.IsFalse(document.Ai.StreamResponses);
 		Assert.AreEqual("Be brief.", document.Ai.SystemPrompt);
 	}
 
@@ -73,6 +75,7 @@ public sealed class ThemeConfigParserTests
 
 			[ai]
 			enabled = true
+			stream_responses = false
 			provider = "openai"
 			api = "chat"
 			endpoint = "https://api.example.test"
@@ -89,9 +92,11 @@ public sealed class ThemeConfigParserTests
 		Assert.AreEqual(12d, result.Settings.Style.ResultPaneTabFontSize, 0.001d);
 		Assert.IsTrue(result.Settings.Ai.Enabled);
 		Assert.AreEqual("secret-api-key", result.Settings.Ai.ApiKey);
+		Assert.IsFalse(result.Settings.Ai.StreamResponses);
 		StringAssert.Contains(result.NormalizedText, "[appearance.style]");
 		StringAssert.Contains(result.NormalizedText, "editor_font_size = 16");
 		StringAssert.Contains(result.NormalizedText, "[ai]");
+		StringAssert.Contains(result.NormalizedText, "stream_responses = false");
 		StringAssert.Contains(result.NormalizedText, "api_key = \"secret-api-key\"");
 	}
 }

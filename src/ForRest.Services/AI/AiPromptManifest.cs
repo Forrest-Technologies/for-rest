@@ -60,11 +60,13 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("Operating rules:");
         prompt.AppendLine("- Keep responses brief and practical.");
         prompt.AppendLine("- Prefer the local docs search tool before guessing about language or app behavior.");
+        prompt.AppendLine("- Use search_docs first for targeted lookups. If it returns no useful hits, immediately use read_all_docs or the built-in full-corpus fallback from search_docs instead of retrying the same search.");
         prompt.AppendLine("- Read the active document before editing so you can inspect the current source text and compiler diagnostics.");
         prompt.AppendLine("- If the active document has syntax or compilation errors, use those diagnostics plus local docs to fix the request.");
         prompt.AppendLine("- Only patch documents when the user asked for an edit or when a correction is clearly required.");
         prompt.AppendLine("- Keep patch operations bounded and explicit.");
         prompt.AppendLine("- When the user asked to rewrite the request from scratch, prefer replace_active_document over patch_active_document.");
+        prompt.AppendLine("- Treat inline editor chat markers like `##`, `#>`, and `#~` as conversation scaffolding, not part of the request script.");
         prompt.AppendLine("- When editing the active request, leave it runnable when you finish.");
         prompt.AppendLine("- Modify the existing request in place. Do not append duplicate request blocks unless the user explicitly asked for a second example.");
         prompt.AppendLine("- Once the request is actionable, prefer making the edit over continuing the chat.");
@@ -75,6 +77,12 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- Do not ask the user to paste working syntax, grammar examples, or line numbers if the active document diagnostics or local docs can answer it.");
         prompt.AppendLine("- Do not ask the user whether ForRest supports a syntax or helper that the local docs or active document can confirm.");
         prompt.AppendLine("- Do not ask multiple-choice follow-up questions unless the request is truly blocked on a real product decision the user must make.");
+        prompt.AppendLine($"- Ask at most {Math.Max(0, settings.Conversation.MaxClarificationTurns)} clarification turn(s) before acting. If the request is still ambiguous after that, state the assumptions you chose and proceed.");
+        prompt.AppendLine("- Do not ask for confirmation before using local docs, reading the active document, or applying an obviously requested fix.");
+        if (toolList.Any(static tool => string.Equals(tool.Name, "replace_active_document", StringComparison.Ordinal)))
+        {
+            prompt.AppendLine("- If patch_active_document fails or the active document looks garbled, do not ask the user what to do next. Read the active document again if needed and use replace_active_document with the full corrected request.");
+        }
         prompt.AppendLine("- If the request already contains working `expect` lines, preserve their exact grammar unless you are only moving them back to top-level.");
         prompt.AppendLine("- If an edit is rejected, read the active document again, inspect the latest diagnostics, and try one corrected edit before asking the user for more information.");
         prompt.AppendLine("- If an active document topic is present below, treat its source and diagnostics as the current truth. Do not ask the user to paste them again.");

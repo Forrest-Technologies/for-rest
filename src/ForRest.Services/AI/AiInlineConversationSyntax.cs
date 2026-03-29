@@ -70,15 +70,65 @@ public sealed record AiInlineConversationDocument(
     }
 }
 
+public static class AiInlineConversationPromptResolver
+{
+    public static AiInlineConversationPrompt? ResolveActionablePrompt(string sourceText, int cursorLineNumber)
+    {
+        return ResolveActionablePrompt(AiInlineConversationParser.Parse(sourceText), cursorLineNumber);
+    }
+
+    public static AiInlineConversationPrompt? ResolveActionablePrompt(AiInlineConversationDocument document, int cursorLineNumber)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        if (document.Prompts.Count == 0)
+        {
+            return null;
+        }
+
+        if (cursorLineNumber >= 1 && cursorLineNumber <= document.Lines.Count)
+        {
+            AiInlineConversationLine cursorLine = document.Lines[cursorLineNumber - 1];
+            if (cursorLine.IsConversationLine)
+            {
+                AiInlineConversationPrompt? prompt = document.FindLatestPrompt(cursorLineNumber);
+                return IsActionablePrompt(prompt) ? prompt : null;
+            }
+        }
+
+        AiInlineConversationLine? lastContentLine = document.Lines.LastOrDefault(
+            static line => line.Kind is not AiInlineConversationLineKind.Blank);
+        if (lastContentLine?.Kind == AiInlineConversationLineKind.Prompt)
+        {
+            AiInlineConversationPrompt? prompt = document.FindLatestPrompt(lastContentLine.LineNumber);
+            return IsActionablePrompt(prompt) ? prompt : null;
+        }
+
+        return null;
+    }
+
+    private static bool IsActionablePrompt(AiInlineConversationPrompt? prompt)
+    {
+        return prompt is not null && !string.IsNullOrWhiteSpace(prompt.PromptText);
+    }
+}
+
 public static class AiInlineConversationParser
 {
     public static AiInlineConversationDocument Parse(string sourceText)
     {
         string normalizedText = sourceText ?? string.Empty;
         (IReadOnlyList<ParsedLine> parsedLines, string lineEnding, bool hasTrailingNewline) = SplitLines(normalizedText);
-        List<AiInlineConversationLine> lines = parsedLines
-            .Select(static line => line.ToConversationLine())
-            .ToList();
+        List<AiInlineConversationLine> lines = [];
+        bool insideMultilineLiteral = false;
+        foreach (ParsedLine parsedLine in parsedLines)
+        {
+            lines.Add(parsedLine.ToConversationLine(insideMultilineLiteral));
+            if (CountTripleQuoteTokens(parsedLine.Text) % 2 == 1)
+            {
+                insideMultilineLiteral = !insideMultilineLiteral;
+            }
+        }
 
         List<AiInlineConversationPrompt> prompts = [];
         for (int index = 0; index < lines.Count; index++)
@@ -151,6 +201,24 @@ public static class AiInlineConversationParser
         return (lines, lineEnding, hasTrailingNewline);
     }
 
+    private static int CountTripleQuoteTokens(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 0;
+        }
+
+        int count = 0;
+        int index = 0;
+        while ((index = text.IndexOf("\"\"\"", index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += 3;
+        }
+
+        return count;
+    }
+
     private static string DetectLineEnding(string text)
     {
         int index = text.IndexOf('\r');
@@ -164,13 +232,18 @@ public static class AiInlineConversationParser
 
     private sealed record ParsedLine(int LineNumber, string Text, string? Ending)
     {
-        public AiInlineConversationLine ToConversationLine()
+        public AiInlineConversationLine ToConversationLine(bool insideMultilineLiteral)
         {
             string leadingWhitespace = GetLeadingWhitespace(Text);
             string trimmed = Text[leadingWhitespace.Length..];
             if (trimmed.Length == 0)
             {
                 return new(LineNumber, Text, AiInlineConversationLineKind.Blank, leadingWhitespace, string.Empty, string.Empty);
+            }
+
+            if (insideMultilineLiteral)
+            {
+                return new(LineNumber, Text, AiInlineConversationLineKind.Text, leadingWhitespace, string.Empty, Text);
             }
 
             if (IsPrompt(trimmed))
@@ -275,6 +348,100 @@ public static class AiInlineConversationFormatter
             : ApplyResponse(sourceText, prompt.LineNumber, responseText);
     }
 
+    public static string RemoveConversationLines(string sourceText)
+    {
+        return RewriteConversationLines(sourceText, preserveLineCount: false);
+    }
+
+    public static string BlankConversationLines(string sourceText)
+    {
+        return RewriteConversationLines(sourceText, preserveLineCount: true);
+    }
+
+    public static string EnsureFreshPromptAfterConversation(string sourceText, int promptLineNumber)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        if (document.Lines.Count == 0)
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        List<string> lines = document.Lines.Select(static line => line.Text).ToList();
+        int insertIndex = ResolveFreshPromptInsertIndex(document, promptLineNumber);
+        if (HasBlankPromptAtIndex(document, insertIndex))
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        for (int index = document.Lines.Count - 1; index >= 0; index--)
+        {
+            if (index == insertIndex)
+            {
+                continue;
+            }
+
+            if (document.Lines[index].Kind == AiInlineConversationLineKind.Prompt &&
+                string.IsNullOrWhiteSpace(document.Lines[index].Content))
+            {
+                lines.RemoveAt(index);
+                if (index < insertIndex)
+                {
+                    insertIndex--;
+                }
+            }
+        }
+
+        return InsertFreshPromptAtIndex(lines, insertIndex, document.LineEnding, document.HasTrailingNewline);
+    }
+
+    public static string ReplaceActiveResponse(string sourceText, int promptLineNumber, string responseText)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        if (document.Lines.Count == 0)
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        int promptIndex = FindPromptIndex(document, promptLineNumber);
+        if (promptIndex < 0)
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        string renderedResponse = RenderResponseBlock(responseText, document.LineEnding);
+        List<string> outputLines = [];
+        for (int index = 0; index < document.Lines.Count; index++)
+        {
+            if (index != promptIndex)
+            {
+                outputLines.Add(document.Lines[index].Text);
+                continue;
+            }
+
+            outputLines.Add(document.Lines[index].Text);
+            if (!string.IsNullOrWhiteSpace(renderedResponse))
+            {
+                outputLines.AddRange(renderedResponse.Split(document.LineEnding, StringSplitOptions.None));
+            }
+
+            int blockEnd = index + 1;
+            while (blockEnd < document.Lines.Count && document.Lines[blockEnd].Kind != AiInlineConversationLineKind.Prompt)
+            {
+                AiInlineConversationLine blockLine = document.Lines[blockEnd];
+                if (blockLine.Kind != AiInlineConversationLineKind.Response)
+                {
+                    outputLines.Add(blockLine.Text);
+                }
+
+                blockEnd++;
+            }
+
+            index = blockEnd - 1;
+        }
+
+        return JoinLines(outputLines, document.LineEnding, document.HasTrailingNewline);
+    }
+
     public static string FadePromptResponses(string sourceText, int promptLineNumber)
     {
         AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
@@ -369,6 +536,106 @@ public static class AiInlineConversationFormatter
         return string.IsNullOrWhiteSpace(line.Content)
             ? $"{line.LeadingWhitespace}{prefix}"
             : $"{line.LeadingWhitespace}{prefix} {line.Content}";
+    }
+
+    private static int ResolveFreshPromptInsertIndex(AiInlineConversationDocument document, int promptLineNumber)
+    {
+        int promptIndex = FindPromptIndex(document, promptLineNumber);
+        if (promptIndex >= 0)
+        {
+            int insertIndex = promptIndex + 1;
+            while (insertIndex < document.Lines.Count &&
+                   document.Lines[insertIndex].Kind is AiInlineConversationLineKind.Response or AiInlineConversationLineKind.StaleResponse)
+            {
+                insertIndex++;
+            }
+
+            return insertIndex;
+        }
+
+        int lastResponseIndex = FindLastResponseIndex(document);
+        if (lastResponseIndex >= 0)
+        {
+            return lastResponseIndex + 1;
+        }
+
+        return Math.Clamp(promptLineNumber - 1, 0, document.Lines.Count);
+    }
+
+    private static bool HasBlankPromptAtIndex(AiInlineConversationDocument document, int insertIndex)
+    {
+        return insertIndex >= 0 &&
+               insertIndex < document.Lines.Count &&
+               document.Lines[insertIndex].Kind == AiInlineConversationLineKind.Prompt &&
+               string.IsNullOrWhiteSpace(document.Lines[insertIndex].Content);
+    }
+
+    private static int FindLastResponseIndex(AiInlineConversationDocument document)
+    {
+        for (int index = document.Lines.Count - 1; index >= 0; index--)
+        {
+            if (document.Lines[index].Kind is AiInlineConversationLineKind.Response or AiInlineConversationLineKind.StaleResponse)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string InsertFreshPromptAtIndex(
+        List<string> lines,
+        int insertIndex,
+        string lineEnding,
+        bool hasTrailingNewline)
+    {
+        insertIndex = Math.Clamp(insertIndex, 0, lines.Count);
+
+        bool needsLeadingSpacer = insertIndex > 0 && !string.IsNullOrWhiteSpace(lines[insertIndex - 1]);
+        if (needsLeadingSpacer)
+        {
+            lines.Insert(insertIndex, string.Empty);
+            insertIndex++;
+        }
+
+        lines.Insert(insertIndex, "## ");
+
+        bool needsTrailingSpacer = insertIndex + 1 < lines.Count && !string.IsNullOrWhiteSpace(lines[insertIndex + 1]);
+        if (needsTrailingSpacer)
+        {
+            lines.Insert(insertIndex + 1, string.Empty);
+        }
+
+        return JoinLines(lines, lineEnding, hasTrailingNewline);
+    }
+
+    private static string RewriteConversationLines(string sourceText, bool preserveLineCount)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        if (document.Lines.Count == 0)
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        List<string> outputLines = [];
+        foreach (AiInlineConversationLine line in document.Lines)
+        {
+            if (line.Kind is AiInlineConversationLineKind.Prompt
+                or AiInlineConversationLineKind.Response
+                or AiInlineConversationLineKind.StaleResponse)
+            {
+                if (preserveLineCount)
+                {
+                    outputLines.Add(string.Empty);
+                }
+
+                continue;
+            }
+
+            outputLines.Add(line.Text);
+        }
+
+        return JoinLines(outputLines, document.LineEnding, document.HasTrailingNewline);
     }
 
     private static string JoinLines(IReadOnlyList<string> lines, string lineEnding, bool hasTrailingNewline)

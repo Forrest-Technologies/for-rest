@@ -134,4 +134,138 @@ public sealed class AiInlineConversationSyntaxTests
 
         Assert.AreEqual(expected, updated);
     }
+
+    [TestMethod]
+    public void ReplaceActiveResponse_swaps_only_the_live_response_block()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "## first",
+                "#> old active",
+                "#~ older answer",
+                "method GET",
+            ]);
+
+        string updated = AiInlineConversationFormatter.ReplaceActiveResponse(source, 1, "typing");
+
+        string expected = string.Join(
+            "\n",
+            [
+                "## first",
+                "#> typing",
+                "#~ older answer",
+                "method GET",
+            ]);
+
+        Assert.AreEqual(expected, updated);
+    }
+
+    [TestMethod]
+    public void RemoveConversationLines_strips_prompt_and_response_markers_from_request_source()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## tighten this request",
+                "#> Done.",
+                "#~ Previous answer",
+                "# ordinary comment",
+                "method GET",
+            ]);
+
+        string updated = AiInlineConversationFormatter.RemoveConversationLines(source);
+
+        string expected = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "# ordinary comment",
+                "method GET",
+            ]);
+
+        Assert.AreEqual(expected, updated);
+    }
+
+    [TestMethod]
+    public void BlankConversationLines_preserves_line_numbers_for_validation()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## tighten this request",
+                "#> Done.",
+                "method GET",
+            ]);
+
+        string updated = AiInlineConversationFormatter.BlankConversationLines(source);
+
+        string expected = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                string.Empty,
+                string.Empty,
+                "method GET",
+            ]);
+
+        Assert.AreEqual(expected, updated);
+    }
+
+    [TestMethod]
+    public void EnsureFreshPromptAfterConversation_keeps_the_follow_up_prompt_with_the_active_thread()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## explain this request",
+                "#> Done.",
+                "method GET",
+            ]);
+
+        string updated = AiInlineConversationFormatter.EnsureFreshPromptAfterConversation(source, 2);
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## explain this request",
+                "#> Done.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            updated.Split('\n'));
+    }
+
+    [TestMethod]
+    public void RemoveConversationLines_keeps_prompt_like_text_inside_triple_quoted_literals()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "body json \"\"\"",
+                "## keep this heading",
+                "#> keep this line too",
+                "\"\"\"",
+                "## actual prompt",
+            ]);
+
+        string updated = AiInlineConversationFormatter.RemoveConversationLines(source);
+
+        string expected = string.Join(
+            "\n",
+            [
+                "body json \"\"\"",
+                "## keep this heading",
+                "#> keep this line too",
+                "\"\"\"",
+            ]);
+
+        Assert.AreEqual(expected, updated);
+    }
 }

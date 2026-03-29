@@ -13,6 +13,8 @@ public sealed class AiSettingsTests
         Assert.IsFalse(settings.ShouldShowSettingsSection);
         Assert.IsFalse(settings.ShouldShowSecretEditor);
         Assert.AreEqual(string.Empty, settings.ApiKey.DisplayValue);
+        Assert.IsTrue(settings.Conversation.StreamResponses);
+        Assert.AreEqual(2, settings.Conversation.MaxClarificationTurns);
 
         AiSettingsEditorProjection projection = settings.ToEditorProjection();
 

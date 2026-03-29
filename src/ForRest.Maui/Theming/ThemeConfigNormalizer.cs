@@ -238,10 +238,11 @@ public sealed class ThemeConfigNormalizer
 	private static void AppendAiSection(List<string> output, ForRestAiSettings ai)
 	{
 		output.Add(ai.Enabled
-			? "# AI settings are enabled."
-			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, endpoint, model, and api key fields.");
+			? "# AI settings are enabled. stream_responses controls the inline typewriter reveal."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, endpoint, model, and api key fields. stream_responses controls the inline typewriter reveal.");
 		output.Add("[ai]");
 		output.Add($"enabled = {(ai.Enabled ? "true" : "false")}");
+		output.Add($"stream_responses = {(ai.StreamResponses ? "true" : "false")}");
 		if (!ai.Enabled && !ai.HasConfiguredValues)
 		{
 			return;

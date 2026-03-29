@@ -58,6 +58,10 @@ public sealed record AiConversationSettings
     public int IdleTimeoutMinutes { get; init; } = 15;
 
     public int MaxHistoryTurns { get; init; } = 12;
+
+    public int MaxClarificationTurns { get; init; } = 2;
+
+    public bool StreamResponses { get; init; } = true;
 }
 
 public sealed record AiSettings

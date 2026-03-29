@@ -94,6 +94,7 @@ public sealed class SettingsTomlDocumentServiceTests
 		StringAssert.Contains(editorText, "[appearance.style]");
 		StringAssert.Contains(editorText, "editor_font_size = 13.5");
 		StringAssert.Contains(editorText, "enabled = false");
+		StringAssert.Contains(editorText, "stream_responses = true");
 		Assert.IsFalse(editorText.Contains("api_key = ", StringComparison.Ordinal));
 	}
 

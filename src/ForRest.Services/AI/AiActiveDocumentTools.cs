@@ -58,17 +58,17 @@ public sealed class AiActiveDocumentToolCatalog : IAiActiveDocumentToolCatalog
             new(
                 "read_active_document",
                 "Read the active document from the host canvas, including current source text and compiler diagnostics.",
-                "Call this before patching so the agent can inspect the current document state, syntax errors, and whether a full rewrite is safer.",
+                "Call this before patching so the agent can inspect the current document state, syntax errors, and whether a full rewrite is safer. The returned source text excludes inline chat scaffolding like ## prompts and #> replies.",
                 MutatesDocument: false),
             new(
                 "patch_active_document",
                 "Apply bounded text edits to the active document currently open in the host canvas.",
-                "Provide a JSON array of AiTextEdit objects for targeted edits after reading the active document and diagnostics. Use replace_active_document instead when the user wants the whole request rewritten.",
+                "Provide a JSON array of AiTextEdit objects for targeted edits after reading the active document and diagnostics. If patching fails or the source looks garbled, do not ask the user for confirmation; use replace_active_document with the full corrected request instead.",
                 MutatesDocument: true),
             new(
                 "replace_active_document",
                 "Replace the entire active document with new source text.",
-                "Use this when the user asked to rewrite the whole request or when the current structure is broken enough that targeted edits are more error-prone than a full replacement.",
+                "Use this when the user asked to rewrite the whole request or when the current structure is broken enough that targeted edits are more error-prone than a full replacement. This is the default fallback when patch_active_document fails.",
                 MutatesDocument: true),
         ];
     }
@@ -188,6 +188,7 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
                 succeeded = false,
                 documentId = document.DocumentId,
                 patchedText = document.SourceText,
+                retryWithReplace = true,
                 errors = patchResult.Errors,
             });
         }
@@ -195,7 +196,14 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
         AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, patchResult.PatchedText);
         if (!updateResult.Succeeded)
         {
-            return SerializeFailure(updateResult.Message);
+            return Serialize(new
+            {
+                succeeded = false,
+                documentId = document.DocumentId,
+                patchedText = patchResult.PatchedText,
+                retryWithReplace = true,
+                errors = new[] { updateResult.Message },
+            });
         }
 
         return Serialize(new

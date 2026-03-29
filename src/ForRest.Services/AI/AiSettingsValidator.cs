@@ -75,6 +75,11 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
             issues.Add(new(AiSettingsIssueSeverity.Error, "ai.conversation.history.out-of-range", "Conversation history must keep at least 1 turn."));
         }
 
+        if (settings.Conversation.MaxClarificationTurns < 0)
+        {
+            issues.Add(new(AiSettingsIssueSeverity.Error, "ai.conversation.clarification-turns.out-of-range", "Max clarification turns must be zero or greater."));
+        }
+
         return issues;
     }
 
@@ -93,4 +98,3 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
         }
     }
 }
-

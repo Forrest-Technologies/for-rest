@@ -1,3 +1,4 @@
+﻿#pragma warning disable OPENAI001
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +8,7 @@ using Microsoft.Agents.AI.OpenAI;
 using Microsoft.Extensions.AI;
 using OpenAI;
 using OpenAI.Chat;
+using OpenAI.Responses;
 using System.ClientModel;
 
 namespace ForRest.Services.AI;
@@ -69,14 +71,6 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             return new(manifest, issues, Agent: null);
         }
 
-        if (settings.Provider.Transport == AiConversationTransport.Responses)
-        {
-            issues.Add(new(
-                AiSettingsIssueSeverity.Warning,
-                "ai.transport.responses.chat-fallback",
-                "The current preview runtime prepares a chat-client agent even when Responses is selected. Keep the Responses setting for future enablement, but expect chat-based execution today."));
-        }
-
         AITool[] runtimeTools = BuildRuntimeTools(settings, activeDocumentHost);
         AIAgent agent = settings.Provider.ProviderKind switch
         {
@@ -132,6 +126,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         if (settings.Tools.EnableDocsSearch)
         {
             tools.Add(AIFunctionFactory.Create((Func<string, int, string>)SearchDocs));
+            tools.Add(AIFunctionFactory.Create((Func<string>)ReadAllDocs));
         }
 
         if (settings.Tools.EnableDocumentPatch && activeDocumentHost is not null)
@@ -147,36 +142,33 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
 
         return [.. tools];
 
-        [Description("Search the canonical local ForRest docs and language reference.")]
+        [Description("Search the canonical local ForRest docs and language reference. If no useful hits are found, this tool falls back to the full local docs corpus.")]
         string SearchDocs(
             [Description("The docs query to search for.")] string query,
             [Description("Maximum number of search hits to return.")] int maxResults)
         {
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return BuildFullDocsCorpus("No docs query was supplied. Returning the full local docs corpus.");
+            }
+
             int boundedResults = Math.Clamp(maxResults, 1, settings.Tools.MaxSearchResults);
             IReadOnlyList<AiKnowledgeSearchHit> hits = _documentationSearchService.Search(query, boundedResults);
-            if (hits.Count == 0)
+            if (AiDocumentationSearchService.ShouldFallbackToFullDocs(query, hits))
             {
-                return "No matching ForRest docs were found.";
+                string fallbackPreface = hits.Count == 0
+                    ? "No matching ForRest docs were found. Returning the full local docs corpus instead."
+                    : "The targeted docs hits were too weak. Returning the full local docs corpus instead.";
+                return BuildFullDocsCorpus(fallbackPreface);
             }
 
-            StringBuilder builder = new();
-            for (int index = 0; index < hits.Count; index++)
-            {
-                AiKnowledgeSearchHit hit = hits[index];
-                builder.Append(index + 1)
-                    .Append(". ")
-                    .Append(hit.Document.Title)
-                    .AppendLine();
-                builder.Append("Summary: ").AppendLine(hit.Document.Summary);
-                builder.Append("Excerpt: ").AppendLine(hit.Excerpt);
-                builder.Append("Source: ").AppendLine(hit.Document.SourcePath ?? hit.Document.Id);
-                if (index + 1 < hits.Count)
-                {
-                    builder.AppendLine();
-                }
-            }
+            return RenderSearchHits(hits);
+        }
 
-            return builder.ToString().TrimEnd();
+        [Description("Read the entire canonical local ForRest docs corpus in one pass.")]
+        string ReadAllDocs()
+        {
+            return BuildFullDocsCorpus("Returning the full local docs corpus.");
         }
 
         [Description("Apply bounded non-overlapping text edits to a document source string.")]
@@ -229,38 +221,110 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         }
     }
 
+    private string RenderSearchHits(IReadOnlyList<AiKnowledgeSearchHit> hits)
+    {
+        StringBuilder builder = new();
+        for (int index = 0; index < hits.Count; index++)
+        {
+            AiKnowledgeSearchHit hit = hits[index];
+            builder.Append(index + 1)
+                .Append(". ")
+                .Append(hit.Document.Title)
+                .AppendLine();
+            builder.Append("Summary: ").AppendLine(hit.Document.Summary);
+            builder.Append("Excerpt: ").AppendLine(hit.Excerpt);
+            builder.Append("Source: ").AppendLine(hit.Document.SourcePath ?? hit.Document.Id);
+            if (index + 1 < hits.Count)
+            {
+                builder.AppendLine();
+            }
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private string BuildFullDocsCorpus(string preface)
+    {
+        IReadOnlyList<AiKnowledgeDocument> documents = _knowledgeCatalog.GetDocuments();
+        StringBuilder builder = new();
+        if (!string.IsNullOrWhiteSpace(preface))
+        {
+            builder.AppendLine(preface.Trim());
+            builder.AppendLine();
+        }
+
+        builder.Append("Documents: ").AppendLine(documents.Count.ToString());
+        builder.AppendLine();
+
+        for (int index = 0; index < documents.Count; index++)
+        {
+            AiKnowledgeDocument document = documents[index];
+            builder.Append(index + 1)
+                .Append(". ")
+                .Append(document.Title)
+                .AppendLine();
+            builder.Append("Summary: ").AppendLine(document.Summary);
+            builder.Append("Source: ").AppendLine(document.SourcePath ?? document.Id);
+            builder.AppendLine("Content:");
+            builder.AppendLine((document.Content ?? string.Empty).Trim());
+            if (index + 1 < documents.Count)
+            {
+                builder.AppendLine();
+            }
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
     private static AIAgent CreateAzureAgent(AiSettings settings, string instructions, IReadOnlyList<AITool> runtimeTools)
     {
         AzureOpenAIClient client = new(new Uri(settings.Provider.Endpoint), new ApiKeyCredential(settings.ApiKey.Value));
         string deployment = string.IsNullOrWhiteSpace(settings.Provider.DeploymentName)
             ? settings.Provider.Model
             : settings.Provider.DeploymentName;
-        List<AITool> tools = [.. runtimeTools];
+        ChatClientAgentOptions options = CreateAgentOptions(instructions, runtimeTools, deployment);
 
         return settings.Provider.Transport switch
         {
             AiConversationTransport.ChatCompletions => client
                 .GetChatClient(deployment)
-                .AsAIAgent(instructions: instructions, name: AgentName, tools: tools),
+                .AsAIAgent(options),
             _ => client
-                .GetChatClient(deployment)
-                .AsAIAgent(instructions: instructions, name: AgentName, tools: tools),
+                .GetResponsesClient(deployment)
+                .AsAIAgent(options),
         };
     }
 
     private static AIAgent CreateOpenAiAgent(AiSettings settings, string instructions, IReadOnlyList<AITool> runtimeTools)
     {
         OpenAIClient client = CreateOpenAiClient(settings);
-        List<AITool> tools = [.. runtimeTools];
+        ChatClientAgentOptions options = CreateAgentOptions(instructions, runtimeTools, settings.Provider.Model);
 
         return settings.Provider.Transport switch
             {
                 AiConversationTransport.ChatCompletions => client
                     .GetChatClient(settings.Provider.Model)
-                    .AsAIAgent(instructions: instructions, name: AgentName, tools: tools),
+                    .AsAIAgent(options),
             _ => client
-                .GetChatClient(settings.Provider.Model)
-                .AsAIAgent(instructions: instructions, name: AgentName, tools: tools),
+                .GetResponsesClient(settings.Provider.Model)
+                .AsAIAgent(options),
+        };
+    }
+
+    private static ChatClientAgentOptions CreateAgentOptions(
+        string instructions,
+        IReadOnlyList<AITool> runtimeTools,
+        string modelId)
+    {
+        return new()
+        {
+            Name = AgentName,
+            ChatOptions = new ChatOptions
+            {
+                Instructions = instructions,
+                Tools = [.. runtimeTools],
+                ModelId = string.IsNullOrWhiteSpace(modelId) ? null : modelId,
+            },
         };
     }
 
@@ -279,3 +343,4 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             });
     }
 }
+#pragma warning restore OPENAI001

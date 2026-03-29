@@ -51,7 +51,7 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
         Assert.IsNotNull(runtime.Agent);
         Assert.AreEqual(0, runtime.Issues.Count);
         CollectionAssert.AreEquivalent(
-            new[] { "search_docs", "patch_document" },
+            new[] { "search_docs", "read_all_docs", "patch_document" },
             runtime.PromptManifest.Tools.Select(static tool => tool.Name).ToArray());
     }
 
@@ -80,8 +80,36 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
         AiPreparedRuntime runtime = factory.Prepare(settings, "Answer syntax questions.");
 
         Assert.IsNotNull(runtime.Agent);
-        Assert.IsTrue(runtime.Issues.Any(static issue => issue.Code == "ai.transport.responses.chat-fallback"));
+        Assert.IsFalse(runtime.Issues.Any(static issue => issue.Code == "ai.transport.responses.chat-fallback"));
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Provider: AzureOpenAI");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Transport: Responses");
+    }
+
+    [TestMethod]
+    public void Prepare_keeps_openai_response_transport_enabled()
+    {
+        IAiRuntimeFactory factory = CreateFactory();
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.OpenAI,
+                Transport = AiConversationTransport.Responses,
+                Model = "gpt-4.1-mini",
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "test-key",
+                IsConfigured = true,
+            },
+        };
+
+        AiPreparedRuntime runtime = factory.Prepare(settings, "Answer syntax questions.");
+
+        Assert.IsNotNull(runtime.Agent);
+        Assert.IsFalse(runtime.Issues.Any(static issue => issue.Code == "ai.transport.responses.chat-fallback"));
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Provider: OpenAI");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Transport: Responses");
     }
 
@@ -109,12 +137,16 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
 
         Assert.IsNotNull(runtime.Agent);
         CollectionAssert.AreEquivalent(
-            new[] { "search_docs", "read_active_document", "patch_active_document", "replace_active_document" },
+            new[] { "search_docs", "read_all_docs", "read_active_document", "patch_active_document", "replace_active_document" },
             runtime.PromptManifest.Tools.Select(static tool => tool.Name).ToArray());
         Assert.IsFalse(runtime.PromptManifest.Tools.Any(static tool => tool.Name == "patch_document"));
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Do not ask the user to paste working syntax");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Do not use `//` comments");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "`expect` statements are top-level assertions");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Ask at most 2 clarification turn");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "read_all_docs or the built-in full-corpus fallback");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Treat inline editor chat markers");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "If patch_active_document fails or the active document looks garbled");
         Assert.AreEqual("Active document", runtime.PromptManifest.Topics[0].Title);
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Unexpected token 'time'.");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "name \"Example\"");

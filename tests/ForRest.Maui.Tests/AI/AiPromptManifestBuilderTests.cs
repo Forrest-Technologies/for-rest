@@ -30,6 +30,7 @@ public sealed class AiPromptManifestBuilderTests
             "Update the AI docs",
             [
                 new AiToolDescriptor("search_docs", "Search the docs.", "Query the docs.", false),
+                new AiToolDescriptor("read_all_docs", "Read the full docs corpus.", "Load the full docs corpus.", false),
                 new AiToolDescriptor("patch_document", "Patch the current document.", "Provide text edits.", true),
             ],
             [
@@ -39,10 +40,14 @@ public sealed class AiPromptManifestBuilderTests
         StringAssert.Contains(manifest.SystemPrompt, "AI enabled: yes");
         StringAssert.Contains(manifest.SystemPrompt, "API key configured: yes");
         StringAssert.Contains(manifest.SystemPrompt, "search_docs");
+        StringAssert.Contains(manifest.SystemPrompt, "read_all_docs");
         StringAssert.Contains(manifest.SystemPrompt, "patch_document");
         StringAssert.Contains(manifest.SystemPrompt, "AI Settings");
+        StringAssert.Contains(manifest.SystemPrompt, "Ask at most 2 clarification turn");
+        StringAssert.Contains(manifest.SystemPrompt, "read_all_docs or the built-in full-corpus fallback");
+        StringAssert.Contains(manifest.SystemPrompt, "Treat inline editor chat markers");
         Assert.IsFalse(manifest.SystemPrompt.Contains("super-secret", StringComparison.Ordinal));
-        Assert.AreEqual(2, manifest.Tools.Count);
+        Assert.AreEqual(3, manifest.Tools.Count);
         Assert.AreEqual(1, manifest.Topics.Count);
     }
 

@@ -19,7 +19,8 @@ public sealed record ForRestAiSettings(
 	string Model = "",
 	string DeploymentName = "",
 	string ApiKey = "",
-	string SystemPrompt = "")
+	string SystemPrompt = "",
+	bool StreamResponses = true)
 {
 	public bool HasConfiguredValues =>
 		Enabled ||
@@ -29,7 +30,8 @@ public sealed record ForRestAiSettings(
 		!string.IsNullOrWhiteSpace(Model) ||
 		!string.IsNullOrWhiteSpace(DeploymentName) ||
 		!string.IsNullOrWhiteSpace(ApiKey) ||
-		!string.IsNullOrWhiteSpace(SystemPrompt);
+		!string.IsNullOrWhiteSpace(SystemPrompt) ||
+		!StreamResponses;
 }
 
 public sealed record ForRestStyleSettings(

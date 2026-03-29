@@ -121,6 +121,8 @@ public sealed class AiActiveDocumentToolServiceTests
             """);
 
         StringAssert.Contains(response, "\"succeeded\":false");
+        StringAssert.Contains(response, "\"retryWithReplace\":true");
+        StringAssert.Contains(response, "\"patchedText\":\"broken\"");
         StringAssert.Contains(response, "left the request invalid");
         Assert.AreEqual("abc", host.CurrentDocument?.SourceText);
     }

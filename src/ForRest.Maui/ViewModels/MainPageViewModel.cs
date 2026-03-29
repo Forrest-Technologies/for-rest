@@ -1047,7 +1047,8 @@ public sealed class MainPageViewModel : ObservableObject
 			return;
 		}
 
-		if (await TryHandleInlineAiAsync())
+		AiSettings aiSettings = _aiSettingsProvider.GetCurrentSettings();
+		if (await TryHandleInlineAiAsync(aiSettings))
 		{
 			return;
 		}
@@ -2583,6 +2584,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		int refreshVersion = Interlocked.Increment(ref _requestMetadataRefreshVersion);
 		string source = _requestEditorText;
+		string compilationSource = BuildConversationIgnoredRequestCompilationSource(source);
 		Guid workspaceId = GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId;
 		string requestName = RequestName;
 		string workspaceName = SelectedWorkspace;
@@ -2601,7 +2603,7 @@ public sealed class MainPageViewModel : ObservableObject
 				{
 					await Task.Delay(450, refreshSource.Token);
 					ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(
-						source,
+						compilationSource,
 						workspaceId,
 						requestName);
 					await MainThread.InvokeOnMainThreadAsync(
@@ -2675,7 +2677,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_suppressDocumentSynchronization = true;
 		try
 		{
-			ForRestScriptEditableSections sections = _documentTextService.Extract(_requestEditorText);
+			ForRestScriptEditableSections sections = _documentTextService.Extract(BuildConversationFreeRequestSource(_requestEditorText));
 			_headersEditorText = sections.Headers;
 			_bodyEditorText = sections.Body;
 			_testsEditorText = sections.Tests;
@@ -2716,8 +2718,9 @@ public sealed class MainPageViewModel : ObservableObject
 
 		try
 		{
+			string compilationSource = BuildConversationIgnoredRequestCompilationSource(_requestEditorText);
 			ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(
-				_requestEditorText,
+				compilationSource,
 				GetSelectedWorkspaceState()?.Id ?? HttpBinWorkspaceId,
 				RequestName);
 			ApplyRequestMetadataCompilation(
@@ -2824,33 +2827,58 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
-	private async Task<bool> TryHandleInlineAiAsync()
+	private async Task<bool> TryHandleInlineAiAsync(AiSettings? aiSettings = null)
 	{
+		aiSettings ??= _aiSettingsProvider.GetCurrentSettings();
+		string originalSource = RequestEditorText;
+		AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(
+			originalSource,
+			_activeEditorLineNumber);
+		CancellationTokenSource? workingAnimationSource = null;
+		Task? workingAnimationTask = null;
 		AiInlineConversationRequest request = new(
 			DocumentId: RequestLocation,
 			DocumentTitle: RequestName,
 			Language: ActiveEditorLanguage,
-			SourceText: RequestEditorText,
+			SourceText: originalSource,
 			CursorLineNumber: _activeEditorLineNumber,
-			Settings: _aiSettingsProvider.GetCurrentSettings(),
-			ActiveDocumentHost: new ActiveRequestDocumentHost(this));
+			Settings: aiSettings,
+			ActiveDocumentHost: new ActiveRequestDocumentHost(this, originalSource));
+
+		if (prompt is not null)
+		{
+			workingAnimationSource = new CancellationTokenSource();
+			workingAnimationTask = RunInlineAiWorkingAnimationAsync(originalSource, prompt.LineNumber, workingAnimationSource.Token);
+		}
 
 		IsSending = true;
 		try
 		{
 			AiInlineConversationResult result = await _aiInlineConversationService.TryHandleAsync(request);
+			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
+			workingAnimationSource = null;
+			workingAnimationTask = null;
 			if (!result.Handled)
 			{
+				RestoreTransientAiConversationText(originalSource);
 				return false;
 			}
 
-			ApplyAiConversationText(
-				result.UpdatedText,
-				result.SuggestedCursorLineNumber,
-				result.SuggestedCursorColumn);
-			if (result.SuggestedCursorLineNumber is int suggestedCursorLineNumber)
+			if (CanStreamInlineAiResponse(aiSettings, prompt, result))
 			{
-				RequestActiveEditorCursorMove(suggestedCursorLineNumber, result.SuggestedCursorColumn);
+				await AnimateInlineAiResponseAsync(prompt!.LineNumber, result.ResponseText);
+			}
+
+			(string repairedUpdatedText, int? repairedSuggestedCursorLineNumber, int repairedSuggestedCursorColumn) = prompt is null
+				? (result.UpdatedText, result.SuggestedCursorLineNumber, result.SuggestedCursorColumn)
+				: RepairInlineAiConversationResult(prompt, result);
+			ApplyAiConversationText(
+				repairedUpdatedText,
+				repairedSuggestedCursorLineNumber,
+				repairedSuggestedCursorColumn);
+			if (repairedSuggestedCursorLineNumber is int suggestedCursorLineNumber)
+			{
+				RequestActiveEditorCursorMove(suggestedCursorLineNumber, repairedSuggestedCursorColumn);
 			}
 
 			await PersistCurrentRequestAsync();
@@ -2869,6 +2897,10 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 		catch (Exception exception)
 		{
+			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
+			workingAnimationSource = null;
+			workingAnimationTask = null;
+			RestoreTransientAiConversationText(originalSource);
 			ExecutionStatus = "AI request failed";
 			DebugOutputText = exception.ToString();
 			TraceEntries.Clear();
@@ -2880,7 +2912,196 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 		finally
 		{
+			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
 			IsSending = false;
+		}
+	}
+
+	private static bool CanStreamInlineAiResponse(
+		AiSettings settings,
+		AiInlineConversationPrompt? prompt,
+		AiInlineConversationResult result)
+	{
+		return settings.Conversation.StreamResponses &&
+		       prompt is not null &&
+		       result.Handled &&
+		       result.UpdateKind == AiInlineConversationUpdateKind.ResponseOnly &&
+		       result.PromptLineNumber == prompt.LineNumber &&
+		       !string.IsNullOrWhiteSpace(result.ResponseText);
+	}
+
+	private static (string UpdatedText, int? SuggestedCursorLineNumber, int SuggestedCursorColumn) RepairInlineAiConversationResult(
+		AiInlineConversationPrompt prompt,
+		AiInlineConversationResult result)
+	{
+		string repairedText = AiInlineConversationFormatter.EnsureFreshPromptAfterConversation(
+			result.UpdatedText,
+			result.PromptLineNumber ?? prompt.LineNumber);
+		int suggestedCursorColumn = Math.Max(1, result.SuggestedCursorColumn);
+		int? suggestedCursorLineNumber = result.SuggestedCursorLineNumber;
+		if (!IsBlankInlineAiPromptLine(repairedText, suggestedCursorLineNumber))
+		{
+			suggestedCursorLineNumber = ResolveFreshInlineAiPromptLineNumber(repairedText, prompt.LineNumber);
+			suggestedCursorColumn = 4;
+		}
+
+		return (repairedText, suggestedCursorLineNumber, suggestedCursorColumn);
+	}
+
+	private static bool IsBlankInlineAiPromptLine(string sourceText, int? lineNumber)
+	{
+		if (lineNumber is not > 0)
+		{
+			return false;
+		}
+
+		AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+		return document.Prompts.Any(
+			prompt => prompt.LineNumber == lineNumber.Value &&
+			          string.IsNullOrWhiteSpace(prompt.PromptText));
+	}
+
+	private static int? ResolveFreshInlineAiPromptLineNumber(string sourceText, int preferredAfterLineNumber)
+	{
+		AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+		AiInlineConversationPrompt? prompt = document.Prompts
+			.Where(static prompt => string.IsNullOrWhiteSpace(prompt.PromptText))
+			.OrderBy(prompt => prompt.LineNumber < preferredAfterLineNumber ? 1 : 0)
+			.ThenBy(prompt => Math.Abs(prompt.LineNumber - preferredAfterLineNumber))
+			.FirstOrDefault();
+		return prompt?.LineNumber;
+	}
+
+	private async Task RunInlineAiWorkingAnimationAsync(string sourceText, int promptLineNumber, CancellationToken cancellationToken)
+	{
+		string[] frames =
+		[
+			"Working.",
+			"Working..",
+			"Working..."
+		];
+		string currentText = sourceText;
+		int frameIndex = 0;
+
+		while (!cancellationToken.IsCancellationRequested)
+		{
+			string nextText = frameIndex == 0
+				? AiInlineConversationFormatter.ApplyResponse(sourceText, promptLineNumber, frames[frameIndex])
+				: AiInlineConversationFormatter.ReplaceActiveResponse(currentText, promptLineNumber, frames[frameIndex]);
+			currentText = nextText;
+			await InvokeOnViewModelThreadAsync(() => ApplyTransientAiConversationText(nextText));
+			frameIndex = (frameIndex + 1) % frames.Length;
+			await Task.Delay(220, cancellationToken);
+		}
+	}
+
+	private static async Task StopInlineAiWorkingAnimationAsync(CancellationTokenSource? animationSource, Task? animationTask)
+	{
+		if (animationSource is null)
+		{
+			return;
+		}
+
+		animationSource.Cancel();
+		try
+		{
+			if (animationTask is not null)
+			{
+				await animationTask;
+			}
+		}
+		catch (OperationCanceledException)
+		{
+		}
+		finally
+		{
+			animationSource.Dispose();
+		}
+	}
+
+	private async Task AnimateInlineAiResponseAsync(int promptLineNumber, string responseText)
+	{
+		if (string.IsNullOrWhiteSpace(responseText))
+		{
+			return;
+		}
+
+		string normalizedResponse = NormalizeLineEndings(responseText);
+		foreach (int breakpoint in BuildInlineAiStreamingBreakpoints(normalizedResponse))
+		{
+			string partialResponse = normalizedResponse[..breakpoint];
+			string updatedText = AiInlineConversationFormatter.ReplaceActiveResponse(
+				_requestEditorText,
+				promptLineNumber,
+				partialResponse);
+			await InvokeOnViewModelThreadAsync(() => ApplyTransientAiConversationText(updatedText));
+			await Task.Delay(28);
+		}
+	}
+
+	private static IReadOnlyList<int> BuildInlineAiStreamingBreakpoints(string responseText)
+	{
+		if (string.IsNullOrEmpty(responseText))
+		{
+			return [];
+		}
+
+		int chunkSize = Math.Clamp(responseText.Length / 18, 3, 24);
+		List<int> breakpoints = [];
+		for (int index = chunkSize; index < responseText.Length; index += chunkSize)
+		{
+			breakpoints.Add(index);
+		}
+
+		if (breakpoints.Count > 0 && breakpoints[^1] == responseText.Length)
+		{
+			breakpoints.RemoveAt(breakpoints.Count - 1);
+		}
+
+		return breakpoints;
+	}
+
+	private void ApplyTransientAiConversationText(string updatedText)
+	{
+		string normalized = NormalizeLineEndings(updatedText);
+		if (string.Equals(_requestEditorText, normalized, StringComparison.Ordinal) &&
+		    string.Equals(_activeEditorText, normalized, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		_requestEditorText = normalized;
+		OnPropertyChanged(nameof(RequestEditorText));
+		if (IsActiveRequestEditor &&
+		    !string.Equals(_activeEditorText, normalized, StringComparison.Ordinal))
+		{
+			SetActiveEditorTextInternal(normalized);
+		}
+	}
+
+	private void RestoreTransientAiConversationText(string sourceText)
+	{
+		ApplyTransientAiConversationText(sourceText);
+	}
+
+	private static Task InvokeOnViewModelThreadAsync(Action action)
+	{
+		ArgumentNullException.ThrowIfNull(action);
+
+		try
+		{
+			if (MainThread.IsMainThread)
+			{
+				action();
+				return Task.CompletedTask;
+			}
+
+			return MainThread.InvokeOnMainThreadAsync(action);
+		}
+		catch
+		{
+			action();
+			return Task.CompletedTask;
 		}
 	}
 
@@ -2923,7 +3144,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		string normalized = NormalizeLineEndings(
 			RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(
-				_requestEditorText,
+				BuildConversationFreeRequestSource(_requestEditorText),
 				preRequestScript: string.Empty,
 				string.IsNullOrWhiteSpace(RequestName) ? "Untitled Request" : RequestName));
 		if (!applyToEditor || string.Equals(_requestEditorText, normalized, StringComparison.Ordinal))
@@ -2944,6 +3165,16 @@ public sealed class MainPageViewModel : ObservableObject
 		return normalized;
 	}
 
+	private static string BuildConversationFreeRequestSource(string sourceText)
+	{
+		return NormalizeLineEndings(AiInlineConversationFormatter.RemoveConversationLines(sourceText));
+	}
+
+	private static string BuildConversationIgnoredRequestCompilationSource(string sourceText)
+	{
+		return NormalizeLineEndings(AiInlineConversationFormatter.BlankConversationLines(sourceText));
+	}
+
 	private void ApplyAiConversationText(string updatedText, int? suggestedCursorLineNumber = null, int? suggestedCursorColumn = null)
 	{
 		string previousRequestName = RequestName;
@@ -2952,7 +3183,6 @@ public sealed class MainPageViewModel : ObservableObject
 		string previousRequestSummary = RequestSummary;
 		string previousRequestLocation = RequestLocation;
 		string normalized = NormalizeLineEndings(updatedText);
-		QueuePendingEditorCursorRequest(suggestedCursorLineNumber, suggestedCursorColumn);
 		if (string.Equals(_requestEditorText, normalized, StringComparison.Ordinal))
 		{
 			return;
@@ -2990,12 +3220,6 @@ public sealed class MainPageViewModel : ObservableObject
 			previousRequestSummary,
 			previousRequestLocation);
 		MarkCurrentDocumentDirty();
-	}
-
-	private void QueuePendingEditorCursorRequest(int? lineNumber, int? column)
-	{
-		_pendingEditorCursorLineNumber = Math.Max(0, lineNumber ?? 0);
-		_pendingEditorCursorColumnNumber = Math.Max(1, column ?? 4);
 	}
 
 	private void ReconcileRequestIdentityAfterAiEdit(
@@ -4417,10 +4641,12 @@ public sealed class MainPageViewModel : ObservableObject
 	private sealed class ActiveRequestDocumentHost : IAiActiveDocumentHost
 	{
 		private readonly MainPageViewModel _owner;
+		private string _sourceText;
 
-		public ActiveRequestDocumentHost(MainPageViewModel owner)
+		public ActiveRequestDocumentHost(MainPageViewModel owner, string sourceText)
 		{
 			_owner = owner;
+			_sourceText = MainPageViewModel.BuildConversationFreeRequestSource(sourceText);
 		}
 
 		public AiActiveDocumentSnapshot? GetActiveDocument()
@@ -4430,13 +4656,12 @@ public sealed class MainPageViewModel : ObservableObject
 				return null;
 			}
 
-			string sourceText = MainPageViewModel.NormalizeLineEndings(_owner.RequestEditorText);
 			return new(
 				DocumentId: _owner.RequestLocation,
 				Title: _owner.RequestName,
 				Language: _owner.ActiveEditorLanguage,
-				SourceText: sourceText,
-				Diagnostics: BuildDiagnostics(sourceText));
+				SourceText: _sourceText,
+				Diagnostics: BuildDiagnostics(_sourceText));
 		}
 
 		public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
@@ -4453,7 +4678,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 			string normalizedText = NormalizeLineEndings(
 				RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(
-					updatedText,
+					MainPageViewModel.BuildConversationFreeRequestSource(updatedText),
 					preRequestScript: string.Empty,
 					string.IsNullOrWhiteSpace(_owner.RequestName) ? "Untitled Request" : _owner.RequestName));
 			ForRestScriptCompilationResult compilation = _owner._scriptExecutionService.Compile(
@@ -4496,6 +4721,7 @@ public sealed class MainPageViewModel : ObservableObject
 				return AiActiveDocumentUpdateResult.Failure(exception.Message);
 			}
 
+			_sourceText = normalizedText;
 			return AiActiveDocumentUpdateResult.Success();
 		}
 

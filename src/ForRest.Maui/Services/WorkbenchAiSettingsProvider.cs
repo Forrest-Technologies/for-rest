@@ -57,6 +57,10 @@ internal static class ForRestAiSettingsMapper
 				Value = apiKey,
 				IsConfigured = !string.IsNullOrWhiteSpace(apiKey),
 			},
+			Conversation = new AiConversationSettings
+			{
+				StreamResponses = settings.StreamResponses,
+			},
 			SystemPromptPrefix = string.IsNullOrWhiteSpace(settings.SystemPrompt)
 				? null
 				: settings.SystemPrompt.Trim(),

@@ -21,8 +21,13 @@ public sealed class AiLocalToolCatalog : IAiToolCatalog
         {
             tools.Add(new(
                 "search_docs",
-                "Search the local For-Rest docs and language reference for relevant facts.",
-                "Provide a concise query string and a bounded result count.",
+                "Search the local For-Rest docs and language reference for relevant facts. If search misses, the runtime can fall back to the full docs corpus.",
+                "Use this first for targeted lookups with a concise query string and a bounded result count.",
+                MutatesDocument: false));
+            tools.Add(new(
+                "read_all_docs",
+                "Read the full local For-Rest docs corpus in one pass when targeted search is insufficient.",
+                "Use this immediately after search_docs returns no useful hits or when you need the full canonical docs context without another search round-trip.",
                 MutatesDocument: false));
         }
 

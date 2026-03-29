@@ -58,6 +58,32 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_executes_conversation_free_request_source()
+	{
+		using TestHarness harness = new();
+		FakeExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(executionService);
+
+		viewModel.ActiveEditorText = """
+			name "demo"
+			method GET
+			url "https://example.test"
+
+			## tighten this request
+			#> Done.
+			""";
+		viewModel.UpdateActiveEditorCursor(1, 1);
+
+		await viewModel.SendAsync();
+
+		Assert.IsNotNull(executionService.LastExecutedSource);
+		Assert.IsFalse(executionService.LastExecutedSource.Contains("## tighten this request", StringComparison.Ordinal));
+		Assert.IsFalse(executionService.LastExecutedSource.Contains("#> Done.", StringComparison.Ordinal));
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("## tighten this request", StringComparison.Ordinal));
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("#> Done.", StringComparison.Ordinal));
+	}
+
+	[TestMethod]
 	public async Task SendAsync_populates_stash_rows_from_execution_result()
 	{
 		using TestHarness harness = new();
@@ -278,6 +304,44 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_shows_transient_working_line_while_inline_ai_request_is_running()
+	{
+		using TestHarness harness = new();
+		TaskCompletionSource<AiInlineConversationResult> gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		FakeAiInlineConversationService aiService = new(
+			AiInlineConversationResult.NotHandled(string.Empty),
+			tryHandleAsync: (_, cancellationToken) => gate.Task.WaitAsync(cancellationToken));
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+
+		viewModel.ActiveEditorText = "name \"demo\"\n## tighten this request";
+		viewModel.UpdateActiveEditorCursor(2, 4);
+
+		Task sendTask = viewModel.SendAsync();
+		for (int attempt = 0;
+		     attempt < 10 && !viewModel.ActiveEditorText.Contains("#> Working", StringComparison.Ordinal);
+		     attempt++)
+		{
+			await Task.Delay(40);
+		}
+
+		StringAssert.Contains(viewModel.ActiveEditorText, "#> Working");
+
+		gate.SetResult(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText: "name \"demo\"\n## tighten this request\n#> Done.",
+				StatusText: "AI replied.",
+				DebugText: "ai debug",
+				ResponseText: "Done.",
+				PromptLineNumber: 2,
+				UpdateKind: AiInlineConversationUpdateKind.ResponseOnly));
+		await sendTask;
+
+		StringAssert.Contains(viewModel.ActiveEditorText, "#> Done.");
+	}
+
+	[TestMethod]
 	public async Task SendAsync_routes_trailing_inline_ai_prompt_after_blank_line_to_ai_service()
 	{
 		using TestHarness harness = new();
@@ -325,6 +389,74 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorLineNumber);
 		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorColumn);
 		Assert.AreEqual(1, viewModel.ActiveEditorRequestedCursorVersion);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_does_not_queue_a_second_legacy_cursor_move_after_inline_ai_reply()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText: "name \"demo\"\n## tighten this request\n#> Done.\n## \nmethod GET",
+				StatusText: "AI replied.",
+				DebugText: "ai debug",
+				SuggestedCursorLineNumber: 4,
+				SuggestedCursorColumn: 4));
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+
+		viewModel.ActiveEditorText = "name \"demo\"\n## tighten this request\nmethod GET";
+		viewModel.UpdateActiveEditorCursor(2, 4);
+
+		await viewModel.SendAsync();
+
+		Assert.IsFalse(viewModel.TryConsumePendingEditorCursorRequest(out _, out _));
+		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorLineNumber);
+		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorColumn);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_repairs_missing_follow_up_prompt_after_ai_reply()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText:
+				"""
+				name "demo"
+				## explain this request
+				#> This reply used to stop without a fresh prompt.
+				method GET
+				""",
+				StatusText: "AI replied.",
+				DebugText: "ai debug",
+				ResponseText: "This reply used to stop without a fresh prompt.",
+				PromptLineNumber: 2,
+				UpdateKind: AiInlineConversationUpdateKind.ResponseOnly));
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+
+		viewModel.ActiveEditorText = "name \"demo\"\n## explain this request\nmethod GET";
+		viewModel.UpdateActiveEditorCursor(2, 4);
+
+		await viewModel.SendAsync();
+
+		CollectionAssert.AreEqual(
+			new[]
+			{
+				"name \"demo\"",
+				"## explain this request",
+				"#> This reply used to stop without a fresh prompt.",
+				string.Empty,
+				"## ",
+				string.Empty,
+				"method GET",
+			},
+			viewModel.ActiveEditorText.Split('\n'));
+		Assert.AreEqual(5, viewModel.ActiveEditorRequestedCursorLineNumber);
+		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorColumn);
 	}
 
 	[TestMethod]
@@ -443,6 +575,7 @@ public sealed class MainPageViewModelLayoutTests
 		await viewModel.SendAsync();
 
 		Assert.IsNotNull(capturedDocument);
+		Assert.AreEqual("name \"demo\"\nmethod GET\nurl \"https://example.test\"\n", capturedDocument.SourceText);
 		Assert.IsTrue(capturedDocument.Diagnostics.Any(static diagnostic => diagnostic.Line == 35 && diagnostic.Message.Contains("; expected", StringComparison.Ordinal)));
 	}
 
@@ -558,9 +691,14 @@ public sealed class MainPageViewModelLayoutTests
 
 		public int ExecuteCallCount { get; private set; }
 
+		public string LastCompiledSource { get; private set; } = string.Empty;
+
+		public string LastExecutedSource { get; private set; } = string.Empty;
+
 		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
 		{
 			CompileCallCount++;
+			LastCompiledSource = source;
 			if (_throwOnCompile)
 			{
 				throw new InvalidOperationException("compile boom");
@@ -586,6 +724,7 @@ public sealed class MainPageViewModelLayoutTests
 			CancellationToken cancellationToken = default)
 		{
 			ExecuteCallCount++;
+			LastExecutedSource = source;
 			ResponseSnapshot response = new()
 			{
 				StatusCode = 200,
@@ -646,11 +785,16 @@ public sealed class MainPageViewModelLayoutTests
 	{
 		private readonly AiInlineConversationResult _result;
 		private readonly Action<AiInlineConversationRequest>? _onTryHandle;
+		private readonly Func<AiInlineConversationRequest, CancellationToken, Task<AiInlineConversationResult>>? _tryHandleAsync;
 
-		public FakeAiInlineConversationService(AiInlineConversationResult result, Action<AiInlineConversationRequest>? onTryHandle = null)
+		public FakeAiInlineConversationService(
+			AiInlineConversationResult result,
+			Action<AiInlineConversationRequest>? onTryHandle = null,
+			Func<AiInlineConversationRequest, CancellationToken, Task<AiInlineConversationResult>>? tryHandleAsync = null)
 		{
 			_result = result;
 			_onTryHandle = onTryHandle;
+			_tryHandleAsync = tryHandleAsync;
 		}
 
 		public int CallCount { get; private set; }
@@ -659,6 +803,11 @@ public sealed class MainPageViewModelLayoutTests
 		{
 			CallCount++;
 			_onTryHandle?.Invoke(request);
+			if (_tryHandleAsync is not null)
+			{
+				return _tryHandleAsync(request, cancellationToken);
+			}
+
 			string updatedText = _result.Handled && string.IsNullOrWhiteSpace(_result.UpdatedText)
 				? request.SourceText
 				: _result.UpdatedText;

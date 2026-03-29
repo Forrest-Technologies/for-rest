@@ -200,6 +200,116 @@ public sealed class AiInlineConversationServiceTests
         Assert.AreEqual(5, result.SuggestedCursorLineNumber);
     }
 
+    [TestMethod]
+    public async Task TryHandleAsync_keeps_response_thread_in_place_when_agent_edits_but_leaves_prompt_present()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## improve this request\nmethod GET");
+        IAiInlineConversationService service = new AiInlineConversationService(
+            new StubTurnExecutor(
+                "Done.",
+                onExecute: static request =>
+                {
+                    request.ActiveDocumentHost?.UpdateActiveDocument(
+                        request.ActiveDocumentHost.GetActiveDocument()!,
+                        "name \"demo\"\n## improve this request\nmethod POST");
+                }));
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## improve this request",
+                "#> Done.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method POST",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_keeps_fresh_prompt_near_the_active_thread_when_older_conversations_exist()
+    {
+        StubActiveDocumentHost host = new(
+            "## old task\n#> old answer\nname \"demo\"\n## improve this request");
+        IAiInlineConversationService service = new AiInlineConversationService(
+            new StubTurnExecutor(
+                "Done.",
+                onExecute: static request =>
+                {
+                    request.ActiveDocumentHost?.UpdateActiveDocument(
+                        request.ActiveDocumentHost.GetActiveDocument()!,
+                        "name \"demo\"\nmethod GET");
+                }));
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 4,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+        Assert.AreEqual(3, result.SuggestedCursorLineNumber);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_keeps_inline_response_when_active_document_source_omits_chat_lines()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\nmethod GET");
+        IAiInlineConversationService service = new AiInlineConversationService(new StubTurnExecutor("Done."));
+        string source = "name \"demo\"\n## improve this request\nmethod GET";
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## improve this request",
+                "#> Done.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
+    }
+
     private sealed class StubTurnExecutor : IAiTurnExecutor
     {
         private readonly string _responseText;

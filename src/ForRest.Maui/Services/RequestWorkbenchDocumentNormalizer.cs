@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using ForRest.Services.AI;
 using ForRest.Scripting;
 
 namespace ForRest.Maui.Services;
@@ -10,7 +11,7 @@ public static class RequestWorkbenchDocumentNormalizer
 {
 	public static string NormalizeRequestDocumentSource(string requestSource, string? preRequestScript, string title)
 	{
-		string normalizedRequest = NormalizeLineEndings(requestSource);
+		string normalizedRequest = NormalizeLineEndings(AiInlineConversationFormatter.RemoveConversationLines(requestSource));
 		if (string.IsNullOrWhiteSpace(normalizedRequest))
 		{
 			return normalizedRequest;

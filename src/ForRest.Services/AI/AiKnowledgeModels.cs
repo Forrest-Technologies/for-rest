@@ -61,6 +61,31 @@ public sealed class AiDocumentationSearchService : IAiDocumentationSearchService
             .ToArray();
     }
 
+    public static bool ShouldFallbackToFullDocs(string query, IReadOnlyList<AiKnowledgeSearchHit> hits)
+    {
+        if (string.IsNullOrWhiteSpace(query) || hits is null || hits.Count == 0)
+        {
+            return true;
+        }
+
+        List<string> queryTokens = Tokenize(query);
+        if (queryTokens.Count == 0)
+        {
+            return true;
+        }
+
+        AiKnowledgeSearchHit bestHit = hits[0];
+        bool supportedByTitleOrSummary =
+            bestHit.Document.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            bestHit.Document.Summary.Contains(query, StringComparison.OrdinalIgnoreCase);
+        bool supportedByTags = queryTokens.Any(token => bestHit.Document.Tags.Contains(token, StringComparer.OrdinalIgnoreCase));
+
+        int weakMatchThreshold = supportedByTitleOrSummary || supportedByTags
+            ? Math.Max(20, queryTokens.Count * 8)
+            : Math.Max(60, queryTokens.Count * 18);
+        return bestHit.Score < weakMatchThreshold;
+    }
+
     private static int ScoreDocument(AiKnowledgeDocument document, IReadOnlyList<string> queryTokens, string query)
     {
         int score = 0;
@@ -171,4 +196,3 @@ public sealed class AiDocumentationSearchService : IAiDocumentationSearchService
         }
     }
 }
-

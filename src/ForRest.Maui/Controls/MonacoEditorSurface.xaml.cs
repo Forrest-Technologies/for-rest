@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using ForRest.Maui.Theming;
 using Microsoft.Maui.Dispatching;
+using ForRest.Maui.Services;
+
 #if ANDROID
 using Android.Content;
 using Android.Views;
@@ -1810,6 +1812,7 @@ public partial class MonacoEditorSurface : ContentView
 				catch (Exception exception)
 				{
 					Debug.WriteLine($"[MonacoEditorSurface] Failed to apply editor state v{requestedVersion}: {exception}");
+					AppLaunchGuard.RecordException($"Monaco editor state apply failed at version {requestedVersion}.", exception);
 					return;
 				}
 

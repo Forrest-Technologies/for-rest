@@ -20,7 +20,8 @@ public sealed class WorkbenchAiSettingsProviderTests
 			Model: "gpt-4.1-mini",
 			DeploymentName: "forrest-agent",
 			ApiKey: "test-key",
-			SystemPrompt: "Keep answers brief.");
+			SystemPrompt: "Keep answers brief.",
+			StreamResponses: false);
 
 		AiSettings runtime = settings.ToRuntimeSettings();
 
@@ -31,6 +32,7 @@ public sealed class WorkbenchAiSettingsProviderTests
 		Assert.AreEqual("forrest-agent", runtime.Provider.DeploymentName);
 		Assert.AreEqual("test-key", runtime.ApiKey.Value);
 		Assert.IsTrue(runtime.ApiKey.IsConfigured);
+		Assert.IsFalse(runtime.Conversation.StreamResponses);
 		Assert.AreEqual("Keep answers brief.", runtime.SystemPromptPrefix);
 	}
 
@@ -52,6 +54,7 @@ public sealed class WorkbenchAiSettingsProviderTests
 
 			[ai]
 			enabled = true
+			stream_responses = false
 			provider = "openai"
 			api = "responses"
 			model = "gpt-4.1-mini"
@@ -68,6 +71,7 @@ public sealed class WorkbenchAiSettingsProviderTests
 		Assert.AreEqual(AiConversationTransport.Responses, settings.Provider.Transport);
 		Assert.AreEqual("gpt-4.1-mini", settings.Provider.Model);
 		Assert.AreEqual("workbench-api-key", settings.ApiKey.Value);
+		Assert.IsFalse(settings.Conversation.StreamResponses);
 		Assert.AreEqual("Use terse answers.", settings.SystemPromptPrefix);
 	}
 

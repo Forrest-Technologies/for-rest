@@ -20,6 +20,7 @@ public sealed class SettingsTomlTemplate
 	private const string AiDeploymentNameKeyName = "deployment_name";
 	private const string AiSecretKeyName = "api_key";
 	private const string AiSystemPromptKeyName = "system_prompt";
+	private const string AiStreamResponsesKeyName = "stream_responses";
 	private const string StyleEditorFontSizeKeyName = "editor_font_size";
 	private const string StyleResultPaneTabFontSizeKeyName = "result_pane_tab_font_size";
 	private static readonly Regex ThemeLinePattern = new(
@@ -154,8 +155,8 @@ public sealed class SettingsTomlTemplate
 	private static string BuildAiComment(ForRestAiSettings ai)
 	{
 		return ai.Enabled
-			? "# AI settings are enabled. OpenAI endpoint is optional; Azure OpenAI requires endpoint and deployment_name."
-			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, model, api key, and optional OpenAI endpoint fields.";
+			? "# AI settings are enabled. OpenAI endpoint is optional; Azure OpenAI requires endpoint and deployment_name. stream_responses controls the inline typewriter reveal."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, model, api key, and optional OpenAI endpoint fields. stream_responses controls the inline typewriter reveal.";
 	}
 
 	private static IReadOnlyList<string> BuildAiSection(ForRestAiSettings ai)
@@ -163,7 +164,8 @@ public sealed class SettingsTomlTemplate
 		List<string> lines =
 		[
 			AiSectionHeader,
-			$"{AiEnabledKeyName} = {(ai.Enabled ? "true" : "false")}"
+			$"{AiEnabledKeyName} = {(ai.Enabled ? "true" : "false")}",
+			$"{AiStreamResponsesKeyName} = {(ai.StreamResponses ? "true" : "false")}"
 		];
 
 		if (!ai.Enabled && !ai.HasConfiguredValues)
@@ -340,7 +342,8 @@ public sealed class SettingsTomlTemplate
 				return false;
 			}
 
-			if (string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) &&
+			if ((string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) ||
+			     string.Equals(key, AiStreamResponsesKeyName, StringComparison.OrdinalIgnoreCase)) &&
 			    !bool.TryParse(value, out _))
 			{
 				return false;
@@ -365,12 +368,15 @@ public sealed class SettingsTomlTemplate
 			return true;
 		}
 
-		if (!seenAiKeys.Contains(AiEnabledKeyName))
+		if (!seenAiKeys.Contains(AiEnabledKeyName) ||
+		    !seenAiKeys.Contains(AiStreamResponsesKeyName))
 		{
 			return false;
 		}
 
-		bool hasAiDetails = seenAiKeys.Any(static key => !string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase));
+		bool hasAiDetails = seenAiKeys.Any(
+			static key => !string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) &&
+			              !string.Equals(key, AiStreamResponsesKeyName, StringComparison.OrdinalIgnoreCase));
 		if (!hasAiDetails)
 		{
 			return true;
@@ -388,6 +394,7 @@ public sealed class SettingsTomlTemplate
 	private static bool IsKnownAiKey(string key)
 	{
 		return string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiStreamResponsesKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiProviderKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiApiKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiEndpointKeyName, StringComparison.OrdinalIgnoreCase) ||

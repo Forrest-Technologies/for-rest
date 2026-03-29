@@ -173,6 +173,14 @@ public sealed class ThemeConfigParser
 			case "system_prompt":
 				parsed = current with { SystemPrompt = value };
 				return true;
+			case "stream_responses":
+				if (!bool.TryParse(value, out bool streamResponses))
+				{
+					return SetMessage("ignored invalid value for 'stream_responses'", out message);
+				}
+
+				parsed = current with { StreamResponses = streamResponses };
+				return true;
 			default:
 				return SetMessage($"ignored setting entry '{key}'", out message);
 		}
