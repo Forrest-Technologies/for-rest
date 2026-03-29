@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using ForRest.Services.Licensing;
 
@@ -9,6 +10,7 @@ public sealed class SettingsTomlTemplate
 	public const string MaskedLicenseValue = "********";
 	public const string GeneratedLicenseInfoSectionHeader = "[license.info]";
 	private const string ThemeSectionHeader = "[appearance.theme]";
+	private const string StyleSectionHeader = "[appearance.style]";
 	private const string AiSectionHeader = "[ai]";
 	private const string AiEnabledKeyName = "enabled";
 	private const string AiProviderKeyName = "provider";
@@ -18,6 +20,8 @@ public sealed class SettingsTomlTemplate
 	private const string AiDeploymentNameKeyName = "deployment_name";
 	private const string AiSecretKeyName = "api_key";
 	private const string AiSystemPromptKeyName = "system_prompt";
+	private const string StyleEditorFontSizeKeyName = "editor_font_size";
+	private const string StyleResultPaneTabFontSizeKeyName = "result_pane_tab_font_size";
 	private static readonly Regex ThemeLinePattern = new(
 		@"^(?<indent>\s*)(?<key>[A-Za-z][\w-]*)\s*=\s*(?<value>[^\r\n#]*?)(?<suffix>\s*(#.*)?)$",
 		RegexOptions.Compiled);
@@ -34,6 +38,10 @@ public sealed class SettingsTomlTemplate
 				string.Empty,
 				ThemeSectionHeader,
 				.. ThemeSupport.OrderedThemes.Select(theme => $"{theme.ToConfigName()} = {(theme == settings.Theme ? "true" : "false")}"),
+				string.Empty,
+				StyleSectionHeader,
+				$"{StyleEditorFontSizeKeyName} = {settings.Style.EditorFontSize.ToString("0.###", CultureInfo.InvariantCulture)}",
+				$"{StyleResultPaneTabFontSizeKeyName} = {settings.Style.ResultPaneTabFontSize.ToString("0.###", CultureInfo.InvariantCulture)}",
 				string.Empty,
 				BuildAiComment(settings.Ai),
 				.. BuildAiSection(settings.Ai)
@@ -146,8 +154,8 @@ public sealed class SettingsTomlTemplate
 	private static string BuildAiComment(ForRestAiSettings ai)
 	{
 		return ai.Enabled
-			? "# AI settings are enabled."
-			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, endpoint, model, and api key fields.";
+			? "# AI settings are enabled. OpenAI endpoint is optional; Azure OpenAI requires endpoint and deployment_name."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, model, api key, and optional OpenAI endpoint fields.";
 	}
 
 	private static IReadOnlyList<string> BuildAiSection(ForRestAiSettings ai)
@@ -178,6 +186,7 @@ public sealed class SettingsTomlTemplate
 		List<EditorEditableRange> ranges = [];
 		string[] lines = text.Replace("\r\n", "\n").Split('\n');
 		bool inThemeSection = false;
+		bool inStyleSection = false;
 		bool inAiSection = false;
 
 		for (int index = 0; index < lines.Length; index++)
@@ -188,11 +197,12 @@ public sealed class SettingsTomlTemplate
 			if (trimmedLine.StartsWith('[') && trimmedLine.EndsWith(']'))
 			{
 				inThemeSection = string.Equals(trimmedLine, ThemeSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inStyleSection = string.Equals(trimmedLine, StyleSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection && !inAiSection)
+			if (!inThemeSection && !inStyleSection && !inAiSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -221,6 +231,14 @@ public sealed class SettingsTomlTemplate
 					continue;
 				}
 			}
+			else if (inStyleSection)
+			{
+				if (!string.Equals(key, StyleEditorFontSizeKeyName, StringComparison.OrdinalIgnoreCase) &&
+				    !string.Equals(key, StyleResultPaneTabFontSizeKeyName, StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
+			}
 			else if (!IsKnownAiKey(key))
 			{
 				continue;
@@ -239,8 +257,10 @@ public sealed class SettingsTomlTemplate
 	{
 		string[] lines = text.Replace("\r\n", "\n").Split('\n');
 		bool inThemeSection = false;
+		bool inStyleSection = false;
 		bool inAiSection = false;
 		HashSet<ShellThemeName> seenThemes = [];
+		HashSet<string> seenStyleKeys = [];
 		HashSet<string> seenAiKeys = [];
 
 		for (int index = 0; index < lines.Length; index++)
@@ -256,11 +276,12 @@ public sealed class SettingsTomlTemplate
 			if (trimmedLine.StartsWith('[') && trimmedLine.EndsWith(']'))
 			{
 				inThemeSection = string.Equals(trimmedLine, ThemeSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inStyleSection = string.Equals(trimmedLine, StyleSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection && !inAiSection)
+			if (!inThemeSection && !inStyleSection && !inAiSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -297,6 +318,23 @@ public sealed class SettingsTomlTemplate
 				continue;
 			}
 
+			if (inStyleSection)
+			{
+				if (!string.Equals(key, StyleEditorFontSizeKeyName, StringComparison.OrdinalIgnoreCase) &&
+				    !string.Equals(key, StyleResultPaneTabFontSizeKeyName, StringComparison.OrdinalIgnoreCase))
+				{
+					return false;
+				}
+
+				if (!TryParseStyleNumber(value, out _))
+				{
+					return false;
+				}
+
+				seenStyleKeys.Add(key.ToLowerInvariant());
+				continue;
+			}
+
 			if (!IsKnownAiKey(key))
 			{
 				return false;
@@ -312,6 +350,12 @@ public sealed class SettingsTomlTemplate
 		}
 
 		if (!ThemeSupport.OrderedThemes.All(seenThemes.Contains))
+		{
+			return false;
+		}
+
+		if (!seenStyleKeys.Contains(StyleEditorFontSizeKeyName) ||
+		    !seenStyleKeys.Contains(StyleResultPaneTabFontSizeKeyName))
 		{
 			return false;
 		}
@@ -352,4 +396,17 @@ public sealed class SettingsTomlTemplate
 		       string.Equals(key, AiSecretKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiSystemPromptKeyName, StringComparison.OrdinalIgnoreCase);
 	}
+
+	private static bool IsKnownStyleKey(string key)
+	{
+		return string.Equals(key, StyleEditorFontSizeKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, StyleResultPaneTabFontSizeKeyName, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool TryParseStyleNumber(string value, out double result)
+	{
+		return double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out result) &&
+		       double.IsFinite(result);
+	}
+
 }

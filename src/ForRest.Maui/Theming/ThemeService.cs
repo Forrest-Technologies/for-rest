@@ -27,13 +27,16 @@ public sealed class ThemeService : IThemeService, IDisposable
 		_themeConfigNormalizer = themeConfigNormalizer;
 		_themeConfigStore = themeConfigStore;
 		_settingsTomlTemplate = settingsTomlTemplate;
-		CurrentTheme = _themeCatalog.GetTheme(ShellThemeName.Azure);
+		CurrentSettings = new ForRestSettings(ShellThemeName.Azure);
+		CurrentTheme = _themeCatalog.GetTheme(CurrentSettings.Theme);
 		CurrentStatusMessage = "Ready";
 	}
 
 	public event EventHandler<ThemeChangedEventArgs>? ThemeChanged;
 
 	public ShellThemeDefinition CurrentTheme { get; private set; }
+
+	public ForRestSettings CurrentSettings { get; private set; }
 
 	public string CurrentStatusMessage { get; private set; }
 
@@ -47,7 +50,7 @@ public sealed class ThemeService : IThemeService, IDisposable
 		}
 
 		_started = true;
-		string initialConfig = _settingsTomlTemplate.Build(new ForRestSettings(ShellThemeName.Azure));
+		string initialConfig = _settingsTomlTemplate.Build(CurrentSettings);
 
 		_themeConfigStore.EnsureConfigFile(initialConfig);
 		ProcessConfigCore("startup");
@@ -67,7 +70,7 @@ public sealed class ThemeService : IThemeService, IDisposable
 			ThemeNormalizationResult normalizationResult = _themeConfigNormalizer.Normalize(parsedDocument);
 			ShellThemeDefinition theme = _themeCatalog.GetTheme(normalizationResult.Settings.Theme);
 			string statusMessage = BuildStatusMessage(theme, normalizationResult.Messages, "preview", configNormalized: false);
-			ApplyTheme(theme, statusMessage, configNormalized: false, isPreview: true);
+			ApplyTheme(theme, normalizationResult.Settings, statusMessage, configNormalized: false, isPreview: true);
 		}
 		finally
 		{
@@ -160,14 +163,15 @@ public sealed class ThemeService : IThemeService, IDisposable
 
 		ShellThemeDefinition theme = _themeCatalog.GetTheme(normalizationResult.Settings.Theme);
 		string statusMessage = BuildStatusMessage(theme, normalizationResult.Messages, origin, requiresRewrite);
-		ApplyTheme(theme, statusMessage, requiresRewrite, isPreview: false);
+		ApplyTheme(theme, normalizationResult.Settings, statusMessage, requiresRewrite, isPreview: false);
 	}
 
-	private void ApplyTheme(ShellThemeDefinition theme, string statusMessage, bool configNormalized, bool isPreview)
+	private void ApplyTheme(ShellThemeDefinition theme, ForRestSettings settings, string statusMessage, bool configNormalized, bool isPreview)
 	{
 		Action applyAction = () =>
 		{
 			CurrentTheme = theme;
+			CurrentSettings = settings;
 			CurrentStatusMessage = statusMessage;
 			if (Application.Current is null)
 			{
@@ -213,7 +217,7 @@ public sealed class ThemeService : IThemeService, IDisposable
 			ApplyColor(resources, ThemeResourceKeys.WindowChromeInactiveBackgroundColor, theme.Colors.WindowChromeInactiveBackgroundColor);
 			ApplyColor(resources, ThemeResourceKeys.WindowChromeInactiveForegroundColor, theme.Colors.WindowChromeInactiveForegroundColor);
 
-			ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, statusMessage, configNormalized, isPreview));
+			ThemeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, settings, statusMessage, configNormalized, isPreview));
 		};
 
 		if (MainThread.IsMainThread)

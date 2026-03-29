@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ForRest.Maui.Theming;
 
 public sealed class ThemeConfigNormalizer
@@ -15,13 +17,14 @@ public sealed class ThemeConfigNormalizer
 		List<string> messages = [.. document.Messages];
 		List<ThemeConfigEntry> knownEntries = document.Entries.Where(entry => entry.IsKnown).ToList();
 		List<ThemeConfigEntry> selectedEntries = knownEntries.Where(entry => entry.SelectedValue == true).ToList();
+		bool settingsNormalized = false;
 
 		ShellThemeName selectedTheme;
 		if (selectedEntries.Count > 1)
 		{
 			ThemeConfigEntry winningEntry = selectedEntries[0];
 			selectedTheme = Enum.Parse<ShellThemeName>(winningEntry.RawName, ignoreCase: true);
-			messages.Add("settings normalized");
+			settingsNormalized = true;
 		}
 		else if (selectedEntries.Count == 1)
 		{
@@ -30,11 +33,23 @@ public sealed class ThemeConfigNormalizer
 		else
 		{
 			selectedTheme = FallbackTheme;
+			settingsNormalized = true;
+		}
+
+		ForRestStyleSettings normalizedStyle = document.Style.Normalize();
+		if (normalizedStyle != document.Style)
+		{
+			settingsNormalized = true;
+		}
+
+		if (settingsNormalized && !messages.Contains("settings normalized", StringComparer.Ordinal))
+		{
 			messages.Add("settings normalized");
 		}
 
 		ForRestSettings settings = new(selectedTheme, document.LicenseKey)
 		{
+			Style = normalizedStyle,
 			Ai = document.Ai
 		};
 
@@ -52,9 +67,11 @@ public sealed class ThemeConfigNormalizer
 
 		List<string> output = [];
 		bool insertedThemeSection = false;
+		bool insertedStyleSection = false;
 		bool insertedAiSection = false;
 		bool insertedLicense = false;
 		bool skippingThemeSection = false;
+		bool skippingStyleSection = false;
 		bool skippingAiSection = false;
 		int licenseInsertIndex = GetLicenseInsertionIndex(document.Lines);
 
@@ -65,6 +82,11 @@ public sealed class ThemeConfigNormalizer
 				if (skippingThemeSection)
 				{
 					skippingThemeSection = false;
+				}
+
+				if (skippingStyleSection)
+				{
+					skippingStyleSection = false;
 				}
 
 				if (skippingAiSection)
@@ -84,8 +106,26 @@ public sealed class ThemeConfigNormalizer
 					continue;
 				}
 
+				if (string.Equals(line.SectionName, "appearance.style", StringComparison.OrdinalIgnoreCase))
+				{
+					if (!insertedStyleSection)
+					{
+						AppendStyleSection(output, settings.Style);
+						insertedStyleSection = true;
+					}
+
+					skippingStyleSection = true;
+					continue;
+				}
+
 				if (string.Equals(line.SectionName, "ai", StringComparison.OrdinalIgnoreCase))
 				{
+					if (!insertedStyleSection)
+					{
+						AppendStyleSection(output, settings.Style);
+						insertedStyleSection = true;
+					}
+
 					if (!insertedAiSection)
 					{
 						AppendAiSection(output, settings.Ai);
@@ -97,7 +137,7 @@ public sealed class ThemeConfigNormalizer
 				}
 			}
 
-			if (skippingThemeSection || skippingAiSection)
+			if (skippingThemeSection || skippingStyleSection || skippingAiSection)
 			{
 				continue;
 			}
@@ -139,6 +179,16 @@ public sealed class ThemeConfigNormalizer
 			AppendThemeSection(output, settings.Theme);
 		}
 
+		if (!insertedStyleSection)
+		{
+			if (output.Count > 0 && !string.IsNullOrWhiteSpace(output[^1]))
+			{
+				output.Add(string.Empty);
+			}
+
+			AppendStyleSection(output, settings.Style);
+		}
+
 		if (!insertedAiSection)
 		{
 			if (output.Count > 0 && !string.IsNullOrWhiteSpace(output[^1]))
@@ -178,6 +228,13 @@ public sealed class ThemeConfigNormalizer
 		}
 	}
 
+	private static void AppendStyleSection(List<string> output, ForRestStyleSettings style)
+	{
+		output.Add("[appearance.style]");
+		output.Add($"editor_font_size = {FormatNumber(style.EditorFontSize)}");
+		output.Add($"result_pane_tab_font_size = {FormatNumber(style.ResultPaneTabFontSize)}");
+	}
+
 	private static void AppendAiSection(List<string> output, ForRestAiSettings ai)
 	{
 		output.Add(ai.Enabled
@@ -208,5 +265,10 @@ public sealed class ThemeConfigNormalizer
 		}
 
 		return lastContentIndex < 0 ? [string.Empty] : output.Take(lastContentIndex + 1).ToArray();
+	}
+
+	private static string FormatNumber(double value)
+	{
+		return value.ToString("0.###", CultureInfo.InvariantCulture);
 	}
 }

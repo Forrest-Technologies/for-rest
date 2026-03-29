@@ -91,8 +91,57 @@ public sealed class SettingsTomlDocumentServiceTests
 		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
 
 		StringAssert.Contains(editorText, "[ai]");
+		StringAssert.Contains(editorText, "[appearance.style]");
+		StringAssert.Contains(editorText, "editor_font_size = 13.5");
 		StringAssert.Contains(editorText, "enabled = false");
 		Assert.IsFalse(editorText.Contains("api_key = ", StringComparison.Ordinal));
+	}
+
+	[TestMethod]
+	public void LoadOrCreate_describes_openai_endpoint_as_optional()
+	{
+		SettingsTomlTemplate template = new();
+		string editorText = template.Build(
+			new ForRestSettings(ShellThemeName.Azure)
+			{
+				Ai = new ForRestAiSettings(Enabled: true)
+			});
+
+		StringAssert.Contains(editorText, "OpenAI endpoint is optional");
+		StringAssert.Contains(editorText, "Azure OpenAI requires endpoint and deployment_name");
+	}
+
+	[TestMethod]
+	public void SaveRawText_persists_style_section_values()
+	{
+		using TestConfigScope scope = new();
+		SettingsTomlDocumentService service = CreateService();
+		File.WriteAllText(
+			scope.ConfigFilePath,
+			"""
+			license = ""
+
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = false
+			amber = false
+
+			[appearance.style]
+			editor_font_size = 13.5
+			result_pane_tab_font_size = 11.5
+			""");
+
+		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
+		string updatedText = editorText
+			.Replace("editor_font_size = 13.5", "editor_font_size = 17.25", StringComparison.Ordinal)
+			.Replace("result_pane_tab_font_size = 11.5", "result_pane_tab_font_size = 13", StringComparison.Ordinal);
+		service.SaveRawText(updatedText);
+
+		string rawText = File.ReadAllText(scope.ConfigFilePath);
+		StringAssert.Contains(rawText, "editor_font_size = 17.25");
+		StringAssert.Contains(rawText, "result_pane_tab_font_size = 13");
 	}
 
 	[TestMethod]

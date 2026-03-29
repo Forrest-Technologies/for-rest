@@ -8,6 +8,7 @@ using ForRest.Maui.Theming;
 using ForRest.Models;
 using ForRest.Repositories;
 using ForRest.Services;
+using ForRest.Services.AI;
 using ForRest.Scripting;
 using Microsoft.Maui.ApplicationModel;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
@@ -46,6 +47,8 @@ public sealed class MainPageViewModel : ObservableObject
 	private readonly IExecutionHistoryRepository _executionHistoryRepository;
 	private readonly ForRestScriptDocumentTextService _documentTextService;
 	private readonly IAppActivationService _appActivationService;
+	private readonly IWorkbenchAiSettingsProvider _aiSettingsProvider;
+	private readonly IAiInlineConversationService _aiInlineConversationService;
 	private readonly Dictionary<Guid, RequestWorkbenchWorkspaceState> _workspaceStates = [];
 	private static readonly Guid HttpBinWorkspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 	private static readonly Guid JsonPlaceholderWorkspaceId = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -87,6 +90,8 @@ public sealed class MainPageViewModel : ObservableObject
 	private bool _canExecuteRequests = true;
 	private string _editorThemeKey;
 	private ShellThemeName _currentThemeName;
+	private double _activeEditorFontSize = ForRestStyleSettings.DefaultEditorFontSize;
+	private double _resultPaneTabFontSize = ForRestStyleSettings.DefaultResultPaneTabFontSize;
 	private string _themeConfigText;
 	private string _activeEditorText;
 	private string _activeEditorLanguage;
@@ -131,7 +136,9 @@ public sealed class MainPageViewModel : ObservableObject
 		IForRestScriptExecutionService scriptExecutionService,
 		IExecutionHistoryRepository executionHistoryRepository,
 		ForRestScriptDocumentTextService documentTextService,
-		IAppActivationService appActivationService)
+		IAppActivationService appActivationService,
+		IWorkbenchAiSettingsProvider aiSettingsProvider,
+		IAiInlineConversationService aiInlineConversationService)
 	{
 		_themeService = themeService;
 		_settingsTomlDocumentService = settingsTomlDocumentService;
@@ -140,6 +147,8 @@ public sealed class MainPageViewModel : ObservableObject
 		_executionHistoryRepository = executionHistoryRepository;
 		_documentTextService = documentTextService;
 		_appActivationService = appActivationService;
+		_aiSettingsProvider = aiSettingsProvider;
+		_aiInlineConversationService = aiInlineConversationService;
 		_languageHelpSourceEntries =
 		[
 			.. ForRestLanguageCatalog.GetEntries().Select(
@@ -180,6 +189,8 @@ public sealed class MainPageViewModel : ObservableObject
 		_activationDetail = "License state has not been evaluated yet.";
 		_currentThemeName = themeService.CurrentTheme.Name;
 		_editorThemeKey = themeService.CurrentTheme.MonacoThemeKey;
+		_activeEditorFontSize = themeService.CurrentSettings.Style.EditorFontSize;
+		_resultPaneTabFontSize = themeService.CurrentSettings.Style.ResultPaneTabFontSize;
 		_themeConfigText = ReadSettingsText(_currentThemeName);
 		_activeEditorText = _requestEditorText;
 		_activeEditorLanguage = "forrest";
@@ -527,6 +538,18 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		get => _editorThemeKey;
 		set => SetProperty(ref _editorThemeKey, value);
+	}
+
+	public double ActiveEditorFontSize
+	{
+		get => _activeEditorFontSize;
+		private set => SetProperty(ref _activeEditorFontSize, value);
+	}
+
+	public double ResultPaneTabFontSize
+	{
+		get => _resultPaneTabFontSize;
+		private set => SetProperty(ref _resultPaneTabFontSize, value);
 	}
 
 	public string ActiveEditorText
@@ -992,6 +1015,11 @@ public sealed class MainPageViewModel : ObservableObject
 		if (!_canExecuteRequests)
 		{
 			ApplyActivationBlock();
+			return;
+		}
+
+		if (await TryHandleInlineAiAsync())
+		{
 			return;
 		}
 
@@ -2177,6 +2205,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		_currentThemeName = e.Theme.Name;
 		EditorThemeKey = e.Theme.MonacoThemeKey;
+		ApplyStyleSettings(e.Settings.Style);
 		ExecutionStatus = e.StatusMessage;
 		ApplyThemePalette(e.Theme);
 		if (!(e.IsPreview && IsActiveSettingsEditor))
@@ -2185,6 +2214,12 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		RefreshActivationStatus();
+	}
+
+	private void ApplyStyleSettings(ForRestStyleSettings style)
+	{
+		ActiveEditorFontSize = style.EditorFontSize;
+		ResultPaneTabFontSize = style.ResultPaneTabFontSize;
 	}
 
 	private void RefreshActivationStatus()
@@ -2750,6 +2785,58 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	private async Task<bool> TryHandleInlineAiAsync()
+	{
+		AiInlineConversationRequest request = new(
+			DocumentId: RequestLocation,
+			DocumentTitle: RequestName,
+			Language: ActiveEditorLanguage,
+			SourceText: RequestEditorText,
+			CursorLineNumber: _activeEditorLineNumber,
+			Settings: _aiSettingsProvider.GetCurrentSettings(),
+			ActiveDocumentHost: new ActiveRequestDocumentHost(this));
+
+		IsSending = true;
+		try
+		{
+			AiInlineConversationResult result = await _aiInlineConversationService.TryHandleAsync(request);
+			if (!result.Handled)
+			{
+				return false;
+			}
+
+			ApplyAiConversationText(result.UpdatedText);
+			await PersistCurrentRequestAsync();
+			ExecutionStatus = result.StatusText;
+			DebugOutputText = result.DebugText;
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("ai", result.StatusText, DateTime.Now.ToString("T"), result.Succeeded ? _successColor : _warningColor));
+			OnPropertyChanged(nameof(CanCopyTrace));
+			if (!result.Succeeded)
+			{
+				FocusRightPaneTab("debug");
+				RevealInspectorOnCompactLayout();
+			}
+
+			return true;
+		}
+		catch (Exception exception)
+		{
+			ExecutionStatus = "AI request failed";
+			DebugOutputText = exception.ToString();
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("ai", exception.Message, DateTime.Now.ToString("T"), _dangerColor));
+			OnPropertyChanged(nameof(CanCopyTrace));
+			FocusRightPaneTab("debug");
+			RevealInspectorOnCompactLayout();
+			return true;
+		}
+		finally
+		{
+			IsSending = false;
+		}
+	}
+
 	private void ScheduleRequestAutosave()
 	{
 		CancellationTokenSource saveSource = new();
@@ -2808,6 +2895,27 @@ public sealed class MainPageViewModel : ObservableObject
 		UpdateRequestMetadataFromSource();
 		MarkCurrentDocumentDirty();
 		return normalized;
+	}
+
+	private void ApplyAiConversationText(string updatedText)
+	{
+		string normalized = NormalizeLineEndings(updatedText);
+		if (string.Equals(_requestEditorText, normalized, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		if (IsActiveRequestEditor)
+		{
+			ActiveEditorText = normalized;
+			return;
+		}
+
+		_requestEditorText = normalized;
+		OnPropertyChanged(nameof(RequestEditorText));
+		SyncSupportEditorsFromRequestSource();
+		UpdateRequestMetadataFromSource();
+		MarkCurrentDocumentDirty();
 	}
 
 	private void UpdateCurrentDocumentMetadata()
@@ -3174,7 +3282,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		try
 		{
-			return _settingsTomlDocumentService.LoadOrCreate(new ForRestSettings(currentTheme));
+			return _settingsTomlDocumentService.LoadOrCreate(_themeService.CurrentSettings with { Theme = currentTheme });
 		}
 		catch (Exception exception)
 		{
@@ -3927,5 +4035,65 @@ public sealed class MainPageViewModel : ObservableObject
 			>= 1_024 => $"{sizeBytes / 1_024d:0.##} KB",
 			_ => $"{sizeBytes} B"
 		};
+	}
+
+	private sealed class ActiveRequestDocumentHost : IAiActiveDocumentHost
+	{
+		private readonly MainPageViewModel _owner;
+
+		public ActiveRequestDocumentHost(MainPageViewModel owner)
+		{
+			_owner = owner;
+		}
+
+		public AiActiveDocumentSnapshot? GetActiveDocument()
+		{
+			if (!_owner.IsActiveRequestEditor || string.IsNullOrWhiteSpace(_owner.RequestLocation))
+			{
+				return null;
+			}
+
+			return new(
+				DocumentId: _owner.RequestLocation,
+				Title: _owner.RequestName,
+				Language: _owner.ActiveEditorLanguage,
+				SourceText: _owner.RequestEditorText);
+		}
+
+		public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
+		{
+			if (!_owner.IsActiveRequestEditor)
+			{
+				return AiActiveDocumentUpdateResult.Failure("The active editor is not a request document.");
+			}
+
+			if (!string.Equals(_owner.RequestLocation, document.DocumentId, StringComparison.OrdinalIgnoreCase))
+			{
+				return AiActiveDocumentUpdateResult.Failure("The active request changed before the AI patch could be applied.");
+			}
+
+			void apply()
+			{
+				_owner.ApplyAiConversationText(updatedText);
+			}
+
+			try
+			{
+				if (MainThread.IsMainThread)
+				{
+					apply();
+				}
+				else
+				{
+					MainThread.InvokeOnMainThreadAsync(apply).GetAwaiter().GetResult();
+				}
+			}
+			catch (Exception exception)
+			{
+				return AiActiveDocumentUpdateResult.Failure(exception.Message);
+			}
+
+			return AiActiveDocumentUpdateResult.Success();
+		}
 	}
 }

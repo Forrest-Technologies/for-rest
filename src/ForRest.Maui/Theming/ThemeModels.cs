@@ -32,10 +32,43 @@ public sealed record ForRestAiSettings(
 		!string.IsNullOrWhiteSpace(SystemPrompt);
 }
 
+public sealed record ForRestStyleSettings(
+	double EditorFontSize = 13.5d,
+	double ResultPaneTabFontSize = 11.5d)
+{
+	public const double DefaultEditorFontSize = 13.5d;
+	public const double MinEditorFontSize = 10d;
+	public const double MaxEditorFontSize = 28d;
+	public const double DefaultResultPaneTabFontSize = 11.5d;
+	public const double MinResultPaneTabFontSize = 9d;
+	public const double MaxResultPaneTabFontSize = 18d;
+
+	public ForRestStyleSettings Normalize()
+	{
+		return this with
+		{
+			EditorFontSize = Normalize(EditorFontSize, DefaultEditorFontSize, MinEditorFontSize, MaxEditorFontSize),
+			ResultPaneTabFontSize = Normalize(ResultPaneTabFontSize, DefaultResultPaneTabFontSize, MinResultPaneTabFontSize, MaxResultPaneTabFontSize)
+		};
+	}
+
+	private static double Normalize(double value, double fallback, double min, double max)
+	{
+		if (!double.IsFinite(value))
+		{
+			return fallback;
+		}
+
+		return Math.Clamp(value, min, max);
+	}
+}
+
 public sealed record ForRestSettings(
 	ShellThemeName Theme,
 	string LicenseKey = "")
 {
+	public ForRestStyleSettings Style { get; init; } = new();
+
 	public ForRestAiSettings Ai { get; init; } = new();
 }
 
@@ -60,6 +93,7 @@ public sealed record ThemeConfigDocument(
 	IReadOnlyList<SettingsTomlLine> Lines,
 	IReadOnlyList<ThemeConfigEntry> Entries,
 	string LicenseKey,
+	ForRestStyleSettings Style,
 	ForRestAiSettings Ai,
 	IReadOnlyList<string> Messages);
 
@@ -125,11 +159,14 @@ public sealed record ShellThemeDefinition(
 
 public sealed class ThemeChangedEventArgs(
 	ShellThemeDefinition theme,
+	ForRestSettings settings,
 	string statusMessage,
 	bool configNormalized,
 	bool isPreview = false) : EventArgs
 {
 	public ShellThemeDefinition Theme { get; } = theme;
+
+	public ForRestSettings Settings { get; } = settings;
 
 	public string StatusMessage { get; } = statusMessage;
 

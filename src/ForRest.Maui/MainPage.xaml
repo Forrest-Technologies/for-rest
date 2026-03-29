@@ -38,7 +38,8 @@
                              Color="{DynamicResource ThemeSplitterColor}" />
                 </Grid>
 
-                <controls:WorkbenchCenterPane Grid.Column="2" />
+                <controls:WorkbenchCenterPane x:Name="CenterPane"
+                                              Grid.Column="2" />
 
                 <Grid Grid.Column="3"
                       x:Name="RightSplitterLane"

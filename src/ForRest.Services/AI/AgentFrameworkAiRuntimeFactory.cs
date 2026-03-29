@@ -18,7 +18,7 @@ public sealed record AiPreparedRuntime(
 
 public interface IAiRuntimeFactory
 {
-    AiPreparedRuntime Prepare(AiSettings settings, string objective);
+    AiPreparedRuntime Prepare(AiSettings settings, string objective, IAiActiveDocumentHost? activeDocumentHost = null);
 }
 
 public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
@@ -26,6 +26,8 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
     private const string AgentName = "ForRestAssistant";
     private readonly IAiSettingsValidator _settingsValidator;
     private readonly IAiToolCatalog _toolCatalog;
+    private readonly IAiActiveDocumentToolCatalog _activeDocumentToolCatalog;
+    private readonly IAiActiveDocumentToolService _activeDocumentToolService;
     private readonly IAiPromptManifestBuilder _promptManifestBuilder;
     private readonly IAiKnowledgeCatalog _knowledgeCatalog;
     private readonly IAiDocumentationSearchService _documentationSearchService;
@@ -41,18 +43,24 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
     {
         _settingsValidator = settingsValidator;
         _toolCatalog = toolCatalog;
+        _activeDocumentToolCatalog = new AiActiveDocumentToolCatalog();
+        _activeDocumentToolService = new AiActiveDocumentToolService(documentPatchService);
         _promptManifestBuilder = promptManifestBuilder;
         _knowledgeCatalog = knowledgeCatalog;
         _documentationSearchService = documentationSearchService;
         _documentPatchService = documentPatchService;
     }
 
-    public AiPreparedRuntime Prepare(AiSettings settings, string objective)
+    public AiPreparedRuntime Prepare(AiSettings settings, string objective, IAiActiveDocumentHost? activeDocumentHost = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
         List<AiSettingsIssue> issues = [.. _settingsValidator.Validate(settings)];
-        IReadOnlyList<AiToolDescriptor> tools = _toolCatalog.GetTools(settings);
+        IReadOnlyList<AiToolDescriptor> tools =
+        [
+            .. _toolCatalog.GetTools(settings, activeDocumentHost),
+            .. _activeDocumentToolCatalog.GetTools(settings, activeDocumentHost)
+        ];
         IReadOnlyList<AiPromptTopic> topics = _knowledgeCatalog.GetTopics();
         AiPromptManifest manifest = _promptManifestBuilder.Build(settings, objective, tools, topics);
         if (issues.Any(static issue => issue.Severity == AiSettingsIssueSeverity.Error) ||
@@ -69,7 +77,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                 "The current preview runtime prepares a chat-client agent even when Responses is selected. Keep the Responses setting for future enablement, but expect chat-based execution today."));
         }
 
-        AITool[] runtimeTools = BuildRuntimeTools(settings);
+        AITool[] runtimeTools = BuildRuntimeTools(settings, activeDocumentHost);
         AIAgent agent = settings.Provider.ProviderKind switch
         {
             AiProviderKind.AzureOpenAI => CreateAzureAgent(settings, manifest.SystemPrompt, runtimeTools),
@@ -79,7 +87,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         return new(manifest, issues, agent);
     }
 
-    private AITool[] BuildRuntimeTools(AiSettings settings)
+    private AITool[] BuildRuntimeTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost)
     {
         List<AITool> tools = [];
         if (settings.Tools.EnableDocsSearch)
@@ -87,7 +95,12 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             tools.Add(AIFunctionFactory.Create((Func<string, int, string>)SearchDocs));
         }
 
-        if (settings.Tools.EnableDocumentPatch)
+        if (settings.Tools.EnableDocumentPatch && activeDocumentHost is not null)
+        {
+            tools.Add(AIFunctionFactory.Create((Func<string>)ReadActiveDocument));
+            tools.Add(AIFunctionFactory.Create((Func<string, string>)PatchActiveDocument));
+        }
+        else if (settings.Tools.EnableDocumentPatch)
         {
             tools.Add(AIFunctionFactory.Create((Func<string, string, string, string>)PatchDocument));
         }
@@ -153,6 +166,19 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                 patchedText = result.PatchedText,
                 errors = result.Errors,
             });
+        }
+
+        [Description("Read the current active document from the host canvas.")] 
+        string ReadActiveDocument()
+        {
+            return _activeDocumentToolService.ReadActiveDocument(settings, activeDocumentHost);
+        }
+
+        [Description("Apply bounded edits to the current active document without supplying raw source text.")]
+        string PatchActiveDocument(
+            [Description("A JSON array of edits with startIndex, length, and replacement fields.")] string editsJson)
+        {
+            return _activeDocumentToolService.PatchActiveDocument(settings, activeDocumentHost, editsJson);
         }
     }
 

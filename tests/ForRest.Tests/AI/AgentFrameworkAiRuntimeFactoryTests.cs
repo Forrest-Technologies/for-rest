@@ -50,8 +50,9 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
 
         Assert.IsNotNull(runtime.Agent);
         Assert.AreEqual(0, runtime.Issues.Count);
-        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "search_docs");
-        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "patch_document");
+        CollectionAssert.AreEquivalent(
+            new[] { "search_docs", "patch_document" },
+            runtime.PromptManifest.Tools.Select(static tool => tool.Name).ToArray());
     }
 
     [TestMethod]
@@ -84,6 +85,35 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Transport: Responses");
     }
 
+    [TestMethod]
+    public void Prepare_uses_active_document_host_tools_when_a_host_is_available()
+    {
+        IAiRuntimeFactory factory = CreateFactory();
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.OpenAI,
+                Transport = AiConversationTransport.ChatCompletions,
+                Model = "gpt-4.1-mini",
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "test-key",
+                IsConfigured = true,
+            },
+        };
+
+        AiPreparedRuntime runtime = factory.Prepare(settings, "Update the active request.", new FakeActiveDocumentHost());
+
+        Assert.IsNotNull(runtime.Agent);
+        CollectionAssert.AreEquivalent(
+            new[] { "search_docs", "read_active_document", "patch_active_document" },
+            runtime.PromptManifest.Tools.Select(static tool => tool.Name).ToArray());
+        Assert.IsFalse(runtime.PromptManifest.Tools.Any(static tool => tool.Name == "patch_document"));
+    }
+
     private static IAiRuntimeFactory CreateFactory()
     {
         IAiKnowledgeCatalog knowledgeCatalog = new ForRestAiKnowledgeCatalog();
@@ -94,5 +124,22 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
             knowledgeCatalog,
             new AiDocumentationSearchService(knowledgeCatalog.GetDocuments()),
             new AiDocumentPatchService());
+    }
+
+    private sealed class FakeActiveDocumentHost : IAiActiveDocumentHost
+    {
+        public AiActiveDocumentSnapshot? GetActiveDocument()
+        {
+            return new AiActiveDocumentSnapshot(
+                "request-1",
+                "Example Request",
+                "forrest",
+                "name \"Example\"");
+        }
+
+        public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
+        {
+            return AiActiveDocumentUpdateResult.Success();
+        }
     }
 }

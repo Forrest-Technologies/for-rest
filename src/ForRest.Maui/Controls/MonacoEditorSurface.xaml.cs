@@ -18,6 +18,7 @@ public partial class MonacoEditorSurface : ContentView
 	public event EventHandler? SendRequested;
 	public event EventHandler<MonacoResponseVarRequestEventArgs>? ResponseVarCopyRequested;
 	public event EventHandler<MonacoCursorPositionChangedEventArgs>? CursorPositionChanged;
+	private static readonly double DefaultEditorFontSize = OperatingSystem.IsAndroid() ? 14d : 13.5d;
 
 	private const string MonacoHostHtml = """
 <!DOCTYPE html>
@@ -101,6 +102,9 @@ public partial class MonacoEditorSurface : ContentView
               { token: "attribute.name", foreground: "4D6277" },
               { token: "string", foreground: "2B6B58" },
               { token: "string.url", foreground: "446F98" },
+              { token: "comment.ai.prompt", foreground: "446F98", fontStyle: "bold" },
+              { token: "comment.ai.response", foreground: "2C7C78", fontStyle: "italic" },
+              { token: "comment.ai.stale", foreground: "9BA5B1", fontStyle: "italic" },
               { token: "comment", foreground: "8A95A3", fontStyle: "italic" },
               { token: "number", foreground: "94551C" },
               { token: "operator", foreground: "708090" }
@@ -135,6 +139,9 @@ public partial class MonacoEditorSurface : ContentView
               { token: "attribute.name", foreground: "46617D" },
               { token: "string", foreground: "1F6953" },
               { token: "string.url", foreground: "0B63A7" },
+              { token: "comment.ai.prompt", foreground: "0B63A7", fontStyle: "bold" },
+              { token: "comment.ai.response", foreground: "1E7A5F", fontStyle: "italic" },
+              { token: "comment.ai.stale", foreground: "8FA0B3", fontStyle: "italic" },
               { token: "comment", foreground: "8190A0", fontStyle: "italic" },
               { token: "number", foreground: "95511A" },
               { token: "operator", foreground: "6A7786" }
@@ -169,6 +176,9 @@ public partial class MonacoEditorSurface : ContentView
               { token: "attribute.name", foreground: "A2C2DD" },
               { token: "string", foreground: "7FD2B3" },
               { token: "string.url", foreground: "7BC1FF" },
+              { token: "comment.ai.prompt", foreground: "7BC1FF", fontStyle: "bold" },
+              { token: "comment.ai.response", foreground: "91D9BF", fontStyle: "italic" },
+              { token: "comment.ai.stale", foreground: "6E7F90", fontStyle: "italic" },
               { token: "comment", foreground: "7F8C9C", fontStyle: "italic" },
               { token: "number", foreground: "F2A665" },
               { token: "operator", foreground: "8FA2B5" }
@@ -203,6 +213,9 @@ public partial class MonacoEditorSurface : ContentView
               { token: "attribute.name", foreground: "C0D3E6" },
               { token: "string", foreground: "8FD7BD" },
               { token: "string.url", foreground: "9EC5F2" },
+              { token: "comment.ai.prompt", foreground: "9EC5F2", fontStyle: "bold" },
+              { token: "comment.ai.response", foreground: "A3E2C7", fontStyle: "italic" },
+              { token: "comment.ai.stale", foreground: "738191", fontStyle: "italic" },
               { token: "comment", foreground: "7D8793", fontStyle: "italic" },
               { token: "number", foreground: "EEAA73" },
               { token: "operator", foreground: "95A4B3" }
@@ -237,6 +250,9 @@ public partial class MonacoEditorSurface : ContentView
               { token: "attribute.name", foreground: "7A6545" },
               { token: "string", foreground: "6D7152" },
               { token: "string.url", foreground: "9B6B2F" },
+              { token: "comment.ai.prompt", foreground: "9B6B2F", fontStyle: "bold" },
+              { token: "comment.ai.response", foreground: "6F8A54", fontStyle: "italic" },
+              { token: "comment.ai.stale", foreground: "A79E8B", fontStyle: "italic" },
               { token: "comment", foreground: "9A8B75", fontStyle: "italic" },
               { token: "number", foreground: "A45D1F" },
               { token: "operator", foreground: "857661" }
@@ -392,6 +408,9 @@ public partial class MonacoEditorSurface : ContentView
         monaco.languages.setMonarchTokensProvider("forrest", {
           tokenizer: {
             root: [
+              [/^##[^\n]*/, "comment.ai.prompt"],
+              [/^#>[^\n]*/, "comment.ai.response"],
+              [/^#~[^\n]*/, "comment.ai.stale"],
               [/#[^\n]*/, "comment"],
               [/\b(name|method|url|timeout|max_send_iterations|redirects|ssl|history|content_type|header|query|body|form|multipart|extract|expect|repeat|retry|auth)\b/, "keyword.directive"],
               [/\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/, "keyword.method"],
@@ -530,6 +549,20 @@ public partial class MonacoEditorSurface : ContentView
         }
       }
 
+      function normalizeEditorFontSize(value, fallback) {
+        const candidate = Number(value);
+        if (!Number.isFinite(candidate)) {
+          return fallback;
+        }
+
+        return Math.min(28, Math.max(10, candidate));
+      }
+
+      function calculateLineHeight(fontSize, isAndroid) {
+        const ratio = isAndroid ? 1.5 : 1.46;
+        return Math.max(Math.round(fontSize * ratio), Math.round(fontSize) + 5);
+      }
+
       const supportedSettingsKeys = ["light", "azure", "dark", "black", "amber"];
 
       window.forRestHost = {
@@ -539,6 +572,7 @@ public partial class MonacoEditorSurface : ContentView
         pendingValue: "",
         pendingLanguage: "forrest",
         pendingTheme: "forrest-azure",
+        pendingFontSize: 13.5,
         pendingReadOnly: false,
         isAndroid: /Android/i.test(navigator.userAgent || ""),
         pendingEditableRanges: [],
@@ -581,6 +615,35 @@ public partial class MonacoEditorSurface : ContentView
             this.textSyncHandle = null;
             requestHostCommand("text-sync");
           }, delay);
+        },
+        isInlineAiPromptLine: function (lineText) {
+          return /^\s*##(?!#)/.test(lineText || "");
+        },
+        shouldSubmitInlineAiPromptOnEnter: function (event, monaco) {
+          if (this.pendingReadOnly || !this.editor || !this.model || !event || !monaco) {
+            return false;
+          }
+
+          if (event.keyCode !== monaco.KeyCode.Enter) {
+            return false;
+          }
+
+          if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+            return false;
+          }
+
+          const browserEvent = event.browserEvent;
+          if (browserEvent && browserEvent.isComposing) {
+            return false;
+          }
+
+          const position = this.editor.getPosition();
+          if (!position) {
+            return false;
+          }
+
+          const lineText = this.model.getLineContent(position.lineNumber) || "";
+          return this.isInlineAiPromptLine(lineText);
         },
         scheduleAndroidFontRemeasure: function () {
           if (!this.isAndroid || !this.editor || !window.monaco || this.androidFontRemeasureHandle) {
@@ -652,6 +715,7 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           this.model = monaco.editor.createModel(this.pendingValue || "", this.pendingLanguage || "forrest");
+          const normalizedFontSize = normalizeEditorFontSize(this.pendingFontSize, this.isAndroid ? 14 : 13.5);
           const editorOptions = {
             model: this.model,
             theme: this.pendingTheme,
@@ -667,8 +731,8 @@ public partial class MonacoEditorSurface : ContentView
             tabSize: 2,
             insertSpaces: true,
             fontFamily: "Cascadia Mono, Consolas, monospace",
-            fontSize: 13.5,
-            lineHeight: 20,
+            fontSize: normalizedFontSize,
+            lineHeight: calculateLineHeight(normalizedFontSize, this.isAndroid),
             letterSpacing: 0.1,
             wordWrap: "on",
             wordBasedSuggestions: "off",
@@ -701,8 +765,6 @@ public partial class MonacoEditorSurface : ContentView
 
           if (this.isAndroid) {
             delete editorOptions.fontFamily;
-            editorOptions.fontSize = 14;
-            editorOptions.lineHeight = 21;
             editorOptions.letterSpacing = 0;
           }
 
@@ -718,6 +780,13 @@ public partial class MonacoEditorSurface : ContentView
           });
           this.editor.addCommand(monaco.KeyCode.F5, function () {
             requestHostCommand("send");
+          });
+          this.editor.onKeyDown((event) => {
+            if (this.shouldSubmitInlineAiPromptOnEnter(event, monaco)) {
+              event.preventDefault();
+              event.stopPropagation();
+              requestHostCommand("send");
+            }
           });
           this.editor.onContextMenu((event) => {
             this.lastContextPosition = event.target && event.target.position
@@ -760,6 +829,7 @@ public partial class MonacoEditorSurface : ContentView
             text: this.pendingValue,
             language: this.pendingLanguage,
             themeKey: this.pendingTheme,
+            editorFontSize: this.pendingFontSize,
             isReadOnly: this.pendingReadOnly,
             editableRanges: this.pendingEditableRanges,
             diagnostics: this.pendingDiagnostics,
@@ -895,6 +965,7 @@ public partial class MonacoEditorSurface : ContentView
           const shouldApplyText = !!nextState.applyText;
           const previousLanguage = this.pendingLanguage;
           const previousTheme = this.pendingTheme;
+          const previousFontSize = this.pendingFontSize;
           const previousReadOnly = this.pendingReadOnly;
           this.pendingShouldApplyText = shouldApplyText;
           if (shouldApplyText || !this.model) {
@@ -906,6 +977,7 @@ public partial class MonacoEditorSurface : ContentView
           this.pendingTheme = typeof nextState.themeKey === "string" && nextState.themeKey.length > 0
             ? nextState.themeKey
             : "forrest-azure";
+          this.pendingFontSize = normalizeEditorFontSize(nextState.editorFontSize, this.isAndroid ? 14 : 13.5);
           this.pendingReadOnly = !!nextState.isReadOnly;
           this.pendingEditableRanges = this.parseEditableRanges(nextState);
           this.pendingDiagnostics = this.parseDiagnostics(nextState);
@@ -915,6 +987,7 @@ public partial class MonacoEditorSurface : ContentView
           const shouldRefreshLayout = shouldApplyText ||
             previousLanguage !== this.pendingLanguage ||
             previousTheme !== this.pendingTheme ||
+            previousFontSize !== this.pendingFontSize ||
             previousReadOnly !== this.pendingReadOnly;
 
           if (this.model && window.monaco && this.model.getLanguageId() !== this.pendingLanguage) {
@@ -922,7 +995,11 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           if (this.editor) {
-            this.editor.updateOptions({ readOnly: this.pendingReadOnly });
+            this.editor.updateOptions({
+              readOnly: this.pendingReadOnly,
+              fontSize: this.pendingFontSize,
+              lineHeight: calculateLineHeight(this.pendingFontSize, this.isAndroid)
+            });
 
             if (shouldApplyText) {
               const normalized = this.pendingValue ?? "";
@@ -1186,6 +1263,13 @@ public partial class MonacoEditorSurface : ContentView
 		"forrest-azure",
 		propertyChanged: OnThemeKeyChanged);
 
+	public static readonly BindableProperty EditorFontSizeProperty = BindableProperty.Create(
+		nameof(EditorFontSize),
+		typeof(double),
+		typeof(MonacoEditorSurface),
+		DefaultEditorFontSize,
+		propertyChanged: OnEditorFontSizeChanged);
+
 	public static readonly BindableProperty EditableRangesJsonProperty = BindableProperty.Create(
 		nameof(EditableRangesJson),
 		typeof(string),
@@ -1234,6 +1318,7 @@ public partial class MonacoEditorSurface : ContentView
 	private string _pendingText = string.Empty;
 	private string _pendingLanguage = "forrest";
 	private string _pendingThemeKey = "forrest-azure";
+	private double _pendingEditorFontSize = DefaultEditorFontSize;
 	private string _pendingEditableRangesJson = "[]";
 	private string _pendingDiagnosticsJson = "[]";
 	private string _pendingLanguageHelpJson = "[]";
@@ -1285,6 +1370,12 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		get => (string)GetValue(ThemeKeyProperty);
 		set => SetValue(ThemeKeyProperty, value);
+	}
+
+	public double EditorFontSize
+	{
+		get => (double)GetValue(EditorFontSizeProperty);
+		set => SetValue(EditorFontSizeProperty, value);
 	}
 
 	public string EditableRangesJson
@@ -1390,6 +1481,13 @@ public partial class MonacoEditorSurface : ContentView
 		editor.RequestStateApply();
 	}
 
+	private static void OnEditorFontSizeChanged(BindableObject bindable, object? oldValue, object? newValue)
+	{
+		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
+		editor._pendingEditorFontSize = newValue is double fontSize && double.IsFinite(fontSize) ? fontSize : DefaultEditorFontSize;
+		editor.RequestStateApply();
+	}
+
 	private static void OnEditableRangesJsonChanged(BindableObject bindable, object? oldValue, object? newValue)
 	{
 		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
@@ -1430,7 +1528,7 @@ public partial class MonacoEditorSurface : ContentView
 		await EnsureEditorReadyAsync();
 	}
 
-	private void OnEditorWebViewNavigating(object? sender, WebNavigatingEventArgs e)
+	private async void OnEditorWebViewNavigating(object? sender, WebNavigatingEventArgs e)
 	{
 		if (e.Url is null ||
 		    !Uri.TryCreate(e.Url, UriKind.Absolute, out Uri? uri) ||
@@ -1443,6 +1541,7 @@ public partial class MonacoEditorSurface : ContentView
 		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
 		    string.Equals(uri.AbsolutePath.Trim('/'), "send", StringComparison.OrdinalIgnoreCase))
 		{
+			await SyncEditorTextAsync();
 			SendRequested?.Invoke(this, EventArgs.Empty);
 			return;
 		}
@@ -1500,6 +1599,7 @@ public partial class MonacoEditorSurface : ContentView
 			{
 				_pendingLanguage = Language;
 				_pendingThemeKey = ThemeKey;
+				_pendingEditorFontSize = EditorFontSize;
 				_pendingEditableRangesJson = EditableRangesJson;
 				_pendingDiagnosticsJson = DiagnosticsJson;
 				_pendingLanguageHelpJson = LanguageHelpJson;
@@ -1600,6 +1700,7 @@ public partial class MonacoEditorSurface : ContentView
 			Text: text,
 			Language: string.IsNullOrWhiteSpace(_pendingLanguage) ? "forrest" : _pendingLanguage,
 			ThemeKey: string.IsNullOrWhiteSpace(_pendingThemeKey) ? "forrest-azure" : _pendingThemeKey,
+			EditorFontSize: _pendingEditorFontSize,
 			IsReadOnly: _pendingIsReadOnly,
 			EditableRangesJson: string.IsNullOrWhiteSpace(_pendingEditableRangesJson) ? "[]" : _pendingEditableRangesJson,
 			DiagnosticsJson: string.IsNullOrWhiteSpace(_pendingDiagnosticsJson) ? "[]" : _pendingDiagnosticsJson,
@@ -1767,6 +1868,11 @@ public partial class MonacoEditorSurface : ContentView
 		{
 			_isPullingEditorText = false;
 		}
+	}
+
+	public Task FlushTextSyncAsync()
+	{
+		return SyncEditorTextAsync();
 	}
 
 	private static string ParseJavascriptBase64Result(string result)
@@ -1964,6 +2070,7 @@ public partial class MonacoEditorSurface : ContentView
 		string Text,
 		string Language,
 		string ThemeKey,
+		double EditorFontSize,
 		bool IsReadOnly,
 		string EditableRangesJson,
 		string DiagnosticsJson,

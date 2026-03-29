@@ -67,6 +67,39 @@ max_send_iterations 3
 
 Comments start with `#`. Blank lines are ignored.
 
+## Inline AI
+
+Request documents can host an inline AI conversation directly in the editor.
+
+Markers:
+
+- `##` user prompt to the AI
+- `#>` latest AI response
+- `#~` older faded AI responses
+
+Examples:
+
+```frs
+## Tighten this request and add a bearer auth example.
+```
+
+```frs
+## Why is this request failing?
+#> The URL is valid, but the request is missing an Authorization header.
+#> Add `auth.mode = bearer` and set `auth.token`.
+```
+
+Current editor behavior:
+
+- pressing `Enter` on a `##` prompt line submits that AI prompt
+- pressing the normal send action also routes to AI when the cursor is on an AI conversation block
+- if the prompt is the last meaningful line in the document, send still treats it as an AI request even if there is a trailing blank line
+
+Settings behavior:
+
+- for `provider = "openai"`, `endpoint` is optional
+- for `provider = "azure_openai"`, `endpoint` and `deployment_name` are required
+
 ## Request Surface
 
 The request envelope is available either as a `request { ... }` section or as top-level aliases. The parser accepts both forms, so the docs and catalog need to keep both in sync.

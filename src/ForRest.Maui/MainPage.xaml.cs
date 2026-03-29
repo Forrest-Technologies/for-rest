@@ -52,6 +52,7 @@ public partial class MainPage : ContentPage
 
 	private async void OnSendClicked(object? sender, EventArgs e)
 	{
+		await CenterPane.FlushActiveEditorAsync();
 		await ViewModel.SendAsync();
 	}
 

@@ -31,6 +31,12 @@ public partial class EditorSurface : ContentView
 		typeof(EditorSurface),
 		false);
 
+	public static readonly BindableProperty EditorFontSizeProperty = BindableProperty.Create(
+		nameof(EditorFontSize),
+		typeof(double),
+		typeof(EditorSurface),
+		13.5d);
+
 	public static readonly BindableProperty FooterTextProperty = BindableProperty.Create(
 		nameof(FooterText),
 		typeof(string),
@@ -79,6 +85,12 @@ public partial class EditorSurface : ContentView
 	{
 		get => (bool)GetValue(IsReadOnlyProperty);
 		set => SetValue(IsReadOnlyProperty, value);
+	}
+
+	public double EditorFontSize
+	{
+		get => (double)GetValue(EditorFontSizeProperty);
+		set => SetValue(EditorFontSizeProperty, value);
 	}
 
 	public string FooterText

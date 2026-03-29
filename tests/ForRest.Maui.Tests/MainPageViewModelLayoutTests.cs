@@ -3,6 +3,7 @@ using ForRest.Maui.Theming;
 using ForRest.Maui.ViewModels;
 using ForRest.Models;
 using ForRest.Services;
+using ForRest.Services.AI;
 using ForRest.Services.Licensing;
 using ForRest.Scripting;
 
@@ -209,6 +210,28 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public void ActiveEditorText_previews_style_font_sizes_immediately()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		string updatedText = viewModel.ActiveEditorText
+			.Replace("editor_font_size = 13.5", "editor_font_size = 16.5", StringComparison.Ordinal)
+			.Replace("result_pane_tab_font_size = 11.5", "result_pane_tab_font_size = 13", StringComparison.Ordinal);
+
+		viewModel.ActiveEditorText = updatedText;
+
+		Assert.AreEqual(16.5d, viewModel.ActiveEditorFontSize, 0.001d);
+		Assert.AreEqual(13d, viewModel.ResultPaneTabFontSize, 0.001d);
+		StringAssert.Contains(viewModel.ActiveEditorText, "editor_font_size = 16.5");
+		StringAssert.Contains(viewModel.ActiveEditorText, "result_pane_tab_font_size = 13");
+	}
+
+	[TestMethod]
 	public async Task ActiveEditorText_refreshes_settings_projection_after_ai_toggle_autosave()
 	{
 		using TestHarness harness = new();
@@ -227,6 +250,74 @@ public sealed class MainPageViewModelLayoutTests
 		StringAssert.Contains(viewModel.ActiveEditorText, "enabled = true");
 		StringAssert.Contains(viewModel.ActiveEditorText, "provider = \"openai\"");
 		StringAssert.Contains(viewModel.ActiveEditorText, "api_key = \"\"");
+	}
+
+	[TestMethod]
+	public async Task SendAsync_routes_active_inline_ai_prompt_to_ai_service()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText: "name \"demo\"\n## tighten this request\n#> Done.",
+				StatusText: "AI replied.",
+				DebugText: "ai debug"));
+		FakeExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(executionService, aiService);
+
+		viewModel.ActiveEditorText = "name \"demo\"\n## tighten this request";
+		viewModel.UpdateActiveEditorCursor(2, 3);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual(1, aiService.CallCount);
+		Assert.AreEqual(0, executionService.ExecuteCallCount);
+		StringAssert.Contains(viewModel.ActiveEditorText, "#> Done.");
+		Assert.AreEqual("AI replied.", viewModel.ExecutionStatus);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_routes_trailing_inline_ai_prompt_after_blank_line_to_ai_service()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: true,
+				Succeeded: true,
+				UpdatedText: "name \"demo\"\n## Do you work agent?\n#> Yes.",
+				StatusText: "AI replied.",
+				DebugText: "ai debug"));
+		FakeExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(executionService, aiService);
+
+		viewModel.ActiveEditorText = "name \"demo\"\n## Do you work agent?\n";
+		viewModel.UpdateActiveEditorCursor(3, 1);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual(1, aiService.CallCount);
+		Assert.AreEqual(0, executionService.ExecuteCallCount);
+		StringAssert.Contains(viewModel.ActiveEditorText, "#> Yes.");
+		Assert.AreEqual("AI replied.", viewModel.ExecutionStatus);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_keeps_regular_request_send_when_cursor_is_not_on_ai_prompt()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(AiInlineConversationResult.NotHandled(string.Empty));
+		FakeExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(executionService, aiService);
+
+		viewModel.ActiveEditorText = "## old ai note\nname \"demo\"\nmethod GET";
+		viewModel.UpdateActiveEditorCursor(3, 1);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual(1, aiService.CallCount);
+		Assert.AreEqual(1, executionService.ExecuteCallCount);
+		Assert.AreEqual("200 OK", viewModel.ResponseState);
 	}
 
 	private sealed class TestHarness : IDisposable
@@ -248,7 +339,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		public string StateFilePath { get; }
 
-		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null)
+		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null, IAiInlineConversationService? aiInlineConversationService = null)
 		{
 			ThemeConfigStore themeConfigStore = new();
 			SettingsTomlTemplate template = new();
@@ -261,6 +352,7 @@ public sealed class MainPageViewModelLayoutTests
 				template,
 				new StandardLicenseValidationService(new LicenseValidationOptions("unused-public-key", GracePeriodDays: 30)),
 				new TestBuildMetadataProvider(DateTimeOffset.UtcNow));
+			WorkbenchAiSettingsProvider aiSettingsProvider = new(themeConfigStore, parser);
 
 			return new MainPageViewModel(
 				new FakeThemeService(),
@@ -269,7 +361,9 @@ public sealed class MainPageViewModelLayoutTests
 				executionService ?? new FakeExecutionService(),
 				new InMemoryExecutionHistoryRepository(),
 				new ForRestScriptDocumentTextService(),
-				new FakeAppActivationService());
+				new FakeAppActivationService(),
+				aiSettingsProvider,
+				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)));
 		}
 
 		public void Dispose()
@@ -287,6 +381,7 @@ public sealed class MainPageViewModelLayoutTests
 		private readonly ThemeCatalog _themeCatalog = new();
 		private readonly ThemeConfigParser _parser = new();
 		private readonly ThemeConfigNormalizer _normalizer = new(new SettingsTomlTemplate());
+		private ForRestSettings _currentSettings = new(ShellThemeName.Azure);
 		private EventHandler<ThemeChangedEventArgs>? _themeChanged;
 
 		public event EventHandler<ThemeChangedEventArgs>? ThemeChanged
@@ -296,6 +391,8 @@ public sealed class MainPageViewModelLayoutTests
 		}
 
 		public ShellThemeDefinition CurrentTheme => _themeCatalog.GetTheme(ShellThemeName.Azure);
+
+		public ForRestSettings CurrentSettings => _currentSettings;
 
 		public string CurrentStatusMessage => "Ready";
 
@@ -308,8 +405,9 @@ public sealed class MainPageViewModelLayoutTests
 		public void PreviewConfigText(string text)
 		{
 			ThemeNormalizationResult normalized = _normalizer.Normalize(_parser.Parse(text));
+			_currentSettings = normalized.Settings;
 			ShellThemeDefinition theme = _themeCatalog.GetTheme(normalized.Settings.Theme);
-			_themeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, $"theme {theme.Name.ToConfigName()}", configNormalized: false, isPreview: true));
+			_themeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, normalized.Settings, $"theme {theme.Name.ToConfigName()}", configNormalized: false, isPreview: true));
 		}
 	}
 
@@ -330,6 +428,8 @@ public sealed class MainPageViewModelLayoutTests
 		}
 
 		public int CompileCallCount { get; private set; }
+
+		public int ExecuteCallCount { get; private set; }
 
 		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
 		{
@@ -358,6 +458,7 @@ public sealed class MainPageViewModelLayoutTests
 			string? preRequestScriptOverride = null,
 			CancellationToken cancellationToken = default)
 		{
+			ExecuteCallCount++;
 			ResponseSnapshot response = new()
 			{
 				StatusCode = 200,
@@ -411,6 +512,27 @@ public sealed class MainPageViewModelLayoutTests
 				Method = HttpMethodKind.Get,
 				UrlTemplate = "https://example.test/mobile"
 			};
+		}
+	}
+
+	private sealed class FakeAiInlineConversationService : IAiInlineConversationService
+	{
+		private readonly AiInlineConversationResult _result;
+
+		public FakeAiInlineConversationService(AiInlineConversationResult result)
+		{
+			_result = result;
+		}
+
+		public int CallCount { get; private set; }
+
+		public Task<AiInlineConversationResult> TryHandleAsync(AiInlineConversationRequest request, CancellationToken cancellationToken = default)
+		{
+			CallCount++;
+			string updatedText = _result.Handled && string.IsNullOrWhiteSpace(_result.UpdatedText)
+				? request.SourceText
+				: _result.UpdatedText;
+			return Task.FromResult(_result with { UpdatedText = updatedText });
 		}
 	}
 

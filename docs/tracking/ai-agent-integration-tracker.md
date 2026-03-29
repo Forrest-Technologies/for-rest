@@ -17,8 +17,8 @@ Wire a source-driven AI foundation into For-Rest using Microsoft Agent Framework
 - `done` Canonical docs now feed AI knowledge documents and prompt topics
 - `done` Agent Framework runtime factory added for OpenAI and Azure OpenAI preparation
 - `done` MAUI DI now registers AI services and can map persisted settings into shared AI runtime settings
-- `pending` Monaco inline AI conversation syntax and session routing
-- `pending` Safe active-document host tool wiring so the runtime can edit the live editor without raw text handoff
+- `done` Monaco inline AI conversation syntax and session routing
+- `done` Safe active-document host tool wiring so the runtime can edit the live editor without raw text handoff
 
 ## Decisions
 
@@ -27,6 +27,9 @@ Wire a source-driven AI foundation into For-Rest using Microsoft Agent Framework
 - Fresh disabled configs only show `ai.enabled`; advanced AI fields expand once enabled or once configuration exists.
 - Use the canonical ForRest language catalog as the source for Monaco help, human docs, AI search, and prompt context.
 - Keep the `responses` setting in configuration and prompt metadata, but currently prepare a chat-client runtime with a warning because the preview responses adapter stack is still version-sensitive.
+- Use `##` for inline AI prompts, `#>` for active AI responses, and `#~` for faded historical AI responses inside request documents.
+- Route `Send` to the AI when the cursor is on an inline AI conversation block or when a trailing `##` prompt is the last meaningful line in the document.
+- Submit inline AI directly from the editor when the user presses `Enter` on a `##` prompt line, and flush Monaco text to the viewmodel before any send action to avoid stale-editor races on Android.
 
 ## Test Policy
 

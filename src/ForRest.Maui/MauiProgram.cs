@@ -62,6 +62,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IAiDocumentationSearchService>(static services =>
 			new AiDocumentationSearchService(services.GetRequiredService<IAiKnowledgeCatalog>().GetDocuments()));
 		builder.Services.AddSingleton<IAiRuntimeFactory, AgentFrameworkAiRuntimeFactory>();
+		builder.Services.AddSingleton<IAiTurnExecutor, AgentFrameworkAiTurnExecutor>();
+		builder.Services.AddSingleton<IAiInlineConversationService, AiInlineConversationService>();
 		builder.Services.AddSingleton<MainPageViewModel>();
 		builder.Services.AddSingleton<MainPage>();
 		builder.Services.AddSingleton(static _ => new AndroidMainPage());

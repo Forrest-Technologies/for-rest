@@ -21,6 +21,10 @@ public sealed class ThemeConfigParserTests
 			black = false
 			amber = false
 
+			[appearance.style]
+			editor_font_size = 15.5
+			result_pane_tab_font_size = 12.25
+
 			[ai]
 			enabled = true
 			provider = "azure_openai"
@@ -33,6 +37,8 @@ public sealed class ThemeConfigParserTests
 			""");
 
 		Assert.AreEqual("super-secret-license", document.LicenseKey);
+		Assert.AreEqual(15.5d, document.Style.EditorFontSize, 0.001d);
+		Assert.AreEqual(12.25d, document.Style.ResultPaneTabFontSize, 0.001d);
 		Assert.IsTrue(document.Ai.Enabled);
 		Assert.AreEqual("azure_openai", document.Ai.Provider);
 		Assert.AreEqual("responses", document.Ai.Api);
@@ -61,6 +67,10 @@ public sealed class ThemeConfigParserTests
 			black = false
 			amber = false
 
+			[appearance.style]
+			editor_font_size = 16
+			result_pane_tab_font_size = 12
+
 			[ai]
 			enabled = true
 			provider = "openai"
@@ -75,8 +85,12 @@ public sealed class ThemeConfigParserTests
 		ThemeNormalizationResult result = normalizer.Normalize(document);
 
 		Assert.AreEqual(ShellThemeName.Azure, result.Settings.Theme);
+		Assert.AreEqual(16d, result.Settings.Style.EditorFontSize, 0.001d);
+		Assert.AreEqual(12d, result.Settings.Style.ResultPaneTabFontSize, 0.001d);
 		Assert.IsTrue(result.Settings.Ai.Enabled);
 		Assert.AreEqual("secret-api-key", result.Settings.Ai.ApiKey);
+		StringAssert.Contains(result.NormalizedText, "[appearance.style]");
+		StringAssert.Contains(result.NormalizedText, "editor_font_size = 16");
 		StringAssert.Contains(result.NormalizedText, "[ai]");
 		StringAssert.Contains(result.NormalizedText, "api_key = \"secret-api-key\"");
 	}

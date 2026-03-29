@@ -54,6 +54,7 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private async void OnEditorSendRequested(object? sender, EventArgs e)
 	{
+		await FlushActiveEditorAsync();
 		await ViewModel.SendAsync();
 	}
 
@@ -64,6 +65,7 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private async void OnSendClicked(object? sender, EventArgs e)
 	{
+		await FlushActiveEditorAsync();
 		await ViewModel.SendAsync();
 	}
 
@@ -140,12 +142,21 @@ public partial class WorkbenchCenterPane : ContentView
 			: BuildNativeEditor();
 	}
 
+	public async Task FlushActiveEditorAsync()
+	{
+		if (EditorHost.Content is MonacoEditorSurface monacoEditor)
+		{
+			await monacoEditor.FlushTextSyncAsync();
+		}
+	}
+
 	private View BuildMonacoEditor()
 	{
 		MonacoEditorSurface editor = new();
 		editor.SetBinding(MonacoEditorSurface.LanguageProperty, nameof(MainPageViewModel.ActiveEditorLanguage));
 		editor.SetBinding(MonacoEditorSurface.DiagnosticsJsonProperty, nameof(MainPageViewModel.ActiveEditorDiagnosticsJson));
 		editor.SetBinding(MonacoEditorSurface.EditableRangesJsonProperty, nameof(MainPageViewModel.ActiveEditorEditableRangesJson));
+		editor.SetBinding(MonacoEditorSurface.EditorFontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
 		editor.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
 		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 		editor.SetBinding(MonacoEditorSurface.LanguageHelpJsonProperty, nameof(MainPageViewModel.LanguageHelpCatalogJson));
@@ -178,6 +189,7 @@ public partial class WorkbenchCenterPane : ContentView
 			ShowHeader = false,
 			ShowFooter = false
 		};
+		editor.SetBinding(EditorSurface.EditorFontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
 		editor.SetBinding(EditorSurface.LanguageProperty, nameof(MainPageViewModel.ActiveEditorLanguage));
 		editor.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 		return editor;
@@ -217,6 +229,7 @@ public partial class WorkbenchCenterPane : ContentView
 			BackgroundColor = Colors.Transparent,
 			Margin = new Thickness(8, 8, 8, 8)
 		};
+		editor.SetBinding(Editor.FontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
 		editor.SetBinding(Editor.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 
 		Grid grid = new()

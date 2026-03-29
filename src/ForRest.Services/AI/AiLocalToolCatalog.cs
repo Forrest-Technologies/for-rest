@@ -2,12 +2,12 @@ namespace ForRest.Services.AI;
 
 public interface IAiToolCatalog
 {
-    IReadOnlyList<AiToolDescriptor> GetTools(AiSettings settings);
+    IReadOnlyList<AiToolDescriptor> GetTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost = null);
 }
 
 public sealed class AiLocalToolCatalog : IAiToolCatalog
 {
-    public IReadOnlyList<AiToolDescriptor> GetTools(AiSettings settings)
+    public IReadOnlyList<AiToolDescriptor> GetTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -26,7 +26,7 @@ public sealed class AiLocalToolCatalog : IAiToolCatalog
                 MutatesDocument: false));
         }
 
-        if (settings.Tools.EnableDocumentPatch)
+        if (settings.Tools.EnableDocumentPatch && activeDocumentHost is null)
         {
             tools.Add(new(
                 "patch_document",
@@ -38,4 +38,3 @@ public sealed class AiLocalToolCatalog : IAiToolCatalog
         return tools;
     }
 }
-

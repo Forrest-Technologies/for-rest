@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace ForRest.Maui.Theming;
@@ -5,6 +6,7 @@ namespace ForRest.Maui.Theming;
 public sealed class ThemeConfigParser
 {
 	private const string ThemeSectionName = "appearance.theme";
+	private const string StyleSectionName = "appearance.style";
 	private const string AiSectionName = "ai";
 	private static readonly Regex ThemeLinePattern = new(
 		@"^(?<key>[A-Za-z][\w-]*)\s*=\s*(?<value>[^\r\n#]*?)(\s*(#.*)?)$",
@@ -18,6 +20,7 @@ public sealed class ThemeConfigParser
 		string[] rawLines = text.Replace("\r\n", "\n").Split('\n');
 		string? currentSection = null;
 		string licenseKey = string.Empty;
+		ForRestStyleSettings style = new();
 		ForRestAiSettings ai = new();
 
 		for (int index = 0; index < rawLines.Length; index++)
@@ -79,6 +82,20 @@ public sealed class ThemeConfigParser
 				continue;
 			}
 
+			if (string.Equals(currentSection, StyleSectionName, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryParseStyleEntry(key!, value, style, out ForRestStyleSettings parsedStyle, out string? styleMessage))
+				{
+					messages.Add(styleMessage ?? $"ignored setting entry '{key}'");
+				}
+				else
+				{
+					style = parsedStyle;
+				}
+
+				continue;
+			}
+
 			if (string.Equals(currentSection, AiSectionName, StringComparison.OrdinalIgnoreCase))
 			{
 				if (!TryParseAiEntry(key!, value, ai, out ForRestAiSettings parsedAi, out string? aiMessage))
@@ -98,7 +115,7 @@ public sealed class ThemeConfigParser
 			}
 		}
 
-		return new ThemeConfigDocument(lines, entries, licenseKey, ai, messages);
+		return new ThemeConfigDocument(lines, entries, licenseKey, style, ai, messages);
 	}
 
 	private static bool TryParseEntry(string line, out string? key, out string? value, out string? message)
@@ -155,6 +172,31 @@ public sealed class ThemeConfigParser
 				return true;
 			case "system_prompt":
 				parsed = current with { SystemPrompt = value };
+				return true;
+			default:
+				return SetMessage($"ignored setting entry '{key}'", out message);
+		}
+	}
+
+	private static bool TryParseStyleEntry(string key, string? rawValue, ForRestStyleSettings current, out ForRestStyleSettings parsed, out string? message)
+	{
+		parsed = current;
+		message = null;
+		string value = ParseScalarValue(rawValue);
+
+		if (!double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double parsedValue) ||
+		    !double.IsFinite(parsedValue))
+		{
+			return SetMessage($"ignored invalid value for '{key}'", out message);
+		}
+
+		switch (key.Trim().ToLowerInvariant())
+		{
+			case "editor_font_size":
+				parsed = current with { EditorFontSize = parsedValue };
+				return true;
+			case "result_pane_tab_font_size":
+				parsed = current with { ResultPaneTabFontSize = parsedValue };
 				return true;
 			default:
 				return SetMessage($"ignored setting entry '{key}'", out message);

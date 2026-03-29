@@ -6,6 +6,8 @@ public interface IThemeService
 
 	ShellThemeDefinition CurrentTheme { get; }
 
+	ForRestSettings CurrentSettings { get; }
+
 	string CurrentStatusMessage { get; }
 
 	string ConfigFilePath { get; }
