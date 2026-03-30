@@ -86,6 +86,38 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_reports_actionable_hint_for_null_runtime_binding_failures()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                var price = response.item.data.price;
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    StatusCode = 200,
+                    Body = """{"item":{"data":null}}""",
+                    ContentType = "application/json",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        StringAssert.Contains(result.ErrorMessage, "Cannot perform runtime binding on a null reference.");
+        StringAssert.Contains(result.ErrorMessage, "if item.data != null");
+        Assert.AreEqual(ConsoleEntryLevel.Error, result.ConsoleEntries.Single().Level);
+        StringAssert.Contains(result.ConsoleEntries.Single().Message, "optional text fields");
+    }
+
+    [TestMethod]
     public async Task Run_uses_last_variable_value_when_duplicate_keys_are_seeded()
     {
         var result = await scriptEngine.Run(
@@ -444,6 +476,85 @@ public sealed class RoslynScriptEngineTests
         Assert.AreEqual(1, callbackCount);
         Assert.AreEqual(string.Empty, result.ErrorMessage);
         Assert.AreEqual("0", result.RuntimeVariables.Single(static item => item.Key == "last_attempt").Value);
+    }
+
+    [TestMethod]
+    public async Task Run_executes_compiled_forrest_flow_with_convert_and_strings_helpers()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var compilation = compiler.Compile(
+            """
+            name "Filter Objects"
+            method GET
+            url "https://api.example.test/objects"
+
+            let results_stashed = 0
+            let max_results = 50
+
+            foreach item in response {
+              if results_stashed >= max_results {
+                break
+              }
+
+              let name = item.name
+              let price_num = convert.ToDouble(item.data.price)
+              let first_upper = strings.Upper(strings.Substring(name, 0, 1))
+              let letter_ok = strings.StartsWith(first_upper, "A") or strings.StartsWith(first_upper, "B") or strings.StartsWith(first_upper, "C")
+
+              if letter_ok and price_num > 300 {
+                stash.ID = item.id
+                stash.Name = strings.Substring(name, 0, 10)
+                stash.Price = price_num
+                stash.Commit()
+                results_stashed = results_stashed + 1
+              }
+            }
+            """,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(compilation.Succeeded, string.Join(Environment.NewLine, compilation.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(compilation.Payload);
+
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script = compilation.Payload.Request.PreRequestScript,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test/objects"),
+                },
+                Response = new()
+                {
+                    StatusCode = 200,
+                    Body =
+                    """
+                    [
+                      { "id": "1", "name": "Acer Swift 5", "data": { "price": 1299.99 } },
+                      { "id": "2", "name": "Dell XPS 13", "data": { "price": 999.99 } },
+                      { "id": "3", "name": "Canon R5 Pro", "data": { "price": 3899 } },
+                      { "id": "4", "name": "Beats Studio Pro", "data": { "price": 199.99 } }
+                    ]
+                    """,
+                    ContentType = "application/json",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        CollectionAssert.AreEqual(new[] { "ID", "Name", "Price" }, result.Stash.Columns.ToArray());
+        Assert.HasCount(2, result.Stash.Rows);
+        Assert.AreEqual("1", result.Stash.Rows[0].Values["ID"]);
+        Assert.AreEqual("Acer Swift", result.Stash.Rows[0].Values["Name"]);
+        Assert.AreEqual("1299.99", result.Stash.Rows[0].Values["Price"]);
+        Assert.AreEqual("3", result.Stash.Rows[1].Values["ID"]);
+        Assert.AreEqual("Canon R5 P", result.Stash.Rows[1].Values["Name"]);
+        Assert.AreEqual("3899", result.Stash.Rows[1].Values["Price"]);
     }
 
     [TestMethod]

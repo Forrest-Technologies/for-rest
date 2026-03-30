@@ -27,7 +27,7 @@ public interface IAiTurnExecutor
 public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 {
     private const int MaxAutomaticContinuationAttempts = 4;
-    private const int MaxAutonomousEditRecoveryAttempts = 2;
+    private const int MaxAutonomousEditRecoveryAttempts = 3;
     private const string AutomaticContinuationPrompt = "Continue the previous answer from exactly where it stopped. Do not repeat prior text, do not add a preamble, and do not ask a follow-up question. Output only the remaining continuation.";
     private const string IncompleteResponseNote = "The AI response ended before completion after multiple automatic continuation attempts.";
     private readonly IAiRuntimeFactory _runtimeFactory;
@@ -207,7 +207,7 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         {
             response = await RunAgentWithAutomaticContinuationAsync(
                 agent,
-                BuildAutonomousEditRecoveryPrompt(request.Prompt),
+                BuildAutonomousEditRecoveryPrompt(request.Prompt, response.Text, attempt + 1),
                 session,
                 cancellationToken);
             if (!ShouldAttemptAutonomousEditRecovery(
@@ -329,8 +329,52 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             .Trim();
     }
 
-    private static string BuildAutonomousEditRecoveryPrompt(string originalPrompt)
+    private static string NormalizeSearchText(string? value)
     {
+        return NormalizeComparisonText(value)
+            .Replace('\u2019', '\'')
+            .Replace('\u2018', '\'')
+            .Replace('\u201C', '"')
+            .Replace('\u201D', '"')
+            .Replace('\u2013', '-')
+            .Replace('\u2014', '-')
+            .Replace('\u2264', '<')
+            .Replace('\u2265', '>')
+            .Replace("\u00E2\u20AC\u2122", "'", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u02DC", "'", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u0153", "\"", StringComparison.Ordinal)
+            .Replace("\u00E2\u20AC\u009D", "\"", StringComparison.Ordinal)
+            .ToLowerInvariant();
+    }
+
+    private static string BuildAutonomousEditRecoveryPrompt(string originalPrompt, string latestResponseText, int attemptNumber)
+    {
+        string normalizedLatestResponse = NormalizeComparisonText(latestResponseText);
+        string searchableLatestResponse = NormalizeSearchText(latestResponseText);
+        bool forceFullReplace =
+            attemptNumber > 1 ||
+            searchableLatestResponse.Contains("still not updated", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("too brittle", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("replace the entire active document", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("replace the whole script", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("replace the whole document", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("if you allow one action", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("safe version", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("in-place patch", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("requested change in this canvas", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("rejected by the editor", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("remains unchanged", StringComparison.Ordinal) ||
+            searchableLatestResponse.Contains("not runnable", StringComparison.Ordinal);
+        string replacementDirective = forceFullReplace
+            ? "Your next document mutation must be a full replace_active_document call with the final working request." + Environment.NewLine +
+              "Do not propose a partial logging probe, a 'safe' intermediate version, or an extra permission step." + Environment.NewLine +
+              "Do not tell the user the document is too brittle to patch; replace it now with the corrected request." + Environment.NewLine
+            : string.Empty;
+        string latestFailureSection = string.IsNullOrWhiteSpace(normalizedLatestResponse)
+            ? string.Empty
+            : "Latest failed reply (do not repeat it back to the user):" + Environment.NewLine +
+              normalizedLatestResponse + Environment.NewLine + Environment.NewLine;
+
         return
             "The previous turn did not modify the active document, but the user asked for an edit." + Environment.NewLine +
             Environment.NewLine +
@@ -340,10 +384,15 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             "Modify the current active request in place. Do not ask whether to create a second request unless the user explicitly asked for an additional request." + Environment.NewLine +
             "If the user asked to iterate, enumerate, batch, or stash values, use the documented foreach/request.send/request.url/max_send_iterations pattern instead of asking how to structure it." + Environment.NewLine +
             "If a requested field name looks misspelled but the nearest valid field is obvious, choose the closest valid field and mention that assumption only after the edit succeeds." + Environment.NewLine +
+            "Prefer response.someField or response[\"Some Field\"] for JSON object members." + Environment.NewLine +
+            "When the response body root is an array, iterate response directly or use response[index]." + Environment.NewLine +
+            "response.json() returns a raw JsonNode; use it only with explicit indexers or AsArray(), not dot-member access." + Environment.NewLine +
+            replacementDirective +
             "If patch_active_document fails or the structure is brittle, use replace_active_document with the full corrected request." + Environment.NewLine +
             "If replace_active_document is rejected, repair the full source and try replace_active_document again." + Environment.NewLine +
             "Finish with a brief statement of what you changed only after the document has actually been updated." + Environment.NewLine +
             Environment.NewLine +
+            latestFailureSection +
             "Original user request:" + Environment.NewLine +
             originalPrompt.Trim();
     }

@@ -189,6 +189,8 @@ public sealed class AiInlineConversationServiceTests
         StringAssert.Contains(result.DebugText, "Command: help");
         StringAssert.Contains(result.ResponseText, "Supported prompt commands:");
         StringAssert.Contains(result.ResponseText, "`reset`");
+        StringAssert.Contains(result.ResponseText, "`clear responses`");
+        StringAssert.Contains(result.ResponseText, "`collapse`");
         StringAssert.Contains(result.ResponseText, "`help`");
         StringAssert.Contains(result.ResponseText, "`commands`");
         CollectionAssert.AreEqual(
@@ -198,6 +200,8 @@ public sealed class AiInlineConversationServiceTests
                 "## help",
                 "#> Supported prompt commands:",
                 "#> - `reset` clears inline AI prompt and response history and reopens a fresh prompt.",
+                "#> - `clear responses` removes inline AI replies and keeps the prompt lines.",
+                "#> - `collapse` keeps only the latest inline AI exchange and reopens a fresh prompt.",
                 "#> - `help` shows this command list.",
                 "#> - `commands` is an alias for `help`.",
                 string.Empty,
@@ -207,8 +211,160 @@ public sealed class AiInlineConversationServiceTests
             },
             result.UpdatedText.Split('\n'));
         Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
-        Assert.AreEqual(8, result.SuggestedCursorLineNumber);
+        Assert.AreEqual(10, result.SuggestedCursorLineNumber);
         Assert.AreEqual(4, result.SuggestedCursorColumn);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_handles_clear_responses_command_without_invoking_ai_turn_executor()
+    {
+        StubTurnExecutor executor = new("Should not run.");
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## first task",
+                "#> first answer",
+                "## second task",
+                "#~ older answer",
+                "method GET",
+                "## clear responses",
+            ]);
+        StubActiveDocumentHost host = new(source);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 7,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual("Inline AI responses cleared.", result.StatusText);
+        StringAssert.Contains(result.DebugText, "Command: clear responses");
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## first task",
+                "## second task",
+                "method GET",
+                string.Empty,
+                "## ",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
+        Assert.AreEqual(6, result.SuggestedCursorLineNumber);
+        Assert.AreEqual(4, result.SuggestedCursorColumn);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_handles_collapse_command_without_invoking_ai_turn_executor()
+    {
+        StubTurnExecutor executor = new("Should not run.");
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## first task",
+                "#> first answer",
+                "## latest task",
+                "#> latest answer",
+                "method GET",
+                "## collapse",
+            ]);
+        StubActiveDocumentHost host = new(source);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 7,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual("Inline AI history collapsed.", result.StatusText);
+        StringAssert.Contains(result.DebugText, "Command: collapse");
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## latest task",
+                "#> latest answer",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
+        Assert.AreEqual(5, result.SuggestedCursorLineNumber);
+        Assert.AreEqual(4, result.SuggestedCursorColumn);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_executes_multiline_prompt_block_as_a_single_prompt()
+    {
+        string? capturedPrompt = null;
+        StubTurnExecutor executor = new(
+            (request, _) =>
+            {
+                capturedPrompt = request.Prompt;
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Done.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## tighten this request",
+                "## add a json body",
+                "## ",
+                "method GET",
+            ]);
+        StubActiveDocumentHost host = new(source);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 4,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual("tighten this request\nadd a json body", capturedPrompt);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## tighten this request",
+                "## add a json body",
+                "#> Done.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(6, result.SuggestedCursorLineNumber);
     }
 
     [TestMethod]
@@ -534,6 +690,295 @@ public sealed class AiInlineConversationServiceTests
         Assert.IsTrue(result.Succeeded);
         StringAssert.Contains(result.UpdatedText, "max_send_iterations 20");
         StringAssert.Contains(result.UpdatedText, "stash.Title = sent.title");
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_retries_when_agent_reports_editor_rejection_and_unchanged_document()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## make a new request that filters objects and stashes results\nmethod GET");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText:
+                            "I tried to replace the active script, but the ForRest editor rejected my update (it reported an invalid `expect` parse). However, your active document is still unchanged and currently contains the old `jsonplaceholder.typicode.com` request.\n\nIf you want, I can retry by patching/replacing again—but I need the active request to be editable successfully.",
+                        Issues: [],
+                        SessionReset: true);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"demo\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Replaced the request with a valid objects API script.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-3",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "autonomous repair pass");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "https://api.restful-api.dev/objects");
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_retries_exact_canvas_rejection_reply_from_user_repro()
+    {
+        StubActiveDocumentHost host = new(
+            "name \"restful-api.dev Test\"\n" +
+            "method GET\n" +
+            "url \"https://jsonplaceholder.typicode.com/posts/1\"\n" +
+            "## Okay, I want you to make a script that hits https://api.restful-api.dev/objects\n" +
+            "## Find objects that start with A-C and cost more than 300, then stash up to 50 rows\n");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText:
+                            "I can\u2019t apply the requested change in this canvas: the active ForRest script remains unchanged (still `url \"https://jsonplaceholder.typicode.com/posts/1\"`), and any attempted full rewrite to `https://api.restful-api.dev/objects` with the A-C + `price > 300` filter and \u226450-result stash is rejected by the editor as \"not runnable\" due to parse errors (including `; expected` on rewritten `header ...` lines / `expect` placement constraints).",
+                        Issues: [],
+                        SessionReset: true);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"restful-api.dev Test\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Replaced the request with a working objects API script.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-3a",
+                DocumentTitle: "restful-api.dev Test",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 5,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "autonomous repair pass");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "https://api.restful-api.dev/objects");
+        StringAssert.Contains(result.UpdatedText, "max_send_iterations 50");
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_retries_when_agent_says_the_partial_edit_still_needs_one_more_fix()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## update this request to filter and stash objects\nmethod GET");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    request.ActiveDocumentHost?.UpdateActiveDocument(
+                        request.ActiveDocumentHost.GetActiveDocument()!,
+                        "name \"demo\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50");
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText:
+                            "I updated the active request to hit `https://api.restful-api.dev/objects`, but the script currently does not run in the editor because the runtime error indicates the parsed JSON object type does not have a `data` field in this environment. If you want, I can fix it next by reading the response JSON structure and adjusting the path.",
+                        Issues: [],
+                        SessionReset: true);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"demo\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50\n\nforeach item in response.body.json().AsArray() {\n  log item[\"name\"]\n}");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Updated the request to use the actual response shape and keep the filter in place.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-4",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "keep repairing it now");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "response.body.json().AsArray()");
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_retries_when_agent_admits_it_did_not_successfully_modify_the_active_document()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## make this request enumerate 20 todos and stash completed titles\nmethod GET\nurl \"https://jsonplaceholder.typicode.com/todos/1\"");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText:
+                            "I attempted to update the active request, but the runtime is currently rejecting the script before scaling it to the full todo flow. I therefore did not successfully modify the active document; it still targets `https://jsonplaceholder.typicode.com/todos/1`. If you want me to keep repairing autonomously, the next step is to switch to the documented foreach/request.send/request.url pattern and then retry the stash logic.",
+                        Issues: [],
+                        SessionReset: true);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"demo\"\nmethod GET\nurl \"https://jsonplaceholder.typicode.com/todos/1\"\nmax_send_iterations 20\n\nforeach todoId in [1..20] {\n  request.url = $\"https://jsonplaceholder.typicode.com/todos/{todoId}\"\n  let sent = request.send()\n  if sent.completed {\n    stash.TodoId = sent.id\n    stash.Title = sent.title\n    stash.Commit()\n  }\n}");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Updated the request to enumerate todos and stash completed titles.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-4b",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "autonomous repair pass");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "max_send_iterations 20");
+        StringAssert.Contains(result.UpdatedText, "stash.Title = sent.title");
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_retries_user_style_edit_prompts_that_start_with_what_i_want_you_to_do()
+    {
+        StubActiveDocumentHost host = new(
+            "name \"demo\"\n" +
+            "## What I want you to do is make a script that hits https://api.restful-api.dev/objects\n" +
+            "## Stash the ID, name up to 10 characters, and price for matching objects\n" +
+            "method GET");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText:
+                            "I updated the active request to hit `https://api.restful-api.dev/objects`, but the script currently does not run in the editor because the runtime error indicates the parsed JSON object type does not have a `data` field in this environment. If you want, I can fix it next by reading the response JSON structure and adjusting the path.",
+                        Issues: [],
+                        SessionReset: true);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"demo\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Updated the request to use the objects endpoint and keep the filter-ready loop in place.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-5",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 3,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "autonomous repair pass");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "https://api.restful-api.dev/objects");
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_forces_full_replacement_when_agent_says_in_place_patch_still_is_not_updated()
+    {
+        StubActiveDocumentHost host = new(
+            "name \"demo\"\n" +
+            "## rewrite this request to use https://api.restful-api.dev/objects and stash matching rows\n" +
+            "method GET");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText:
+                            "I tried an in-place patch, but the active document is still not updated. Incremental patching safely is too brittle, so I need to replace the entire active document with a safe version. If you allow one action, I can apply that safe version now.",
+                        Issues: [],
+                        SessionReset: true);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"demo\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Replaced the active request with the working objects script.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-6",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "full `replace_active_document` call");
+        StringAssert.Contains(executor.PromptHistory[1], "Do not propose a partial logging probe");
+        StringAssert.Contains(executor.PromptHistory[1], "replace it now with the corrected request");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "https://api.restful-api.dev/objects");
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
     }
 
     private sealed class StubTurnExecutor : IAiTurnExecutor

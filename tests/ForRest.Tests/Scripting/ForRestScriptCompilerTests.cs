@@ -150,6 +150,39 @@ public sealed class ForRestScriptCompilerTests
     }
 
     [TestMethod]
+    public void Compile_preserves_convert_and_strings_helpers_in_flow()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            request {
+              method = GET
+              url = "https://api.example.test/objects"
+            }
+
+            flow {
+              let price = convert.ToDouble("1849.99")
+              let prefix = strings.Upper(strings.Substring("apple", 0, 1))
+              tests.Equal(true, strings.StartsWith(prefix, "A"), "prefix is A")
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic price = convert.ToDouble(\"1849.99\");");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic prefix = strings.Upper(strings.Substring(\"apple\", 0, 1));");
+        Assert.IsFalse(result.Payload.Request.PreRequestScript.Contains("__flow.V(\"convert\")", StringComparison.Ordinal));
+        Assert.IsFalse(result.Payload.Request.PreRequestScript.Contains("__flow.V(\"strings\")", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void Compile_tolerates_explicit_await_on_request_send_in_flow()
     {
         var compiler = new ForRestScriptCompiler(new ForRestScriptParser());

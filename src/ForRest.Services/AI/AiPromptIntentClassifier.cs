@@ -29,18 +29,10 @@ internal static class AiPromptIntentClassifier
         "store",
         "expand",
         "transform",
-    };
-
-    private static readonly HashSet<string> InformationalIntentKeywords = new(StringComparer.Ordinal)
-    {
-        "explain",
-        "describe",
-        "summarize",
-        "what",
-        "why",
-        "how",
-        "understand",
-        "clarify",
+        "make",
+        "create",
+        "build",
+        "generate",
     };
 
     public static bool IsLikelyEditPrompt(string? prompt)
@@ -50,11 +42,71 @@ internal static class AiPromptIntentClassifier
             return false;
         }
 
-        string[] tokens = prompt.ToLowerInvariant().Split(
+        string[] tokens = Tokenize(prompt);
+        bool hasEditKeyword = tokens.Any(EditIntentKeywords.Contains);
+        if (!hasEditKeyword)
+        {
+            return false;
+        }
+
+        if (ContainsSequence(tokens, "want", "you", "to"))
+        {
+            return true;
+        }
+
+        return !LooksLikeInformationalLead(tokens);
+    }
+
+    private static string[] Tokenize(string prompt)
+    {
+        return prompt.ToLowerInvariant().Split(
             [' ', '\t', '\r', '\n', '.', ',', '!', '?', ':', ';', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-'],
             StringSplitOptions.RemoveEmptyEntries);
-        bool hasInformationalKeyword = tokens.Any(InformationalIntentKeywords.Contains);
-        bool hasEditKeyword = tokens.Any(EditIntentKeywords.Contains);
-        return hasEditKeyword && !hasInformationalKeyword;
+    }
+
+    private static bool LooksLikeInformationalLead(string[] tokens)
+    {
+        if (tokens.Length == 0)
+        {
+            return false;
+        }
+
+        return tokens[0] switch
+        {
+            "explain" or "describe" or "summarize" or "clarify" => true,
+            "help" => tokens.Length > 2 && tokens[1] == "me" && tokens[2] == "understand",
+            "what" => tokens.Length > 1 && (tokens[1] == "does" || tokens[1] == "is"),
+            "why" => tokens.Length > 1 && (tokens[1] == "does" || tokens[1] == "is"),
+            "how" => tokens.Length > 1 && (tokens[1] == "do" || tokens[1] == "does" || tokens[1] == "can" || tokens[1] == "to"),
+            _ => false,
+        };
+    }
+
+    private static bool ContainsSequence(string[] tokens, params string[] sequence)
+    {
+        if (sequence.Length == 0 || tokens.Length < sequence.Length)
+        {
+            return false;
+        }
+
+        for (int start = 0; start <= tokens.Length - sequence.Length; start++)
+        {
+            bool match = true;
+            for (int index = 0; index < sequence.Length; index++)
+            {
+                if (!string.Equals(tokens[start + index], sequence[index], StringComparison.Ordinal))
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

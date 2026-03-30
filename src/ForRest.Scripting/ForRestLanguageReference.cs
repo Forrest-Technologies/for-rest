@@ -432,13 +432,34 @@ internal static class ForRestLanguageReference
             "response.json()",
             "Response",
             "Parse the latest response body as JSON.",
-            "Use `response.json()` when you need explicit JSON node access instead of dynamic members.",
+            "Use `response.json()` when you need explicit JsonNode access such as indexers or `AsArray()`. Do not use dot-member access on the returned value.",
             "let payload = response.json()",
             ["json", "parse response", "body"],
             ["response.json"],
             "Method",
             "response.json()",
             false),
+        new(
+            "response-array",
+            "foreach item in response",
+            "Response",
+            "Iterate array-root JSON bodies directly from `response`.",
+            "When the latest response body root is a JSON array, iterate `response` directly or use `response[index]` instead of inventing wrapper properties.",
+            """
+            let sent = request.send()
+            foreach item in response {
+              log item.name
+            }
+            """,
+            ["json array", "root array", "response[0]", "iterate response"],
+            ["response", "response[0]", "foreach item in response"],
+            "Snippet",
+            """
+            foreach ${1:item} in response {
+              $0
+            }
+            """,
+            true),
         new(
             "range-literal",
             "[0..9]",

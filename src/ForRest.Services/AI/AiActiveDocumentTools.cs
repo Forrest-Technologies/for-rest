@@ -332,6 +332,18 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             hints.Add("stash");
         }
 
+        if (normalized.Contains("jsonobject", StringComparison.Ordinal) ||
+            normalized.Contains("jsonarray", StringComparison.Ordinal) ||
+            normalized.Contains("response.json", StringComparison.Ordinal) ||
+            normalized.Contains("asarray", StringComparison.Ordinal) ||
+            normalized.Contains("does not contain a definition for", StringComparison.Ordinal) ||
+            normalized.Contains("json shape", StringComparison.Ordinal))
+        {
+            hints.Add("response");
+            hints.Add("response-json");
+            hints.Add("response-array");
+        }
+
         return [.. hints];
     }
 
@@ -343,6 +355,14 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             .Replace('‘', '\'')
             .Replace('“', '"')
             .Replace('”', '"')
+            .Replace('\u2019', '\'')
+            .Replace('\u2018', '\'')
+            .Replace('\u201C', '"')
+            .Replace('\u201D', '"')
+            .Replace('\u2013', '-')
+            .Replace('\u2014', '-')
+            .Replace('\u2264', '<')
+            .Replace('\u2265', '>')
             .Trim()
             .ToLowerInvariant();
     }

@@ -643,31 +643,220 @@ public partial class MonacoEditorSurface : ContentView
         isInlineAiPromptLine: function (lineText) {
           return /^\s*##(?!#)/.test(lineText || "");
         },
-        shouldSubmitInlineAiPromptOnEnter: function (event, monaco) {
+        parseInlineAiPromptLine: function (lineText) {
+          const match = String(lineText || "").match(/^(\s*)##(?!#)(.*)$/);
+          if (!match) {
+            return null;
+          }
+
+          return {
+            leadingWhitespace: match[1] || "",
+            rawContent: match[2] || ""
+          };
+        },
+        getInlineAiPromptBlock: function (lineNumber) {
+          if (!this.model || !Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > this.model.getLineCount()) {
+            return null;
+          }
+
+          const lineText = this.model.getLineContent(lineNumber) || "";
+          if (!this.isInlineAiPromptLine(lineText)) {
+            return null;
+          }
+
+          let startLineNumber = lineNumber;
+          while (startLineNumber > 1) {
+            const previousLineText = this.model.getLineContent(startLineNumber - 1) || "";
+            if (!this.isInlineAiPromptLine(previousLineText)) {
+              break;
+            }
+
+            startLineNumber--;
+          }
+
+          let endLineNumber = lineNumber;
+          const lineCount = this.model.getLineCount();
+          while (endLineNumber < lineCount) {
+            const nextLineText = this.model.getLineContent(endLineNumber + 1) || "";
+            if (!this.isInlineAiPromptLine(nextLineText)) {
+              break;
+            }
+
+            endLineNumber++;
+          }
+
+          const lines = [];
+          for (let currentLineNumber = startLineNumber; currentLineNumber <= endLineNumber; currentLineNumber++) {
+            const currentLineText = this.model.getLineContent(currentLineNumber) || "";
+            const parsed = this.parseInlineAiPromptLine(currentLineText);
+            lines.push({
+              lineNumber: currentLineNumber,
+              text: currentLineText,
+              leadingWhitespace: parsed ? parsed.leadingWhitespace : "",
+              hasContent: parsed ? parsed.rawContent.trim().length > 0 : false
+            });
+          }
+
+          return {
+            startLineNumber,
+            endLineNumber,
+            lines
+          };
+        },
+        getInlineAiPromptEnterAction: function (event, monaco) {
           if (this.pendingReadOnly || !this.editor || !this.model || !event || !monaco) {
-            return false;
+            return null;
           }
 
           if (event.keyCode !== monaco.KeyCode.Enter) {
-            return false;
+            return null;
           }
 
           if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
-            return false;
+            return null;
           }
 
           const browserEvent = event.browserEvent;
           if (browserEvent && browserEvent.isComposing) {
-            return false;
+            return null;
           }
 
           const position = this.editor.getPosition();
           if (!position) {
-            return false;
+            return null;
           }
 
           const lineText = this.model.getLineContent(position.lineNumber) || "";
-          return this.isInlineAiPromptLine(lineText);
+          const parsedLine = this.parseInlineAiPromptLine(lineText);
+          if (!parsedLine) {
+            return null;
+          }
+
+          const promptBlock = this.getInlineAiPromptBlock(position.lineNumber);
+          if (!promptBlock) {
+            return null;
+          }
+
+          const currentLineIndex = position.lineNumber - promptBlock.startLineNumber;
+          const hasPriorContent = promptBlock.lines
+            .slice(0, currentLineIndex)
+            .some((line) => line.hasContent);
+          const hasFollowingContent = promptBlock.lines
+            .slice(currentLineIndex + 1)
+            .some((line) => line.hasContent);
+
+          if (parsedLine.rawContent.trim().length > 0 || hasFollowingContent || hasPriorContent) {
+            if (parsedLine.rawContent.trim().length === 0 && hasPriorContent && !hasFollowingContent) {
+              return { kind: "submit" };
+            }
+
+            return {
+              kind: "continue",
+              leadingWhitespace: parsedLine.leadingWhitespace
+            };
+          }
+
+          return { kind: "noop" };
+        },
+        insertInlineAiPromptContinuation: function (monaco, leadingWhitespace) {
+          if (!this.editor || !this.model || !monaco) {
+            return;
+          }
+
+          const position = this.editor.getPosition();
+          if (!position) {
+            return;
+          }
+
+          const lineEnding = this.model.getEOL ? this.model.getEOL() : "\n";
+          const nextLinePrefix = `${leadingWhitespace || ""}## `;
+          this.editor.executeEdits("forrest-inline-ai-enter", [
+            {
+              range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+              text: `${lineEnding}${nextLinePrefix}`
+            }
+          ]);
+
+          const nextLineNumber = position.lineNumber + 1;
+          const nextColumn = nextLinePrefix.length + 1;
+          this.editor.setPosition({ lineNumber: nextLineNumber, column: nextColumn });
+          this.editor.setSelection({
+            startLineNumber: nextLineNumber,
+            startColumn: nextColumn,
+            endLineNumber: nextLineNumber,
+            endColumn: nextColumn
+          });
+        },
+        countLineBreaks: function (text) {
+          const matches = String(text || "").match(/\r\n|\r|\n/g);
+          return matches ? matches.length : 0;
+        },
+        normalizeInlineAiPromptPaste: function (event) {
+          if (!this.editor || !this.model || !event || !Array.isArray(event.changes) || event.changes.length !== 1) {
+            return false;
+          }
+
+          const change = event.changes[0];
+          if (!change || !change.range || typeof change.text !== "string") {
+            return false;
+          }
+
+          const insertedLineBreakCount = this.countLineBreaks(change.text);
+          if (insertedLineBreakCount < 1) {
+            return false;
+          }
+
+          const startLineNumber = change.range.startLineNumber;
+          const startLineText = this.model.getLineContent(startLineNumber) || "";
+          const startLine = this.parseInlineAiPromptLine(startLineText);
+          if (!startLine) {
+            return false;
+          }
+
+          const endLineNumber = Math.min(
+            this.model.getLineCount(),
+            startLineNumber + insertedLineBreakCount);
+          if (endLineNumber <= startLineNumber) {
+            return false;
+          }
+
+          const normalizedLines = [];
+          let changed = false;
+          for (let lineNumber = startLineNumber + 1; lineNumber <= endLineNumber; lineNumber++) {
+            const currentLineText = this.model.getLineContent(lineNumber) || "";
+            if (this.isInlineAiPromptLine(currentLineText)) {
+              normalizedLines.push(currentLineText);
+              continue;
+            }
+
+            changed = true;
+            normalizedLines.push(
+              currentLineText.trim().length === 0
+                ? `${startLine.leadingWhitespace}## `
+                : `${startLine.leadingWhitespace}## ${currentLineText}`);
+          }
+
+          if (!changed || normalizedLines.length === 0 || !window.monaco) {
+            return false;
+          }
+
+          this.isApplyingProtectedEdit = true;
+          try {
+            this.editor.executeEdits("forrest-inline-ai-paste", [
+              {
+                range: new window.monaco.Range(
+                  startLineNumber + 1,
+                  1,
+                  endLineNumber,
+                  this.model.getLineMaxColumn(endLineNumber)),
+                text: normalizedLines.join(this.model.getEOL ? this.model.getEOL() : "\n")
+              }
+            ]);
+          } finally {
+            this.isApplyingProtectedEdit = false;
+          }
+
+          return true;
         },
         hasPrimaryModifier: function (event) {
           return !!(event && (event.ctrlKey || event.metaKey));
@@ -846,10 +1035,20 @@ public partial class MonacoEditorSurface : ContentView
               return;
             }
 
-            if (this.shouldSubmitInlineAiPromptOnEnter(event, monaco)) {
+            const inlineAiEnterAction = this.getInlineAiPromptEnterAction(event, monaco);
+            if (inlineAiEnterAction) {
               event.preventDefault();
               event.stopPropagation();
-              requestHostCommand("send", getCursorPayload(this.editor));
+              if (inlineAiEnterAction.kind === "submit") {
+                requestHostCommand("send", getCursorPayload(this.editor));
+                return;
+              }
+
+              if (inlineAiEnterAction.kind === "continue") {
+                this.insertInlineAiPromptContinuation(monaco, inlineAiEnterAction.leadingWhitespace);
+              }
+
+              return;
             }
           });
           this.editor.onDidChangeCursorPosition((event) => {
@@ -1299,6 +1498,13 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           if (!this.isProtectedSettingsEditor()) {
+            if (this.normalizeInlineAiPromptPaste(event)) {
+              this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
+              this.refreshEditableDecorations();
+              this.scheduleTextSyncNotification();
+              return;
+            }
+
             this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
             this.scheduleTextSyncNotification();
             return;
@@ -1600,6 +1806,14 @@ public partial class MonacoEditorSurface : ContentView
 
 	private void OnEditorWebViewHandlerChanged(object? sender, EventArgs e)
 	{
+		if (EditorWebView.Handler is null)
+		{
+			StopSyncTimer();
+			_isEditorReady = false;
+			_isWaitingForReady = false;
+			return;
+		}
+
 #if ANDROID
 		AttachAndroidWebView();
 #endif
@@ -1880,6 +2094,11 @@ public partial class MonacoEditorSurface : ContentView
 				}
 				catch (Exception exception)
 				{
+					if (MarkEditorUnavailableIfWebViewIsGone(exception))
+					{
+						return;
+					}
+
 					Debug.WriteLine($"[MonacoEditorSurface] Failed to apply editor state v{requestedVersion}: {exception}");
 					AppLaunchGuard.RecordException($"Monaco editor state apply failed at version {requestedVersion}.", exception);
 					return;
@@ -1970,6 +2189,9 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		if (EditorWebView.Handler is null)
 		{
+			StopSyncTimer();
+			_isEditorReady = false;
+			_isWaitingForReady = false;
 			throw new InvalidOperationException("The Monaco web view is not attached to a native handler.");
 		}
 
@@ -1979,7 +2201,11 @@ public partial class MonacoEditorSurface : ContentView
 		}
 		catch (Exception exception)
 		{
-			Debug.WriteLine($"[MonacoEditorSurface] JavaScript evaluation failed.{Environment.NewLine}{script}{Environment.NewLine}{exception}");
+			if (!MarkEditorUnavailableIfWebViewIsGone(exception))
+			{
+				Debug.WriteLine($"[MonacoEditorSurface] JavaScript evaluation failed.{Environment.NewLine}{script}{Environment.NewLine}{exception}");
+			}
+
 			throw;
 		}
 	}
@@ -1997,9 +2223,49 @@ public partial class MonacoEditorSurface : ContentView
 		}
 		catch (Exception exception)
 		{
-			Debug.WriteLine($"[MonacoEditorSurface] Optional JavaScript evaluation failed.{Environment.NewLine}{script}{Environment.NewLine}{exception}");
+			if (!MarkEditorUnavailableIfWebViewIsGone(exception))
+			{
+				Debug.WriteLine($"[MonacoEditorSurface] Optional JavaScript evaluation failed.{Environment.NewLine}{script}{Environment.NewLine}{exception}");
+			}
+
 			return null;
 		}
+	}
+
+	private bool MarkEditorUnavailableIfWebViewIsGone(Exception exception)
+	{
+		if (!IsExpectedWebViewUnavailableException(exception))
+		{
+			return false;
+		}
+
+		StopSyncTimer();
+		_isEditorReady = false;
+		_isWaitingForReady = false;
+		return true;
+	}
+
+	private static bool IsExpectedWebViewUnavailableException(Exception exception)
+	{
+		for (Exception? current = exception; current is not null; current = current.InnerException)
+		{
+			string text = current.ToString();
+			if (text.Contains("valid CoreWebView2 is not present", StringComparison.OrdinalIgnoreCase) ||
+			    text.Contains("ExecuteScriptAsync(): Failed because a valid CoreWebView2 is not present", StringComparison.OrdinalIgnoreCase) ||
+			    text.Contains("The Monaco web view is not attached to a native handler.", StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+
+			if (current is InvalidOperationException &&
+			    text.Contains("A method was called at an unexpected time.", StringComparison.OrdinalIgnoreCase) &&
+			    text.Contains("CoreWebView2", StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private void StartSyncTimer()

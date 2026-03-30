@@ -125,6 +125,69 @@ public sealed class AgentFrameworkAiTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ExecuteAsync_retries_internal_repair_for_edit_prompts_that_start_with_what_i_want_you_to_do()
+    {
+        MutableActiveDocumentHost host = new("name \"Example\"\nmethod GET");
+        StubAgent agent = new(
+            (_, _) => CreateResponse(
+                "I updated the active request to hit `https://api.restful-api.dev/objects`, but the script currently does not run in the editor because the runtime error indicates the parsed JSON object type does not have a `data` field in this environment. If you want, I can fix it next by reading the response JSON structure and adjusting the path.",
+                ChatFinishReason.Stop),
+            (_, _) =>
+            {
+                host.SourceText =
+                    "name \"Example\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50";
+                return CreateResponse("Updated the request to use the objects endpoint.", ChatFinishReason.Stop);
+            });
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(new StubRuntimeFactory(agent));
+
+        AiTurnExecutionResult result = await executor.ExecuteAsync(
+            new(
+                ConversationId: "doc-3c",
+                Objective: "Update the active request.",
+                Prompt:
+                    "What I want you to do is make a script that hits https://api.restful-api.dev/objects. Stash the ID, name up to 10 characters, and price for matching objects.",
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(2, agent.Calls.Count);
+        Assert.AreEqual("name \"Example\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50", host.SourceText);
+        StringAssert.Contains(agent.Calls[1].MessageText, "The previous turn did not modify the active document");
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_forces_full_replacement_for_exact_canvas_rejection_reply_from_user_repro()
+    {
+        MutableActiveDocumentHost host = new("name \"Example\"\nmethod GET\nurl \"https://jsonplaceholder.typicode.com/posts/1\"");
+        StubAgent agent = new(
+            (_, _) => CreateResponse(
+                "I can\u2019t apply the requested change in this canvas: the active ForRest script remains unchanged (still `url \"https://jsonplaceholder.typicode.com/posts/1\"`), and any attempted full rewrite to `https://api.restful-api.dev/objects` with the A-C + `price > 300` filter and \u226450-result stash is rejected by the editor as \"not runnable\" due to parse errors (including `; expected` on rewritten `header ...` lines / `expect` placement constraints).",
+                ChatFinishReason.Stop),
+            (_, _) =>
+            {
+                host.SourceText =
+                    "name \"Example\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50";
+                return CreateResponse("Replaced the active request with the working objects script.", ChatFinishReason.Stop);
+            });
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(new StubRuntimeFactory(agent));
+
+        AiTurnExecutionResult result = await executor.ExecuteAsync(
+            new(
+                ConversationId: "doc-3d",
+                Objective: "Update the active request.",
+                Prompt:
+                    "Okay, I want you to make a script that hits https://api.restful-api.dev/objects. Find objects that start with A-C and cost more than 300, then stash up to 50 rows.",
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(2, agent.Calls.Count);
+        Assert.AreEqual("name \"Example\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50", host.SourceText);
+        StringAssert.Contains(agent.Calls[1].MessageText, "full replace_active_document call");
+        StringAssert.Contains(agent.Calls[1].MessageText, "The previous turn did not modify the active document");
+    }
+
+    [TestMethod]
     public async Task ExecuteAsync_does_not_force_internal_repair_for_non_edit_prompts()
     {
         MutableActiveDocumentHost host = new("name \"Example\"\nmethod GET");

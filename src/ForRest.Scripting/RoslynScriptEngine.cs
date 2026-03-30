@@ -1,6 +1,7 @@
 namespace ForRest.Scripting;
 
 using System.Collections.Immutable;
+using Microsoft.CSharp.RuntimeBinder;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -108,8 +109,10 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             {
                 consoleApi.Error(BuildReferenceDiagnostics());
             }
-            consoleApi.Error(exception.Message);
-            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, exception.Message);
+
+            string message = BuildFriendlyRuntimeErrorMessage(exception);
+            consoleApi.Error(message);
+            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
         }
 
         return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, string.Empty);
@@ -175,6 +178,24 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             ErrorMessage = errorMessage,
             Stash = stashApi.BuildTable(),
         };
+    }
+
+    private static string BuildFriendlyRuntimeErrorMessage(Exception exception)
+    {
+        if (exception is RuntimeBinderException runtimeBinderException
+            && string.Equals(runtimeBinderException.Message, "Cannot perform runtime binding on a null reference", StringComparison.Ordinal))
+        {
+            return string.Join(
+                " ",
+                [
+                    runtimeBinderException.Message + ".",
+                    "A nested JSON value in the script resolved to null before the next member access.",
+                    "Guard the parent value first, for example `if item.data != null { ... item.data.price ... }`.",
+                    "For optional text fields, prefer `convert.ToString(...)` and the `strings` helpers."
+                ]);
+        }
+
+        return exception.Message;
     }
 
     private static PreparedRequest BuildPreparedRequestOrFallback(PreparedRequest fallback, ScriptRequestApi requestApi)

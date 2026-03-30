@@ -60,6 +60,47 @@ public sealed class AiInlineConversationSyntaxTests
     }
 
     [TestMethod]
+    public void Parse_groups_contiguous_prompt_lines_into_a_single_multiline_prompt()
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## tighten this request",
+                "## add a json body",
+                "## ",
+                "#> Done.",
+                "method GET",
+            ]));
+
+        Assert.AreEqual(1, document.Prompts.Count);
+        Assert.AreEqual(3, document.Prompts[0].PromptLines.Count);
+        Assert.AreEqual("tighten this request\nadd a json body", document.Prompts[0].PromptText);
+        Assert.AreEqual(2, document.Prompts[0].LineNumber);
+        Assert.IsTrue(document.Prompts[0].HasActiveResponse);
+    }
+
+    [TestMethod]
+    public void ResolveActionablePrompt_uses_multiline_prompt_text_when_cursor_is_on_blank_submit_line()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## tighten this request",
+                "## add a json body",
+                "## ",
+                "method GET",
+            ]);
+
+        AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 4);
+
+        Assert.IsNotNull(prompt);
+        Assert.AreEqual("tighten this request\nadd a json body", prompt.PromptText);
+        Assert.AreEqual(2, prompt.LineNumber);
+    }
+
+    [TestMethod]
     public void RenderResponseBlock_preserves_multiline_structure()
     {
         string rendered = AiInlineConversationFormatter.RenderResponseBlock("first\n\nthird", "\n");
@@ -97,6 +138,34 @@ public sealed class AiInlineConversationSyntaxTests
                 "#~ old response 2",
                 "#~ faded response",
                 "# another comment",
+                "method GET",
+            ]);
+
+        Assert.AreEqual(expected, updated);
+    }
+
+    [TestMethod]
+    public void ApplyResponseAtCursor_inserts_after_multiline_prompt_and_removes_blank_submit_line()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## tighten this request",
+                "## add a json body",
+                "## ",
+                "method GET",
+            ]);
+
+        string updated = AiInlineConversationFormatter.ApplyResponseAtCursor(source, 4, "Done.");
+
+        string expected = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## tighten this request",
+                "## add a json body",
+                "#> Done.",
                 "method GET",
             ]);
 

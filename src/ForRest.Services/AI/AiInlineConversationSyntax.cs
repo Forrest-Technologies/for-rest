@@ -26,18 +26,40 @@ public sealed record AiInlineConversationLine(
 }
 
 public sealed record AiInlineConversationPrompt(
-    AiInlineConversationLine PromptLine,
+    IReadOnlyList<AiInlineConversationLine> PromptLines,
     IReadOnlyList<AiInlineConversationLine> BlockLines)
 {
+    public AiInlineConversationLine PromptLine => PromptLines[0];
+
     public int LineNumber => PromptLine.LineNumber;
 
-    public string PromptText => PromptLine.Content;
+    public string PromptText => string.Join(
+        "\n",
+        GetRenderedPromptLines().Select(static line => line.Content));
 
     public bool HasActiveResponse => BlockLines.Any(static line => line.Kind == AiInlineConversationLineKind.Response);
 
     public bool HasStaleResponse => BlockLines.Any(static line => line.Kind == AiInlineConversationLineKind.StaleResponse);
 
     public AiInlineConversationLine? LatestActiveResponse => BlockLines.LastOrDefault(static line => line.Kind == AiInlineConversationLineKind.Response);
+
+    public IReadOnlyList<AiInlineConversationLine> GetRenderedPromptLines()
+    {
+        int promptLineCount = PromptLines.Count;
+        while (promptLineCount > 0 && string.IsNullOrWhiteSpace(PromptLines[promptLineCount - 1].Content))
+        {
+            promptLineCount--;
+        }
+
+        if (promptLineCount == PromptLines.Count)
+        {
+            return PromptLines;
+        }
+
+        return promptLineCount == 0
+            ? []
+            : PromptLines.Take(promptLineCount).ToArray();
+    }
 }
 
 public sealed record AiInlineConversationDocument(
@@ -139,8 +161,16 @@ public static class AiInlineConversationParser
                 continue;
             }
 
+            List<AiInlineConversationLine> promptLines = [line];
+            int blockStart = index + 1;
+            while (blockStart < lines.Count && lines[blockStart].Kind == AiInlineConversationLineKind.Prompt)
+            {
+                promptLines.Add(lines[blockStart]);
+                blockStart++;
+            }
+
             List<AiInlineConversationLine> blockLines = [];
-            for (int blockIndex = index + 1; blockIndex < lines.Count; blockIndex++)
+            for (int blockIndex = blockStart; blockIndex < lines.Count; blockIndex++)
             {
                 AiInlineConversationLine blockLine = lines[blockIndex];
                 if (blockLine.Kind == AiInlineConversationLineKind.Prompt)
@@ -151,7 +181,8 @@ public static class AiInlineConversationParser
                 blockLines.Add(blockLine);
             }
 
-            prompts.Add(new(line, blockLines));
+            prompts.Add(new(promptLines, blockLines));
+            index = blockStart - 1;
         }
 
         return new(normalizedText, lineEnding, hasTrailingNewline, lines, prompts);
@@ -300,7 +331,13 @@ public static class AiInlineConversationFormatter
             return sourceText ?? string.Empty;
         }
 
-        int promptIndex = FindPromptIndex(document, promptLineNumber);
+        AiInlineConversationPrompt? prompt = FindPrompt(document, promptLineNumber);
+        if (prompt is null)
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        int promptIndex = FindPromptIndex(document, prompt.LineNumber);
         if (promptIndex < 0)
         {
             return sourceText ?? string.Empty;
@@ -320,20 +357,18 @@ public static class AiInlineConversationFormatter
                 continue;
             }
 
-            outputLines.Add(document.Lines[index].Text);
+            AddRenderedPromptLines(outputLines, prompt);
             if (!string.IsNullOrWhiteSpace(renderedResponse))
             {
                 outputLines.AddRange(renderedResponse.Split(document.LineEnding, StringSplitOptions.None));
             }
 
-            int blockEnd = index + 1;
-            while (blockEnd < document.Lines.Count && document.Lines[blockEnd].Kind != AiInlineConversationLineKind.Prompt)
+            foreach (AiInlineConversationLine blockLine in prompt.BlockLines)
             {
-                outputLines.Add(RenderHistoryLine(document.Lines[blockEnd]));
-                blockEnd++;
+                outputLines.Add(RenderHistoryLine(blockLine));
             }
 
-            index = blockEnd - 1;
+            index += prompt.PromptLines.Count + prompt.BlockLines.Count - 1;
         }
 
         return JoinLines(outputLines, document.LineEnding, document.HasTrailingNewline);
@@ -402,7 +437,13 @@ public static class AiInlineConversationFormatter
             return sourceText ?? string.Empty;
         }
 
-        int promptIndex = FindPromptIndex(document, promptLineNumber);
+        AiInlineConversationPrompt? prompt = FindPrompt(document, promptLineNumber);
+        if (prompt is null)
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        int promptIndex = FindPromptIndex(document, prompt.LineNumber);
         if (promptIndex < 0)
         {
             return sourceText ?? string.Empty;
@@ -418,25 +459,21 @@ public static class AiInlineConversationFormatter
                 continue;
             }
 
-            outputLines.Add(document.Lines[index].Text);
+            AddRenderedPromptLines(outputLines, prompt);
             if (!string.IsNullOrWhiteSpace(renderedResponse))
             {
                 outputLines.AddRange(renderedResponse.Split(document.LineEnding, StringSplitOptions.None));
             }
 
-            int blockEnd = index + 1;
-            while (blockEnd < document.Lines.Count && document.Lines[blockEnd].Kind != AiInlineConversationLineKind.Prompt)
+            foreach (AiInlineConversationLine blockLine in prompt.BlockLines)
             {
-                AiInlineConversationLine blockLine = document.Lines[blockEnd];
                 if (blockLine.Kind != AiInlineConversationLineKind.Response)
                 {
                     outputLines.Add(blockLine.Text);
                 }
-
-                blockEnd++;
             }
 
-            index = blockEnd - 1;
+            index += prompt.PromptLines.Count + prompt.BlockLines.Count - 1;
         }
 
         return JoinLines(outputLines, document.LineEnding, document.HasTrailingNewline);
@@ -450,7 +487,13 @@ public static class AiInlineConversationFormatter
             return sourceText ?? string.Empty;
         }
 
-        int promptIndex = FindPromptIndex(document, promptLineNumber);
+        AiInlineConversationPrompt? prompt = FindPrompt(document, promptLineNumber);
+        if (prompt is null)
+        {
+            return sourceText ?? string.Empty;
+        }
+
+        int promptIndex = FindPromptIndex(document, prompt.LineNumber);
         if (promptIndex < 0)
         {
             return sourceText ?? string.Empty;
@@ -462,15 +505,13 @@ public static class AiInlineConversationFormatter
             AiInlineConversationLine line = document.Lines[index];
             if (index == promptIndex)
             {
-                outputLines.Add(line.Text);
-                int blockEnd = index + 1;
-                while (blockEnd < document.Lines.Count && document.Lines[blockEnd].Kind != AiInlineConversationLineKind.Prompt)
+                AddRenderedPromptLines(outputLines, prompt);
+                foreach (AiInlineConversationLine blockLine in prompt.BlockLines)
                 {
-                    outputLines.Add(RenderHistoryLine(document.Lines[blockEnd]));
-                    blockEnd++;
+                    outputLines.Add(RenderHistoryLine(blockLine));
                 }
 
-                index = blockEnd - 1;
+                index += prompt.PromptLines.Count + prompt.BlockLines.Count - 1;
                 continue;
             }
 
@@ -521,6 +562,16 @@ public static class AiInlineConversationFormatter
         return -1;
     }
 
+    private static AiInlineConversationPrompt? FindPrompt(AiInlineConversationDocument document, int promptLineNumber)
+    {
+        if (promptLineNumber < 1 || document.Prompts.Count == 0)
+        {
+            return null;
+        }
+
+        return document.FindLatestPrompt(promptLineNumber);
+    }
+
     private static string RenderHistoryLine(AiInlineConversationLine line)
     {
         return line.Kind switch
@@ -540,10 +591,17 @@ public static class AiInlineConversationFormatter
 
     private static int ResolveFreshPromptInsertIndex(AiInlineConversationDocument document, int promptLineNumber)
     {
-        int promptIndex = FindPromptIndex(document, promptLineNumber);
-        if (promptIndex >= 0)
+        AiInlineConversationPrompt? prompt = FindPrompt(document, promptLineNumber);
+        if (prompt is not null)
         {
-            int insertIndex = promptIndex + 1;
+            int promptIndex = FindPromptIndex(document, prompt.LineNumber);
+            int renderedPromptLineCount = GetRenderedPromptLineCount(prompt);
+            if (renderedPromptLineCount == 0)
+            {
+                renderedPromptLineCount = prompt.PromptLines.Count;
+            }
+
+            int insertIndex = promptIndex + renderedPromptLineCount;
             while (insertIndex < document.Lines.Count &&
                    document.Lines[insertIndex].Kind is AiInlineConversationLineKind.Response or AiInlineConversationLineKind.StaleResponse)
             {
@@ -581,6 +639,26 @@ public static class AiInlineConversationFormatter
         }
 
         return -1;
+    }
+
+    private static int GetRenderedPromptLineCount(AiInlineConversationPrompt prompt)
+    {
+        return prompt.GetRenderedPromptLines().Count;
+    }
+
+    private static void AddRenderedPromptLines(List<string> outputLines, AiInlineConversationPrompt prompt)
+    {
+        IReadOnlyList<AiInlineConversationLine> promptLines = prompt.GetRenderedPromptLines();
+        if (promptLines.Count == 0)
+        {
+            outputLines.Add(prompt.PromptLine.Text);
+            return;
+        }
+
+        foreach (AiInlineConversationLine promptLine in promptLines)
+        {
+            outputLines.Add(promptLine.Text);
+        }
     }
 
     private static string InsertFreshPromptAtIndex(

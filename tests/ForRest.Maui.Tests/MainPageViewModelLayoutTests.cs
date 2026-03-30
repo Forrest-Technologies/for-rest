@@ -1,3 +1,4 @@
+using System.Reflection;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
 using ForRest.Maui.ViewModels;
@@ -592,6 +593,44 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_routes_multiline_inline_ai_prompt_block_to_ai_service()
+	{
+		using TestHarness harness = new();
+		CapturingTurnExecutor executor = new("Done.");
+		IAiInlineConversationService aiService = new AiInlineConversationService(executor);
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+
+		viewModel.ActiveEditorText =
+			"""
+			name "demo"
+			## tighten this request
+			## add a json body
+			## 
+			method GET
+			""";
+		viewModel.UpdateActiveEditorCursor(4, 4);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual("tighten this request\nadd a json body", executor.LastPrompt);
+		CollectionAssert.AreEqual(
+			new[]
+			{
+				"name \"demo\"",
+				"## tighten this request",
+				"## add a json body",
+				"#> Done.",
+				string.Empty,
+				"## ",
+				string.Empty,
+				"method GET",
+			},
+			viewModel.ActiveEditorText.Split('\n'));
+		Assert.AreEqual("AI replied.", viewModel.ExecutionStatus);
+		Assert.AreEqual(6, viewModel.ActiveEditorRequestedCursorLineNumber);
+	}
+
+	[TestMethod]
 	public async Task SendAsync_requests_follow_up_cursor_move_after_inline_ai_reply()
 	{
 		using TestHarness harness = new();
@@ -866,6 +905,39 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.IsNotNull(capturedDocument);
 		Assert.AreEqual("name \"demo\"\nmethod GET\nurl \"https://example.test\"\n", capturedDocument.SourceText);
 		Assert.IsTrue(capturedDocument.Diagnostics.Any(static diagnostic => diagnostic.Line == 35 && diagnostic.Message.Contains("; expected", StringComparison.Ordinal)));
+	}
+
+	[TestMethod]
+	public void TryValidateCompiledRequestScripts_accepts_array_root_validation_samples_when_object_root_fails()
+	{
+		using TestHarness harness = new();
+		ArrayRootValidationExecutionService executionService = new();
+		ArrayRootValidationScriptEngine scriptEngine = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: executionService,
+			scriptEngine: scriptEngine);
+		scriptEngine.ResponseRootKinds.Clear();
+
+		ForRestScriptCompilationResult compilation = executionService.Compile(
+			"""
+			name "demo"
+			method GET
+			url "https://api.restful-api.dev/objects"
+			""",
+			Guid.NewGuid(),
+			"Demo");
+		Assert.IsNotNull(compilation.Payload);
+
+		MethodInfo method = typeof(MainPageViewModel).GetMethod(
+			"TryValidateCompiledRequestScripts",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+		object?[] arguments = [compilation.Payload, null];
+
+		bool succeeded = (bool)method.Invoke(viewModel, arguments)!;
+
+		Assert.IsTrue(succeeded);
+		Assert.AreEqual(string.Empty, arguments[1] as string);
+		CollectionAssert.AreEqual(new[] { '{', '[' }, scriptEngine.ResponseRootKinds.ToArray());
 	}
 
 	private static string NormalizeLineEndings(string value)
@@ -1238,11 +1310,96 @@ public sealed class MainPageViewModelLayoutTests
 		}
 	}
 
+	private sealed class ArrayRootValidationExecutionService : IForRestScriptExecutionService
+	{
+		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
+		{
+			return new(
+				null,
+				new ForRestExecutionPayload
+				{
+					SourceText = source,
+					Request = new RequestDefinition
+					{
+						WorkspaceId = workspaceId,
+						Name = defaultRequestName ?? "Demo",
+						Method = HttpMethodKind.Get,
+						UrlTemplate = "https://api.restful-api.dev/objects",
+						Headers = [],
+						Variables = [],
+						TestsScript =
+							"""
+							foreach item in response {
+							  log item.name
+							}
+							""",
+					},
+				},
+				[]);
+		}
+
+		public Task<ForRestScriptExecutionOutcome> Execute(
+			AppProfile profile,
+			WorkspaceSnapshot workspace,
+			string source,
+			EnvironmentDefinition? environment,
+			string? defaultRequestName = null,
+			string? preRequestScriptOverride = null,
+			CancellationToken cancellationToken = default)
+		{
+			throw new NotSupportedException("Execution is not used in this validation test.");
+		}
+	}
+
 	private sealed class ThrowingTurnExecutor : IAiTurnExecutor
 	{
 		public Task<AiTurnExecutionResult> ExecuteAsync(AiTurnExecutionRequest request, CancellationToken cancellationToken = default)
 		{
 			throw new InvalidOperationException("Blank AI prompts should never reach the turn executor.");
+		}
+	}
+
+	private sealed class ArrayRootValidationScriptEngine : IScriptEngine
+	{
+		public List<char> ResponseRootKinds { get; } = [];
+
+		public Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
+		{
+			string body = request.Response?.Body?.TrimStart() ?? string.Empty;
+			if (!string.IsNullOrWhiteSpace(request.Script) &&
+			    !string.IsNullOrWhiteSpace(body))
+			{
+				ResponseRootKinds.Add(body[0]);
+			}
+
+			ScriptExecutionResult result = new()
+			{
+				PreparedRequest = request.PreparedRequest,
+				Response = request.Response,
+				SentResponse = request.Response,
+				RuntimeVariables = [.. request.RuntimeVariables],
+				ErrorMessage = !string.IsNullOrWhiteSpace(request.Script) && body.StartsWith("{", StringComparison.Ordinal)
+					? "RuntimeBinderException: 'System.Text.Json.Nodes.JsonObject' does not contain a definition for 'objects'"
+					: null,
+			};
+
+			if (string.IsNullOrWhiteSpace(request.Script))
+			{
+				return Task.FromResult(result);
+			}
+
+			return Task.FromResult(result);
+		}
+	}
+
+	private sealed class CapturingTurnExecutor(string responseText) : IAiTurnExecutor
+	{
+		public string? LastPrompt { get; private set; }
+
+		public Task<AiTurnExecutionResult> ExecuteAsync(AiTurnExecutionRequest request, CancellationToken cancellationToken = default)
+		{
+			LastPrompt = request.Prompt;
+			return Task.FromResult(new AiTurnExecutionResult(true, responseText, [], SessionReset: false));
 		}
 	}
 

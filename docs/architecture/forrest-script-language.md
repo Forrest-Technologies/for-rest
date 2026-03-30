@@ -96,10 +96,16 @@ Inline AI also supports local shorthand commands that run without sending a turn
 Currently supported:
 
 - `## reset`
+- `## clear responses`
+- `## collapse`
 - `## help`
 - `## commands`
 
 `## reset` clears all inline AI prompt and response lines from the active request document, then reopens a fresh blank `## ` prompt near the current working area so the user can start a new inline thread with no carried history.
+
+`## clear responses` removes inline AI response lines from the active request document, keeps the existing `##` prompt history, and reopens a fresh blank `## ` prompt.
+
+`## collapse` keeps only the latest inline AI exchange in the active request document, removes older inline AI history, and reopens a fresh blank `## ` prompt.
 
 `## help` lists the supported local prompt commands directly in the inline AI pane, then opens a fresh blank `## ` prompt.
 
@@ -107,7 +113,9 @@ Currently supported:
 
 Current editor behavior:
 
-- pressing `Enter` on a `##` prompt line submits that AI prompt
+- pressing `Enter` on a non-empty `##` prompt line inserts a continuation line that also starts with `## `
+- pressing `Enter` on a blank trailing `## ` continuation line submits the whole multiline prompt block
+- pasting multiline text into a `##` prompt automatically prefixes each continuation line with `## `
 - pressing the normal send action also routes to AI when the cursor is on an AI conversation block
 - if the prompt is the last meaningful line in the document, send still treats it as an AI request even if there is a trailing blank line
 

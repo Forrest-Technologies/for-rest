@@ -3260,10 +3260,15 @@ public sealed class MainPageViewModel : ObservableObject
 		AiInlineConversationPrompt prompt,
 		AiInlineConversationResult result)
 	{
+		int suggestedCursorColumn = Math.Max(1, result.SuggestedCursorColumn);
+		if (IsBlankInlineAiPromptLine(result.UpdatedText, result.SuggestedCursorLineNumber))
+		{
+			return (result.UpdatedText, result.SuggestedCursorLineNumber, suggestedCursorColumn);
+		}
+
 		string repairedText = AiInlineConversationFormatter.EnsureFreshPromptAfterConversation(
 			result.UpdatedText,
 			result.PromptLineNumber ?? prompt.LineNumber);
-		int suggestedCursorColumn = Math.Max(1, result.SuggestedCursorColumn);
 		int? suggestedCursorLineNumber = result.SuggestedCursorLineNumber;
 		if (!IsBlankInlineAiPromptLine(repairedText, suggestedCursorLineNumber))
 		{
@@ -3759,32 +3764,69 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private bool TryValidateCompiledRequestScripts(ForRestExecutionPayload payload, out string detail)
 	{
-		ResponseSnapshot defaultResponse = BuildValidationResponse();
 		PreparedRequest preparedRequest = BuildValidationPreparedRequest(payload.Request);
 		WorkspaceDefinition workspace = new()
 		{
 			Id = _selectedWorkspaceId,
 			Name = SelectedWorkspace,
 		};
+		List<string> failures = [];
 
+		foreach (ResponseSnapshot validationResponse in BuildValidationResponses())
+		{
+			if (TryValidateCompiledRequestScriptsAgainstSample(payload, preparedRequest, workspace, validationResponse, out string sampleDetail))
+			{
+				detail = string.Empty;
+				return true;
+			}
+
+			if (!string.IsNullOrWhiteSpace(sampleDetail))
+			{
+				failures.Add(sampleDetail);
+			}
+		}
+
+		detail = failures.Count == 0
+			? "The generated script would not run."
+			: string.Join("  ", failures.Distinct(StringComparer.Ordinal).Take(4));
+		return false;
+	}
+
+	private bool TryValidateCompiledRequestScriptsAgainstSample(
+		ForRestExecutionPayload payload,
+		PreparedRequest preparedRequest,
+		WorkspaceDefinition workspace,
+		ResponseSnapshot validationResponse,
+		out string detail)
+	{
 		try
 		{
+			Task<ResponseSnapshot?> sendAsync(PreparedRequest _)
+			{
+				return Task.FromResult<ResponseSnapshot?>(validationResponse);
+			}
+
+			Task<ScriptExecutionResult> executeWorkspaceRequestAsync(string _, IReadOnlyList<VariableDefinition> callerRuntimeVariables)
+			{
+				return Task.FromResult(new ScriptExecutionResult
+				{
+					Response = validationResponse,
+					SentResponse = validationResponse,
+					RuntimeVariables = [.. callerRuntimeVariables],
+				});
+			}
+
 			ScriptExecutionResult preRequestResult = _scriptEngine.Run(
 				new()
 				{
 					Script = payload.Request.PreRequestScript,
 					PreparedRequest = preparedRequest,
-					Response = defaultResponse,
+					Response = validationResponse,
 					Workspace = workspace,
 					RequestVariables = [.. payload.Request.Variables],
 					RuntimeVariables = [],
-					SendAsync = static _ => Task.FromResult<ResponseSnapshot?>(BuildValidationResponse()),
-					ExecuteWorkspaceRequestAsync = static (_, callerRuntimeVariables) => Task.FromResult(new ScriptExecutionResult
-					{
-						Response = BuildValidationResponse(),
-						SentResponse = BuildValidationResponse(),
-						RuntimeVariables = [.. callerRuntimeVariables],
-					}),
+					SendAsync = sendAsync,
+					ExecuteWorkspaceRequestAsync = executeWorkspaceRequestAsync,
 					MaxSendIterations = payload.Request.MaxSendIterations,
 				}).GetAwaiter().GetResult();
 			if (!string.IsNullOrWhiteSpace(preRequestResult.ErrorMessage))
@@ -3798,17 +3840,12 @@ public sealed class MainPageViewModel : ObservableObject
 				{
 					Script = payload.Request.TestsScript,
 					PreparedRequest = preRequestResult.PreparedRequest,
-					Response = preRequestResult.SentResponse ?? preRequestResult.Response ?? defaultResponse,
+					Response = preRequestResult.SentResponse ?? preRequestResult.Response ?? validationResponse,
 					Workspace = workspace,
 					RequestVariables = [.. payload.Request.Variables],
 					RuntimeVariables = [.. preRequestResult.RuntimeVariables],
-					SendAsync = static _ => Task.FromResult<ResponseSnapshot?>(BuildValidationResponse()),
-					ExecuteWorkspaceRequestAsync = static (_, callerRuntimeVariables) => Task.FromResult(new ScriptExecutionResult
-					{
-						Response = BuildValidationResponse(),
-						SentResponse = BuildValidationResponse(),
-						RuntimeVariables = [.. callerRuntimeVariables],
-					}),
+					SendAsync = sendAsync,
+					ExecuteWorkspaceRequestAsync = executeWorkspaceRequestAsync,
 					MaxSendIterations = payload.Request.MaxSendIterations,
 				}).GetAwaiter().GetResult();
 			if (!string.IsNullOrWhiteSpace(testsResult.ErrorMessage))
@@ -3847,14 +3884,104 @@ public sealed class MainPageViewModel : ObservableObject
 		};
 	}
 
-	private static ResponseSnapshot BuildValidationResponse()
+	private static IReadOnlyList<ResponseSnapshot> BuildValidationResponses()
+	{
+		return
+		[
+			BuildValidationResponse(
+				"""
+				{
+				  "ok": true,
+				  "id": "7",
+				  "name": "Apple MacBook Pro 16",
+				  "title": "Alpha object",
+				  "completed": true,
+				  "userId": 1,
+				  "user": {
+				    "name": "Ada Lovelace"
+				  },
+				  "data": {
+				    "year": 2019,
+				    "price": 1849.99,
+				    "CPU model": "Intel Core i9",
+				    "Hard disk size": "1 TB"
+				  },
+				  "items": [
+				    {
+				      "id": "7",
+				      "name": "Apple MacBook Pro 16",
+				      "title": "Alpha object",
+				      "completed": true,
+				      "userId": 1,
+				      "data": {
+				        "price": 1849.99
+				      }
+				    },
+				    {
+				      "id": "8",
+				      "name": "Banana Phone",
+				      "title": "Beta object",
+				      "completed": false,
+				      "userId": 2,
+				      "data": {
+				        "price": 399.99
+				      }
+				    }
+				  ],
+				  "results": [
+				    {
+				      "id": "7",
+				      "name": "Apple MacBook Pro 16",
+				      "data": {
+				        "price": 1849.99
+				      }
+				    }
+				  ]
+				}
+				"""),
+			BuildValidationResponse(
+				"""
+				[
+				  {
+				    "id": "7",
+				    "name": "Apple MacBook Pro 16",
+				    "title": "Alpha object",
+				    "completed": true,
+				    "userId": 1,
+				    "data": {
+				      "year": 2019,
+				      "price": 1849.99,
+				      "CPU model": "Intel Core i9",
+				      "Hard disk size": "1 TB"
+				    }
+				  },
+				  {
+				    "id": "8",
+				    "name": "Banana Phone",
+				    "title": "Beta object",
+				    "completed": false,
+				    "userId": 2,
+				    "data": {
+				      "year": 2020,
+				      "price": 399.99,
+				      "CPU model": "Intel Core i7",
+				      "Hard disk size": "512 GB"
+				    }
+				  }
+				]
+				"""),
+		];
+	}
+
+	private static ResponseSnapshot BuildValidationResponse(string body)
 	{
 		return new()
 		{
 			StatusCode = 200,
 			ReasonPhrase = "OK",
 			ContentType = "application/json",
-			Body = "{\"ok\":true}",
+			SizeBytes = body.Length,
+			Body = body,
 			RawResponse = "HTTP/1.1 200 OK",
 			Headers =
 			[

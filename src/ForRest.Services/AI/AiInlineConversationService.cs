@@ -40,17 +40,20 @@ public interface IAiInlineConversationService
 
 public sealed class AiInlineConversationService : IAiInlineConversationService
 {
-    private const int MaxAutonomousRepairAttempts = 2;
+    private const int MaxAutonomousRepairAttempts = 3;
     private static readonly string[] StuckResponsePhrases =
     [
         "can't apply",
         "cannot apply",
+        "requested change in this canvas",
         "can't safely",
         "cannot safely",
         "can't update",
         "cannot update",
         "can't rewrite",
         "cannot rewrite",
+        "rejected by the editor",
+        "not runnable",
         "the runtime rejected",
         "runtime rejected",
         "diagnostics indicate",
@@ -73,6 +76,22 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         "reply 2",
         "reply \"1\"",
         "reply \"2\"",
+    ];
+    private static readonly string[] ForcedReplacementResponsePhrases =
+    [
+        "still not updated",
+        "too brittle",
+        "incremental patching safely",
+        "replace the entire active document",
+        "replace the whole document",
+        "replace the whole script",
+        "replace the entire document",
+        "replace the whole request",
+        "if you allow one action",
+        "safe version",
+        "in-place patch",
+        "full replacements were rejected",
+        "earlier full replacements were rejected",
     ];
     private readonly IAiTurnExecutor _turnExecutor;
 
@@ -119,7 +138,7 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
 
     private static AiInlineConversationResult? TryHandlePromptCommand(string sourceText, AiInlineConversationPrompt prompt)
     {
-        string commandText = prompt.PromptText.Trim();
+        string commandText = NormalizePromptCommandText(prompt.PromptText);
         if (string.Equals(commandText, "reset", StringComparison.OrdinalIgnoreCase))
         {
             string cleanedSource = RemoveConversationBlocks(sourceText);
@@ -139,6 +158,38 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
                 UpdateKind: updatedResetDocument.Kind,
                 SuggestedCursorLineNumber: updatedResetDocument.SuggestedCursorLineNumber,
                 SuggestedCursorColumn: updatedResetDocument.SuggestedCursorColumn);
+        }
+
+        if (string.Equals(commandText, "clear responses", StringComparison.OrdinalIgnoreCase))
+        {
+            ConversationUpdate updatedDocument = ClearResponsesAndReopenPrompt(sourceText, prompt);
+
+            return new(
+                Handled: true,
+                Succeeded: true,
+                UpdatedText: updatedDocument.Text,
+                StatusText: "Inline AI responses cleared.",
+                DebugText: BuildCommandDebugText(prompt, "clear responses"),
+                PromptLineNumber: updatedDocument.SuggestedCursorLineNumber,
+                UpdateKind: updatedDocument.Kind,
+                SuggestedCursorLineNumber: updatedDocument.SuggestedCursorLineNumber,
+                SuggestedCursorColumn: updatedDocument.SuggestedCursorColumn);
+        }
+
+        if (string.Equals(commandText, "collapse", StringComparison.OrdinalIgnoreCase))
+        {
+            ConversationUpdate updatedDocument = CollapseConversationHistory(sourceText, prompt);
+
+            return new(
+                Handled: true,
+                Succeeded: true,
+                UpdatedText: updatedDocument.Text,
+                StatusText: "Inline AI history collapsed.",
+                DebugText: BuildCommandDebugText(prompt, "collapse"),
+                PromptLineNumber: updatedDocument.SuggestedCursorLineNumber,
+                UpdateKind: updatedDocument.Kind,
+                SuggestedCursorLineNumber: updatedDocument.SuggestedCursorLineNumber,
+                SuggestedCursorColumn: updatedDocument.SuggestedCursorColumn);
         }
 
         if (string.Equals(commandText, "help", StringComparison.OrdinalIgnoreCase) ||
@@ -188,7 +239,7 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
 
             AiTurnExecutionResult repairTurn = await ExecuteTurnAsync(
                 request,
-                BuildAutonomousRepairPrompt(prompt.PromptText),
+                BuildAutonomousRepairPrompt(prompt.PromptText, turn.ResponseText, attempt + 1),
                 cancellationToken);
             sessionReset |= repairTurn.SessionReset;
             turn = repairTurn with { SessionReset = sessionReset };
@@ -279,22 +330,24 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         string latestSource,
         AiTurnExecutionResult turn)
     {
-        if (HasDocumentChanged(originalSource, latestSource))
-        {
-            return false;
-        }
-
         if (turn.ResponseText.StartsWith("AI request failed:", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        if (LooksLikeStuckResponse(turn.ResponseText))
+        bool likelyEditPrompt = AiPromptIntentClassifier.IsLikelyEditPrompt(promptText);
+        bool documentChanged = HasDocumentChanged(originalSource, latestSource);
+        if (likelyEditPrompt && LooksLikeIncompleteEditResponse(turn.ResponseText))
         {
             return true;
         }
 
-        return !turn.Succeeded && AiPromptIntentClassifier.IsLikelyEditPrompt(promptText);
+        if (!documentChanged && LooksLikeStuckResponse(turn.ResponseText))
+        {
+            return true;
+        }
+
+        return !turn.Succeeded && likelyEditPrompt;
     }
 
     private static bool LooksLikeStuckResponse(string responseText)
@@ -307,7 +360,129 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
 
         return normalized.EndsWith("?", StringComparison.Ordinal) ||
                ContainsAnyPhrase(normalized, StuckResponsePhrases) ||
+               LooksLikeRejectedEditResponse(normalized) ||
                LooksLikeMultipleChoiceResponse(normalized);
+    }
+
+    private static bool LooksLikeRejectedEditResponse(string normalizedResponse)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedResponse))
+        {
+            return false;
+        }
+
+        if (normalizedResponse.Contains("editor rejected", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("rejected by the editor", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("rejected my update", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("requested change in this canvas", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("tried to replace", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("tried to patch", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("retry by patching", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("retry by replacing", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("not runnable", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("need the active request to be editable", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        bool mentionsRuntimeRejectingScript =
+            normalizedResponse.Contains("runtime is currently rejecting the script", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("currently rejecting the script", StringComparison.Ordinal);
+        bool mentionsFailedActiveDocumentUpdate =
+            normalizedResponse.Contains("did not successfully modify the active document", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("did not modify the active document", StringComparison.Ordinal);
+        bool mentionsAttemptedUpdate =
+            normalizedResponse.Contains("attempted to update the active request", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("attempted to update the request", StringComparison.Ordinal);
+        bool mentionsStillTargetsPreviousRequest =
+            normalizedResponse.Contains("still targets", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("still points to", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("still not updated", StringComparison.Ordinal);
+        if (mentionsRuntimeRejectingScript ||
+            mentionsFailedActiveDocumentUpdate ||
+            (mentionsAttemptedUpdate && mentionsStillTargetsPreviousRequest))
+        {
+            return true;
+        }
+
+        bool mentionsRejectedParse =
+            normalizedResponse.Contains("reported an invalid", StringComparison.Ordinal) &&
+            normalizedResponse.Contains("parse", StringComparison.Ordinal);
+        if (mentionsRejectedParse)
+        {
+            return true;
+        }
+
+        bool mentionsUnchangedDocument =
+            normalizedResponse.Contains("active document is still unchanged", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("document is still unchanged", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("remains unchanged", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("still unchanged", StringComparison.Ordinal);
+        bool mentionsRetry =
+            normalizedResponse.Contains("retry", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("try again", StringComparison.Ordinal);
+        return mentionsUnchangedDocument && mentionsRetry;
+    }
+
+    private static bool LooksLikeIncompleteEditResponse(string responseText)
+    {
+        string normalizedResponse = NormalizeSearchText(responseText);
+        if (string.IsNullOrWhiteSpace(normalizedResponse))
+        {
+            return false;
+        }
+
+        if (LooksLikeRejectedEditResponse(normalizedResponse))
+        {
+            return true;
+        }
+
+        if (normalizedResponse.Contains("currently does not run", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("does not run in the editor", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("still needs a small fix", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("still needs a fix", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("needs a small fix", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("script still needs", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("handle the actual returned json shape", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("different from { data:", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("does not contain a definition for 'data'", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("keep repairing autonomously", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("the next step is", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("before scaling", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("if you allow one action", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("safe version", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("too brittle", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("replace the entire active document", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        bool offersFollowUpRepair =
+            normalizedResponse.Contains("if you want, i can", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("i can fix it next", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("i can fix this next", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("i can adjust it next", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("i can retry", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("if you want me to keep repairing autonomously", StringComparison.Ordinal);
+        bool mentionsFurtherRepairWork =
+            normalizedResponse.Contains("fix it next", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("adjusting", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("safe probe", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("response json structure", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("actual returned json shape", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("small fix", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("the next step is", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("before scaling", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("currently rejecting the script", StringComparison.Ordinal) ||
+            normalizedResponse.Contains("safe version", StringComparison.Ordinal);
+        return offersFollowUpRepair && mentionsFurtherRepairWork;
+    }
+
+    private static bool LooksLikeForcedReplacementNeededResponse(string responseText)
+    {
+        string normalizedResponse = NormalizeSearchText(responseText);
+        return !string.IsNullOrWhiteSpace(normalizedResponse) &&
+               ContainsAnyPhrase(normalizedResponse, ForcedReplacementResponsePhrases);
     }
 
     private static bool LooksLikeMultipleChoiceResponse(string normalizedResponse)
@@ -343,6 +518,14 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             .Replace('‘', '\'')
             .Replace('“', '"')
             .Replace('”', '"')
+            .Replace('\u2019', '\'')
+            .Replace('\u2018', '\'')
+            .Replace('\u201C', '"')
+            .Replace('\u201D', '"')
+            .Replace('\u2013', '-')
+            .Replace('\u2014', '-')
+            .Replace('\u2264', '<')
+            .Replace('\u2265', '>')
             .Trim()
             .ToLowerInvariant();
     }
@@ -368,12 +551,16 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             return RemoveConversationBlocks(sourceText);
         }
 
-        HashSet<int> keptLineNumbers = new([keptPrompt.LineNumber, .. keptPrompt.BlockLines.Select(static line => line.LineNumber)]);
+        HashSet<int> keptLineNumbers = new(
+        [
+            .. keptPrompt.PromptLines.Select(static line => line.LineNumber),
+            .. keptPrompt.BlockLines.Select(static line => line.LineNumber)
+        ]);
         List<string> lines = document.Lines
             .Where(line =>
-                line.Kind is not AiInlineConversationLineKind.Prompt
+                (line.Kind is not AiInlineConversationLineKind.Prompt
                 and not AiInlineConversationLineKind.Response
-                and not AiInlineConversationLineKind.StaleResponse
+                and not AiInlineConversationLineKind.StaleResponse)
                 || keptLineNumbers.Contains(line.LineNumber))
             .Select(static line => line.Text)
             .ToList();
@@ -384,8 +571,8 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
     {
         AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
         List<string> lines = document.Lines.Select(static line => line.Text).ToList();
-        int promptIndex = FindPromptIndex(document, promptLineNumber);
-        if (promptIndex < 0)
+        AiInlineConversationPrompt? prompt = FindPrompt(document, promptLineNumber);
+        if (prompt is null)
         {
             int lastResponseIndex = FindLastResponseIndex(document);
             if (lastResponseIndex >= 0)
@@ -396,7 +583,14 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             return InsertFreshPromptNearLine(sourceText, promptLineNumber, kind);
         }
 
-        int insertIndex = promptIndex + 1;
+        int promptIndex = FindPromptIndex(document, prompt.LineNumber);
+        int renderedPromptLineCount = GetRenderedPromptLineCount(prompt);
+        if (renderedPromptLineCount == 0)
+        {
+            renderedPromptLineCount = prompt.PromptLines.Count;
+        }
+
+        int insertIndex = promptIndex + renderedPromptLineCount;
         while (insertIndex < document.Lines.Count &&
                document.Lines[insertIndex].Kind is AiInlineConversationLineKind.Response or AiInlineConversationLineKind.StaleResponse)
         {
@@ -484,6 +678,16 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         return -1;
     }
 
+    private static AiInlineConversationPrompt? FindPrompt(AiInlineConversationDocument document, int promptLineNumber)
+    {
+        if (promptLineNumber < 1 || document.Prompts.Count == 0)
+        {
+            return null;
+        }
+
+        return document.FindLatestPrompt(promptLineNumber);
+    }
+
     private static int FindLastResponseIndex(AiInlineConversationDocument document)
     {
         for (int index = document.Lines.Count - 1; index >= 0; index--)
@@ -502,13 +706,31 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         return (value ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
-    private static string BuildObjective(AiInlineConversationRequest request)
+    private static string NormalizePromptCommandText(string? value)
     {
-        return $"Help with the active ForRest request document '{request.DocumentTitle}'. Use the local docs and active document tools before guessing. Active document tools expose the request script without inline chat markers. Keep clarification short and, once a reasonable default exists, prefer editing over more back-and-forth. If the user asks to iterate, enumerate, batch, or stash values, default to modifying the current request in place. If a requested field name appears misspelled but the closest valid field is obvious, choose the closest valid field and state that assumption after the edit. If a targeted patch fails, prefer replacing the full request instead of asking the user for confirmation. If an edit is rejected or leaves the document unchanged, read the active document again, use the returned diagnostics, and retry internally instead of surfacing the failed attempt.";
+        string[] segments = (value ?? string.Empty)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(" ", segments);
     }
 
-    private static string BuildAutonomousRepairPrompt(string originalPrompt)
+    private static string BuildObjective(AiInlineConversationRequest request)
     {
+        return $"Help with the active ForRest request document '{request.DocumentTitle}'. Use the local docs and active document tools before guessing. Active document tools expose the request script without inline chat markers. Keep clarification short and, once a reasonable default exists, prefer editing over more back-and-forth. If the user asks to iterate, enumerate, batch, or stash values, default to modifying the current request in place. If a requested field name appears misspelled but the closest valid field is obvious, choose the closest valid field and state that assumption after the edit. If a targeted patch fails, prefer replacing the full request instead of asking the user for confirmation. If an edit is rejected or leaves the document unchanged, read the active document again, use the returned diagnostics, and retry internally instead of surfacing the failed attempt. Prefer dynamic `response.someField` access for object bodies and iterate `response` directly for array-root bodies. Use `response.json()` only for explicit JsonNode operations like indexers or `AsArray()`, not dot-member access.";
+    }
+
+    private static string BuildAutonomousRepairPrompt(string originalPrompt, string latestResponseText, int attemptNumber)
+    {
+        bool forceFullReplace = attemptNumber > 1 || LooksLikeForcedReplacementNeededResponse(latestResponseText);
+        string normalizedLatestResponse = NormalizeLineEndings(latestResponseText).Trim();
+        string latestFailureSection = string.IsNullOrWhiteSpace(normalizedLatestResponse)
+            ? string.Empty
+            : $"Latest failed reply (do not repeat it back to the user):{Environment.NewLine}{normalizedLatestResponse}{Environment.NewLine}{Environment.NewLine}";
+        string replacementDirective = forceFullReplace
+            ? "Your next document mutation must be a full `replace_active_document` call with the final working request." + Environment.NewLine +
+              "Do not propose a partial logging probe, a 'safe' intermediate version, or an extra permission step." + Environment.NewLine +
+              "Do not tell the user the document is too brittle to patch; replace it now with the corrected request." + Environment.NewLine
+            : string.Empty;
+
         return
             $"""
             Your previous turn did not leave the active ForRest request updated.
@@ -517,11 +739,15 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             Read the active document again, inspect the latest diagnostics, use local docs if needed, and apply a valid edit now.
             If the user asked to iterate, enumerate, batch, or stash values, transform the current request in place instead of asking whether to replace it or create another request.
             If a requested field name is slightly wrong but the closest valid field is obvious, choose the closest valid field and note the assumption after the edit.
-            If a full rewrite is rejected, reduce the change, fix the syntax, and retry with a valid document.
+            Prefer `response.someField` or `response["Some Field"]` for JSON object members.
+            When the response body root is an array, iterate `response` directly or use `response[index]`.
+            `response.json()` returns a raw JsonNode; use it only with explicit indexers or `AsArray()`, not dot-member access.
+            {replacementDirective}If a full rewrite is rejected, reduce the change, fix the syntax, and retry with a valid document.
+            If a partial edit leaves the request still broken or still needing one more fix, keep repairing it now instead of telling the user what you would fix next.
             Prefer a smaller valid improvement over an explanatory refusal or plan.
             After the document has been updated, reply briefly with what you changed.
 
-            Original user request: {originalPrompt}
+            {latestFailureSection}Original user request: {originalPrompt}
             """;
     }
 
@@ -564,9 +790,75 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             [
                 "Supported prompt commands:",
                 "- `reset` clears inline AI prompt and response history and reopens a fresh prompt.",
+                "- `clear responses` removes inline AI replies and keeps the prompt lines.",
+                "- `collapse` keeps only the latest inline AI exchange and reopens a fresh prompt.",
                 "- `help` shows this command list.",
                 "- `commands` is an alias for `help`.",
             ]);
+    }
+
+    private static ConversationUpdate ClearResponsesAndReopenPrompt(string sourceText, AiInlineConversationPrompt commandPrompt)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        HashSet<int> removedPromptLineNumbers = new(commandPrompt.PromptLines.Select(static line => line.LineNumber));
+        List<string> lines = document.Lines
+            .Where(line =>
+                (line.Kind is not AiInlineConversationLineKind.Response
+                and not AiInlineConversationLineKind.StaleResponse) &&
+                !removedPromptLineNumbers.Contains(line.LineNumber))
+            .Select(static line => line.Text)
+            .ToList();
+
+        int insertIndex = document.Lines
+            .Take(Math.Max(0, commandPrompt.LineNumber - 1))
+            .Count(static line => line.Kind is not AiInlineConversationLineKind.Response
+                and not AiInlineConversationLineKind.StaleResponse);
+
+        return InsertFreshPromptAtIndex(document, lines, insertIndex, AiInlineConversationUpdateKind.ResponseOnly);
+    }
+
+    private static ConversationUpdate CollapseConversationHistory(string sourceText, AiInlineConversationPrompt commandPrompt)
+    {
+        AiInlineConversationDocument document = AiInlineConversationParser.Parse(sourceText);
+        AiInlineConversationPrompt? keptPrompt = document.Prompts
+            .Where(prompt => prompt.LineNumber < commandPrompt.LineNumber)
+            .LastOrDefault();
+        if (keptPrompt is null)
+        {
+            string cleanedSource = RemoveConversationBlocks(sourceText);
+            return InsertFreshPromptNearOriginalConversation(
+                cleanedSource,
+                sourceText,
+                commandPrompt.LineNumber,
+                AiInlineConversationUpdateKind.ResponseOnly);
+        }
+
+        HashSet<int> keptConversationLineNumbers = new(
+        [
+            .. keptPrompt.PromptLines.Select(static line => line.LineNumber),
+            .. keptPrompt.BlockLines
+                .Where(static line => line.Kind is AiInlineConversationLineKind.Response or AiInlineConversationLineKind.StaleResponse)
+                .Select(static line => line.LineNumber)
+        ]);
+        List<string> lines = document.Lines
+            .Where(line =>
+                (line.Kind is not AiInlineConversationLineKind.Prompt
+                and not AiInlineConversationLineKind.Response
+                and not AiInlineConversationLineKind.StaleResponse)
+                || keptConversationLineNumbers.Contains(line.LineNumber))
+            .Select(static line => line.Text)
+            .ToList();
+        string collapsedSource = JoinLines(lines, document.LineEnding);
+
+        return InsertFreshPromptAfterConversation(
+            collapsedSource,
+            keptPrompt.LineNumber,
+            AiInlineConversationUpdateKind.ResponseOnly);
+    }
+
+    private static int GetRenderedPromptLineCount(AiInlineConversationPrompt prompt)
+    {
+        return prompt.GetRenderedPromptLines().Count;
     }
 
     private readonly record struct ConversationUpdate(
