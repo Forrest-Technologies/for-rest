@@ -119,28 +119,55 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
 
     private static AiInlineConversationResult? TryHandlePromptCommand(string sourceText, AiInlineConversationPrompt prompt)
     {
-        if (!string.Equals(prompt.PromptText.Trim(), "reset", StringComparison.OrdinalIgnoreCase))
+        string commandText = prompt.PromptText.Trim();
+        if (string.Equals(commandText, "reset", StringComparison.OrdinalIgnoreCase))
         {
-            return null;
+            string cleanedSource = RemoveConversationBlocks(sourceText);
+            ConversationUpdate updatedResetDocument = InsertFreshPromptNearOriginalConversation(
+                cleanedSource,
+                sourceText,
+                prompt.LineNumber,
+                AiInlineConversationUpdateKind.DocumentChanged);
+
+            return new(
+                Handled: true,
+                Succeeded: true,
+                UpdatedText: updatedResetDocument.Text,
+                StatusText: "AI history reset.",
+                DebugText: BuildCommandDebugText(prompt, "reset"),
+                PromptLineNumber: updatedResetDocument.SuggestedCursorLineNumber,
+                UpdateKind: updatedResetDocument.Kind,
+                SuggestedCursorLineNumber: updatedResetDocument.SuggestedCursorLineNumber,
+                SuggestedCursorColumn: updatedResetDocument.SuggestedCursorColumn);
         }
 
-        string cleanedSource = RemoveConversationBlocks(sourceText);
-        ConversationUpdate updatedDocument = InsertFreshPromptNearOriginalConversation(
-            cleanedSource,
-            sourceText,
-            prompt.LineNumber,
-            AiInlineConversationUpdateKind.DocumentChanged);
+        if (string.Equals(commandText, "help", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(commandText, "commands", StringComparison.OrdinalIgnoreCase))
+        {
+            string withResponse = AiInlineConversationFormatter.ApplyResponse(
+                sourceText,
+                prompt.LineNumber,
+                BuildPromptCommandHelpText());
+            string latestOnly = KeepOnlyPromptBlock(withResponse, prompt.LineNumber);
+            ConversationUpdate updatedHelpDocument = InsertFreshPromptAfterConversation(
+                latestOnly,
+                prompt.LineNumber,
+                AiInlineConversationUpdateKind.ResponseOnly);
 
-        return new(
-            Handled: true,
-            Succeeded: true,
-            UpdatedText: updatedDocument.Text,
-            StatusText: "AI history reset.",
-            DebugText: BuildCommandDebugText(prompt, "reset"),
-            PromptLineNumber: updatedDocument.SuggestedCursorLineNumber,
-            UpdateKind: updatedDocument.Kind,
-            SuggestedCursorLineNumber: updatedDocument.SuggestedCursorLineNumber,
-            SuggestedCursorColumn: updatedDocument.SuggestedCursorColumn);
+            return new(
+                Handled: true,
+                Succeeded: true,
+                UpdatedText: updatedHelpDocument.Text,
+                StatusText: "Listed AI prompt commands.",
+                DebugText: BuildCommandDebugText(prompt, "help"),
+                ResponseText: BuildPromptCommandHelpText(),
+                PromptLineNumber: prompt.LineNumber,
+                UpdateKind: updatedHelpDocument.Kind,
+                SuggestedCursorLineNumber: updatedHelpDocument.SuggestedCursorLineNumber,
+                SuggestedCursorColumn: updatedHelpDocument.SuggestedCursorColumn);
+        }
+
+        return null;
     }
 
     private async Task<AiTurnExecutionResult> ExecuteTurnWithAutonomousRecoveryAsync(
@@ -527,6 +554,18 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
                 $"Command: {commandName}",
                 "Succeeded: True",
                 "Session reset: False",
+            ]);
+    }
+
+    private static string BuildPromptCommandHelpText()
+    {
+        return string.Join(
+            "\n",
+            [
+                "Supported prompt commands:",
+                "- `reset` clears inline AI prompt and response history and reopens a fresh prompt.",
+                "- `help` shows this command list.",
+                "- `commands` is an alias for `help`.",
             ]);
     }
 

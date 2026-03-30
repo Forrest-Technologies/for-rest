@@ -68,6 +68,8 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 tests = testsApi,
                 console = consoleApi,
                 time = new TimeApi(),
+                strings = new StringsApi(),
+                convert = new ConvertApi(),
                 json = new JsonApi(),
                 encoding = new EncodingApi(),
                 crypto = new CryptoApi(),

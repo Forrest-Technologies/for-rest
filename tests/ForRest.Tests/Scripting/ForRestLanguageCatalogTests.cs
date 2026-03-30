@@ -30,6 +30,9 @@ public sealed class ForRestLanguageCatalogTests
         Assert.IsTrue(entries.Any(static entry => entry.Key == "batch-stash-loop"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "workspace-execute"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "logic-aliases"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "strings-replace"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "convert-to-bool"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "time-parse"));
         Assert.AreEqual(entries.Count, entries.Select(static entry => entry.Key).Distinct(StringComparer.Ordinal).Count());
     }
 
@@ -48,6 +51,9 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(json, "\"label\":\"workspace.execute()\"");
         StringAssert.Contains(json, "\"label\":\"expect ... regex\"");
         StringAssert.Contains(json, "\"label\":\"[0..9]\"");
+        StringAssert.Contains(json, "\"label\":\"strings.Replace / strings.Split\"");
+        StringAssert.Contains(json, "\"label\":\"convert.ToBool / convert.ToInt\"");
+        StringAssert.Contains(json, "\"label\":\"time.Parse / time.Format\"");
         StringAssert.Contains(json, "\"kind\":\"Method\"");
         StringAssert.Contains(json, "\"example\":\"let attempts = [0..2]");
     }
@@ -66,6 +72,9 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(markdown, "loop + stash pattern");
         StringAssert.Contains(markdown, "oauth_integrated_windows");
         StringAssert.Contains(markdown, "workspace.execute(\"Request Name\")");
+        StringAssert.Contains(markdown, "strings.Replace / strings.Split");
+        StringAssert.Contains(markdown, "convert.ToBool / convert.ToInt");
+        StringAssert.Contains(markdown, "time.Parse / time.Format");
         StringAssert.Contains(markdown, "`switch` / `case` / `default` are not currently part of the flow compiler");
     }
 
@@ -83,6 +92,9 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(prompt, "workspace.execute()");
         StringAssert.Contains(prompt, "stash");
         StringAssert.Contains(prompt, "max_send_iterations");
+        StringAssert.Contains(prompt, "strings.Replace / strings.Split");
+        StringAssert.Contains(prompt, "convert.ToBool / convert.ToInt");
+        StringAssert.Contains(prompt, "time.Parse / time.Format");
         StringAssert.Contains(prompt, "loop + stash pattern");
         StringAssert.Contains(prompt, "If a requested feature is not listed, treat it as unsupported");
     }

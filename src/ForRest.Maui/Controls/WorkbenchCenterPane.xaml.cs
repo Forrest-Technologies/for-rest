@@ -57,6 +57,16 @@ public partial class WorkbenchCenterPane : ContentView
 		await SendActiveDocumentAsync();
 	}
 
+	private async void OnEditorUndoRequested(object? sender, EventArgs e)
+	{
+		await UndoActiveDocumentAsync();
+	}
+
+	private async void OnEditorRedoRequested(object? sender, EventArgs e)
+	{
+		await RedoActiveDocumentAsync();
+	}
+
 	private void OnEditorCursorPositionChanged(object? sender, MonacoCursorPositionChangedEventArgs e)
 	{
 		ViewModel.UpdateActiveEditorCursor(e.LineNumber, e.Column);
@@ -70,6 +80,16 @@ public partial class WorkbenchCenterPane : ContentView
 	private async void OnCopyClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyActiveEditorAsync();
+	}
+
+	private async void OnUndoClicked(object? sender, EventArgs e)
+	{
+		await UndoActiveDocumentAsync();
+	}
+
+	private async void OnRedoClicked(object? sender, EventArgs e)
+	{
+		await RedoActiveDocumentAsync();
 	}
 
 	private void OnToggleLanguageHelpClicked(object? sender, EventArgs e)
@@ -155,6 +175,8 @@ public partial class WorkbenchCenterPane : ContentView
 		if (EditorHost.Content is MonacoEditorSurface monacoEditor)
 		{
 			monacoEditor.SendRequested -= OnEditorSendRequested;
+			monacoEditor.UndoRequested -= OnEditorUndoRequested;
+			monacoEditor.RedoRequested -= OnEditorRedoRequested;
 			monacoEditor.CursorPositionChanged -= OnEditorCursorPositionChanged;
 		}
 
@@ -174,6 +196,18 @@ public partial class WorkbenchCenterPane : ContentView
 		await FlushActiveEditorAsync();
 		await ViewModel.SendAsync();
 		await ApplyPendingCursorRequestAsync();
+	}
+
+	public async Task UndoActiveDocumentAsync()
+	{
+		await FlushActiveEditorAsync();
+		ViewModel.Undo();
+	}
+
+	public async Task RedoActiveDocumentAsync()
+	{
+		await FlushActiveEditorAsync();
+		ViewModel.Redo();
 	}
 
 	private async Task ApplyPendingCursorRequestAsync()
@@ -205,6 +239,8 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.SetBinding(MonacoEditorSurface.RequestedCursorColumnProperty, nameof(MainPageViewModel.ActiveEditorRequestedCursorColumn));
 		editor.SetBinding(MonacoEditorSurface.RequestedCursorVersionProperty, nameof(MainPageViewModel.ActiveEditorRequestedCursorVersion));
 		editor.SendRequested += OnEditorSendRequested;
+		editor.UndoRequested += OnEditorUndoRequested;
+		editor.RedoRequested += OnEditorRedoRequested;
 		editor.CursorPositionChanged += OnEditorCursorPositionChanged;
 		return editor;
 	}

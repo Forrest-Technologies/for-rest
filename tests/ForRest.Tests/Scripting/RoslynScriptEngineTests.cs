@@ -264,6 +264,45 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_supports_string_convert_and_time_helpers()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                var cleaned = strings.Trim("  Alpha Beta  ");
+                var replaced = strings.Replace(cleaned, "beta", "Gamma", true);
+                var pieces = strings.Split("one,,two", ",", true);
+                var stamp = time.Parse("2026-03-29T10:15:00Z");
+                var nextDay = time.AddDays(stamp, 1);
+                var unix = time.UnixSeconds(stamp);
+
+                tests.Equal("Alpha Gamma", replaced, "strings can trim and replace");
+                tests.Equal("one|two", strings.Join("|", pieces), "strings can split and join");
+                tests.Equal(true, convert.ToBool("yes"), "convert can coerce booleans");
+                tests.Equal(42, convert.ToInt("42"), "convert can coerce ints");
+                tests.Equal("42.5", convert.ToString(convert.ToDecimal("42.5")), "convert can round-trip decimals");
+                tests.Equal("2026-03-30", time.Format(nextDay, "yyyy-MM-dd"), "time can add and format");
+                tests.Equal("2026-03-29T10:15:00.0000000+00:00", time.Format(time.FromUnixSeconds(unix)), "time can round-trip unix seconds");
+                variables.Set("unix", convert.ToString(unix));
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
+        Assert.AreEqual("1774779300", result.RuntimeVariables.Single(static item => item.Key == "unix").Value);
+    }
+
+    [TestMethod]
     public async Task Run_supports_request_send_and_updates_global_response()
     {
         var callbackCount = 0;

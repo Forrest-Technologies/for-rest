@@ -96,8 +96,14 @@ Inline AI also supports local shorthand commands that run without sending a turn
 Currently supported:
 
 - `## reset`
+- `## help`
+- `## commands`
 
 `## reset` clears all inline AI prompt and response lines from the active request document, then reopens a fresh blank `## ` prompt near the current working area so the user can start a new inline thread with no carried history.
+
+`## help` lists the supported local prompt commands directly in the inline AI pane, then opens a fresh blank `## ` prompt.
+
+`## commands` is an alias for `## help`.
 
 Current editor behavior:
 
@@ -254,6 +260,8 @@ Behavior to keep documented:
 
 The runtime currently includes these helper surfaces:
 
+- `strings`
+- `convert`
 - `regex`
 - `encoding`
 - `crypto`
@@ -265,6 +273,9 @@ The runtime currently includes these helper surfaces:
 
 Common patterns they already support:
 
+- trimming, replacing, splitting, and joining request/runtime text
+- coercing string or JSON values into booleans, ints, decimals, and stable strings
+- parsing and formatting UTC timestamps plus Unix time round-trips
 - token scraping from HTML or JSON fragments
 - replaying server-issued values into later requests
 - chained login / probe / follow-up sends

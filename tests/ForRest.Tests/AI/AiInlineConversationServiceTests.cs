@@ -165,6 +165,53 @@ public sealed class AiInlineConversationServiceTests
     }
 
     [TestMethod]
+    public async Task TryHandleAsync_handles_help_command_without_invoking_ai_turn_executor()
+    {
+        StubTurnExecutor executor = new("Should not run.");
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+        string source = "name \"demo\"\n## help\nmethod GET";
+        StubActiveDocumentHost host = new(source);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Handled);
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual("Listed AI prompt commands.", result.StatusText);
+        StringAssert.Contains(result.DebugText, "Command: help");
+        StringAssert.Contains(result.ResponseText, "Supported prompt commands:");
+        StringAssert.Contains(result.ResponseText, "`reset`");
+        StringAssert.Contains(result.ResponseText, "`help`");
+        StringAssert.Contains(result.ResponseText, "`commands`");
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## help",
+                "#> Supported prompt commands:",
+                "#> - `reset` clears inline AI prompt and response history and reopens a fresh prompt.",
+                "#> - `help` shows this command list.",
+                "#> - `commands` is an alias for `help`.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
+        Assert.AreEqual(8, result.SuggestedCursorLineNumber);
+        Assert.AreEqual(4, result.SuggestedCursorColumn);
+    }
+
+    [TestMethod]
     public async Task TryHandleAsync_cleans_chat_from_document_after_agent_applies_edits()
     {
         StubActiveDocumentHost host = new("name \"demo\"\n## tighten this request");

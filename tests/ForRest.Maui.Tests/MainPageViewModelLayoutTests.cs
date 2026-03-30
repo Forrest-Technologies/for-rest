@@ -258,6 +258,112 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public void ActiveEditorText_supports_undo_and_redo_for_request_document()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		string originalText = viewModel.ActiveEditorText;
+		string updatedText = originalText + "\n# request undo";
+
+		Assert.IsFalse(viewModel.CanUndo);
+		Assert.IsFalse(viewModel.CanRedo);
+
+		viewModel.ActiveEditorText = updatedText;
+
+		Assert.AreEqual(updatedText, viewModel.ActiveEditorText);
+		Assert.IsTrue(viewModel.CanUndo);
+		Assert.IsFalse(viewModel.CanRedo);
+
+		viewModel.Undo();
+
+		Assert.AreEqual(originalText, viewModel.ActiveEditorText);
+		Assert.IsFalse(viewModel.CanUndo);
+		Assert.IsTrue(viewModel.CanRedo);
+
+		viewModel.Redo();
+
+		Assert.AreEqual(updatedText, viewModel.ActiveEditorText);
+		Assert.IsTrue(viewModel.CanUndo);
+		Assert.IsFalse(viewModel.CanRedo);
+	}
+
+	[TestMethod]
+	public void ActiveEditorText_supports_undo_and_redo_for_settings_document()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		static string NormalizeLineEndings(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		string originalText = NormalizeLineEndings(viewModel.ActiveEditorText);
+		string updatedText = originalText
+			.Replace("azure = true", "azure = false", StringComparison.Ordinal)
+			.Replace("dark = false", "dark = true", StringComparison.Ordinal);
+
+		viewModel.ActiveEditorText = updatedText;
+
+		Assert.AreEqual(updatedText, NormalizeLineEndings(viewModel.ActiveEditorText));
+		Assert.IsTrue(viewModel.CanUndo);
+		Assert.IsFalse(viewModel.CanRedo);
+
+		viewModel.Undo();
+
+		Assert.AreEqual(originalText, NormalizeLineEndings(viewModel.ActiveEditorText));
+		Assert.IsFalse(viewModel.CanUndo);
+		Assert.IsTrue(viewModel.CanRedo);
+
+		viewModel.Redo();
+
+		Assert.AreEqual(updatedText, NormalizeLineEndings(viewModel.ActiveEditorText));
+		Assert.IsTrue(viewModel.CanUndo);
+		Assert.IsFalse(viewModel.CanRedo);
+	}
+
+	[TestMethod]
+	public void Undo_and_redo_keep_request_history_scoped_per_document()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		RequestDocumentViewModel firstDocument = viewModel.OpenDocuments[0];
+		string firstOriginalText = viewModel.ActiveEditorText;
+		string firstUpdatedText = firstOriginalText + "\n# first document change";
+
+		viewModel.ActiveEditorText = firstUpdatedText;
+		viewModel.AddRequest();
+
+		RequestDocumentViewModel secondDocument = viewModel.OpenDocuments[^1];
+		string secondOriginalText = viewModel.ActiveEditorText;
+		string secondUpdatedText = secondOriginalText + "\n# second document change";
+
+		viewModel.ActiveEditorText = secondUpdatedText;
+		viewModel.Undo();
+
+		Assert.AreEqual(secondOriginalText, viewModel.ActiveEditorText);
+		Assert.IsTrue(viewModel.CanRedo);
+
+		viewModel.SelectDocument(viewModel.OpenDocuments[0]);
+
+		Assert.AreEqual(firstUpdatedText, viewModel.ActiveEditorText);
+
+		viewModel.Undo();
+
+		Assert.AreEqual(firstOriginalText, viewModel.ActiveEditorText);
+		Assert.IsTrue(viewModel.CanRedo);
+
+		viewModel.Redo();
+
+		Assert.AreEqual(firstUpdatedText, viewModel.ActiveEditorText);
+
+		viewModel.SelectDocument(viewModel.OpenDocuments[^1]);
+		viewModel.Redo();
+
+		Assert.AreEqual(secondUpdatedText, viewModel.ActiveEditorText);
+	}
+
+	[TestMethod]
 	public async Task PrepareForShutdownAsync_persists_latest_request_state()
 	{
 		using TestHarness harness = new();
@@ -387,6 +493,39 @@ public sealed class MainPageViewModelLayoutTests
 				"## "
 			},
 			viewModel.ActiveEditorText.Split('\n'));
+	}
+
+	[TestMethod]
+	public async Task SendAsync_reset_inline_ai_command_can_be_undone_and_redone()
+	{
+		using TestHarness harness = new();
+		IAiInlineConversationService aiService = new AiInlineConversationService(new ThrowingTurnExecutor());
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+		string originalText =
+			"""
+			name "demo"
+			## first task
+			#> first answer
+			method GET
+			## reset
+			""";
+
+		viewModel.ActiveEditorText = originalText;
+		viewModel.UpdateActiveEditorCursor(5, 4);
+
+		await viewModel.SendAsync();
+
+		string resetText = viewModel.ActiveEditorText;
+		Assert.IsTrue(viewModel.CanUndo);
+
+		viewModel.Undo();
+
+		Assert.AreEqual(originalText, viewModel.ActiveEditorText);
+		Assert.IsTrue(viewModel.CanRedo);
+
+		viewModel.Redo();
+
+		Assert.AreEqual(resetText, viewModel.ActiveEditorText);
 	}
 
 	[TestMethod]
@@ -727,6 +866,11 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.IsNotNull(capturedDocument);
 		Assert.AreEqual("name \"demo\"\nmethod GET\nurl \"https://example.test\"\n", capturedDocument.SourceText);
 		Assert.IsTrue(capturedDocument.Diagnostics.Any(static diagnostic => diagnostic.Line == 35 && diagnostic.Message.Contains("; expected", StringComparison.Ordinal)));
+	}
+
+	private static string NormalizeLineEndings(string value)
+	{
+		return (value ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
 	}
 
 	private sealed class TestHarness : IDisposable

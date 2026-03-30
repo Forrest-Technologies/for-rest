@@ -249,10 +249,26 @@ public partial class MainPage : ContentPage
 	private async void OnNativeKeyDown(object sender, KeyRoutedEventArgs e)
 	{
 		bool isControlPressed = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+		bool isShiftPressed = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
 		if (e.Key == VirtualKey.F5 || (e.Key == VirtualKey.Enter && isControlPressed))
 		{
 			e.Handled = true;
+			await CenterPane.FlushActiveEditorAsync();
 			await ViewModel.SendAsync();
+			return;
+		}
+
+		if (isControlPressed && e.Key == VirtualKey.Z && !isShiftPressed)
+		{
+			e.Handled = true;
+			await CenterPane.UndoActiveDocumentAsync();
+			return;
+		}
+
+		if (isControlPressed && (e.Key == VirtualKey.Y || (isShiftPressed && e.Key == VirtualKey.Z)))
+		{
+			e.Handled = true;
+			await CenterPane.RedoActiveDocumentAsync();
 		}
 	}
 #endif

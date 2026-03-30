@@ -948,6 +948,385 @@ public sealed class TimeApi
     public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
 
     public DateTimeOffset Now => DateTimeOffset.Now;
+
+    public DateTimeOffset Parse(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException("time.Parse() requires a date or timestamp value.");
+        }
+
+        if (DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset parsed))
+        {
+            return parsed;
+        }
+
+        throw new InvalidOperationException($"time.Parse() could not parse '{value}'.");
+    }
+
+    public string Format(DateTimeOffset value, string format = "O")
+    {
+        return value.ToString(string.IsNullOrWhiteSpace(format) ? "O" : format, CultureInfo.InvariantCulture);
+    }
+
+    public DateTimeOffset AddDays(DateTimeOffset value, double days)
+    {
+        return value.AddDays(days);
+    }
+
+    public DateTimeOffset AddHours(DateTimeOffset value, double hours)
+    {
+        return value.AddHours(hours);
+    }
+
+    public DateTimeOffset AddMinutes(DateTimeOffset value, double minutes)
+    {
+        return value.AddMinutes(minutes);
+    }
+
+    public DateTimeOffset AddSeconds(DateTimeOffset value, double seconds)
+    {
+        return value.AddSeconds(seconds);
+    }
+
+    public long UnixSeconds(DateTimeOffset value)
+    {
+        return value.ToUnixTimeSeconds();
+    }
+
+    public long UnixMilliseconds(DateTimeOffset value)
+    {
+        return value.ToUnixTimeMilliseconds();
+    }
+
+    public DateTimeOffset FromUnixSeconds(long value)
+    {
+        return DateTimeOffset.FromUnixTimeSeconds(value);
+    }
+
+    public DateTimeOffset FromUnixMilliseconds(long value)
+    {
+        return DateTimeOffset.FromUnixTimeMilliseconds(value);
+    }
+}
+
+public sealed class StringsApi
+{
+    public int Length(string? value)
+    {
+        return value?.Length ?? 0;
+    }
+
+    public string Trim(string? value)
+    {
+        return value?.Trim() ?? string.Empty;
+    }
+
+    public string TrimStart(string? value)
+    {
+        return value?.TrimStart() ?? string.Empty;
+    }
+
+    public string TrimEnd(string? value)
+    {
+        return value?.TrimEnd() ?? string.Empty;
+    }
+
+    public string Upper(string? value)
+    {
+        return (value ?? string.Empty).ToUpperInvariant();
+    }
+
+    public string Lower(string? value)
+    {
+        return (value ?? string.Empty).ToLowerInvariant();
+    }
+
+    public bool Contains(string? value, string? search, bool ignoreCase = false)
+    {
+        return (value ?? string.Empty).IndexOf(search ?? string.Empty, GetComparison(ignoreCase)) >= 0;
+    }
+
+    public bool StartsWith(string? value, string? prefix, bool ignoreCase = false)
+    {
+        return (value ?? string.Empty).StartsWith(prefix ?? string.Empty, GetComparison(ignoreCase));
+    }
+
+    public bool EndsWith(string? value, string? suffix, bool ignoreCase = false)
+    {
+        return (value ?? string.Empty).EndsWith(suffix ?? string.Empty, GetComparison(ignoreCase));
+    }
+
+    public string Replace(string? value, string? oldValue, string? newValue, bool ignoreCase = false)
+    {
+        string text = value ?? string.Empty;
+        if (string.IsNullOrEmpty(oldValue))
+        {
+            return text;
+        }
+
+        string replacement = newValue ?? string.Empty;
+        if (!ignoreCase)
+        {
+            return text.Replace(oldValue, replacement, StringComparison.Ordinal);
+        }
+
+        return Regex.Replace(
+            text,
+            Regex.Escape(oldValue),
+            _ => replacement,
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    }
+
+    public string Substring(string? value, int startIndex)
+    {
+        string text = value ?? string.Empty;
+        if (text.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        int safeStartIndex = Math.Clamp(startIndex, 0, text.Length);
+        return safeStartIndex >= text.Length ? string.Empty : text[safeStartIndex..];
+    }
+
+    public string Substring(string? value, int startIndex, int length)
+    {
+        string text = value ?? string.Empty;
+        if (text.Length == 0 || length <= 0)
+        {
+            return string.Empty;
+        }
+
+        int safeStartIndex = Math.Clamp(startIndex, 0, text.Length);
+        if (safeStartIndex >= text.Length)
+        {
+            return string.Empty;
+        }
+
+        int safeLength = Math.Min(length, text.Length - safeStartIndex);
+        return safeLength <= 0 ? string.Empty : text.Substring(safeStartIndex, safeLength);
+    }
+
+    public IReadOnlyList<string> Split(string? value, string? separator, bool removeEmpty = false)
+    {
+        string text = value ?? string.Empty;
+        if (string.IsNullOrEmpty(separator))
+        {
+            return [text];
+        }
+
+        StringSplitOptions options = removeEmpty ? StringSplitOptions.RemoveEmptyEntries : StringSplitOptions.None;
+        return [.. text.Split([separator], options)];
+    }
+
+    public string Join(string? separator, IEnumerable? values)
+    {
+        if (values is null)
+        {
+            return string.Empty;
+        }
+
+        if (values is string text)
+        {
+            return text;
+        }
+
+        return string.Join(
+            separator ?? string.Empty,
+            values.Cast<object?>().Select(ConvertApi.FormatValue));
+    }
+
+    private static StringComparison GetComparison(bool ignoreCase)
+    {
+        return ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    }
+}
+
+public sealed class ConvertApi
+{
+    public string ToString(object? value, string fallback = "")
+    {
+        return value is null ? fallback ?? string.Empty : FormatValue(value);
+    }
+
+    public int ToInt(object? value, int fallback = 0)
+    {
+        object? normalizedValue = NormalizeValue(value);
+        return normalizedValue switch
+        {
+            null => fallback,
+            int intValue => intValue,
+            long longValue when longValue is >= int.MinValue and <= int.MaxValue => (int)longValue,
+            decimal decimalValue when decimalValue is >= int.MinValue and <= int.MaxValue => (int)decimal.Truncate(decimalValue),
+            double doubleValue when double.IsFinite(doubleValue) && doubleValue >= int.MinValue && doubleValue <= int.MaxValue => (int)Math.Truncate(doubleValue),
+            bool boolValue => boolValue ? 1 : 0,
+            string stringValue when int.TryParse(stringValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedIntValue) => parsedIntValue,
+            string stringValue when long.TryParse(stringValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsedLongValue) && parsedLongValue is >= int.MinValue and <= int.MaxValue => (int)parsedLongValue,
+            string stringValue when decimal.TryParse(stringValue, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal parsedDecimalValue) && parsedDecimalValue is >= int.MinValue and <= int.MaxValue => (int)decimal.Truncate(parsedDecimalValue),
+            _ => fallback,
+        };
+    }
+
+    public long ToLong(object? value, long fallback = 0)
+    {
+        object? normalizedValue = NormalizeValue(value);
+        return normalizedValue switch
+        {
+            null => fallback,
+            long longValue => longValue,
+            int intValue => intValue,
+            decimal decimalValue when decimalValue is >= long.MinValue and <= long.MaxValue => (long)decimal.Truncate(decimalValue),
+            double doubleValue when double.IsFinite(doubleValue) && doubleValue >= long.MinValue && doubleValue <= long.MaxValue => (long)Math.Truncate(doubleValue),
+            bool boolValue => boolValue ? 1L : 0L,
+            string stringValue when long.TryParse(stringValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsedLongValue) => parsedLongValue,
+            string stringValue when decimal.TryParse(stringValue, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal parsedDecimalValue) && parsedDecimalValue is >= long.MinValue and <= long.MaxValue => (long)decimal.Truncate(parsedDecimalValue),
+            _ => fallback,
+        };
+    }
+
+    public double ToDouble(object? value, double fallback = 0d)
+    {
+        object? normalizedValue = NormalizeValue(value);
+        return normalizedValue switch
+        {
+            null => fallback,
+            double doubleValue when double.IsFinite(doubleValue) => doubleValue,
+            decimal decimalValue => (double)decimalValue,
+            long longValue => longValue,
+            int intValue => intValue,
+            bool boolValue => boolValue ? 1d : 0d,
+            string stringValue when double.TryParse(stringValue, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double parsedDoubleValue) && double.IsFinite(parsedDoubleValue) => parsedDoubleValue,
+            _ => fallback,
+        };
+    }
+
+    public decimal ToDecimal(object? value, decimal fallback = 0m)
+    {
+        object? normalizedValue = NormalizeValue(value);
+        return normalizedValue switch
+        {
+            null => fallback,
+            decimal decimalValue => decimalValue,
+            int intValue => intValue,
+            long longValue => longValue,
+            double doubleValue when double.IsFinite(doubleValue) => (decimal)doubleValue,
+            bool boolValue => boolValue ? 1m : 0m,
+            string stringValue when decimal.TryParse(stringValue, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal parsedDecimalValue) => parsedDecimalValue,
+            _ => fallback,
+        };
+    }
+
+    public bool ToBool(object? value, bool fallback = false)
+    {
+        object? normalizedValue = NormalizeValue(value);
+        return normalizedValue switch
+        {
+            null => fallback,
+            bool boolValue => boolValue,
+            int intValue => intValue != 0,
+            long longValue => longValue != 0,
+            decimal decimalValue => decimalValue != 0m,
+            double doubleValue when double.IsFinite(doubleValue) => Math.Abs(doubleValue) > double.Epsilon,
+            string stringValue => TryParseBoolean(stringValue, fallback),
+            _ => fallback,
+        };
+    }
+
+    internal static string FormatValue(object? value)
+    {
+        object? normalizedValue = NormalizeValue(value);
+        return normalizedValue switch
+        {
+            null => string.Empty,
+            string stringValue => stringValue,
+            bool boolValue => boolValue ? "true" : "false",
+            DateTimeOffset dateTimeOffsetValue => dateTimeOffsetValue.ToString("O", CultureInfo.InvariantCulture),
+            DateTime dateTimeValue => dateTimeValue.ToString("O", CultureInfo.InvariantCulture),
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
+            _ => normalizedValue.ToString() ?? string.Empty,
+        };
+    }
+
+    internal static object? NormalizeValue(object? value)
+    {
+        return value switch
+        {
+            JsonValue jsonValue => UnwrapJsonValue(jsonValue),
+            JsonObject jsonObject => jsonObject.ToJsonString(),
+            JsonArray jsonArray => jsonArray.ToJsonString(),
+            _ => value,
+        };
+    }
+
+    private static bool TryParseBoolean(string value, bool fallback)
+    {
+        string normalized = value?.Trim() ?? string.Empty;
+        if (bool.TryParse(normalized, out bool parsedBoolValue))
+        {
+            return parsedBoolValue;
+        }
+
+        if (long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsedNumericValue))
+        {
+            return parsedNumericValue != 0;
+        }
+
+        if (string.Equals(normalized, "yes", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "y", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "on", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(normalized, "no", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "n", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return fallback;
+    }
+
+    private static object? UnwrapJsonValue(JsonValue value)
+    {
+        if (value.TryGetValue<string>(out string? stringValue))
+        {
+            return stringValue;
+        }
+
+        if (value.TryGetValue<bool>(out bool boolValue))
+        {
+            return boolValue;
+        }
+
+        if (value.TryGetValue<int>(out int intValue))
+        {
+            return intValue;
+        }
+
+        if (value.TryGetValue<long>(out long longValue))
+        {
+            return longValue;
+        }
+
+        if (value.TryGetValue<decimal>(out decimal decimalValue))
+        {
+            return decimalValue;
+        }
+
+        if (value.TryGetValue<double>(out double doubleValue))
+        {
+            return doubleValue;
+        }
+
+        return value.ToJsonString().Trim('"');
+    }
 }
 
 public sealed class JsonApi
@@ -1177,6 +1556,10 @@ public sealed class ScriptGlobals
     public required ConsoleApi console { get; init; }
 
     public required TimeApi time { get; init; }
+
+    public required StringsApi strings { get; init; }
+
+    public required ConvertApi convert { get; init; }
 
     public required JsonApi json { get; init; }
 

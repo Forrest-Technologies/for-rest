@@ -31,6 +31,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private const double CompactLayoutBreakpoint = 980d;
 	private const double CompactPaneMinWidth = 300d;
 	private const double CompactPaneMaxWidth = 440d;
+	private const int MaxDocumentHistoryEntries = 200;
 	private const string RequestDocumentKind = "request";
 	private const string SettingsDocumentKind = "settings";
 
@@ -53,6 +54,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private readonly IWorkbenchAiSettingsProvider _aiSettingsProvider;
 	private readonly IAiInlineConversationService _aiInlineConversationService;
 	private readonly Dictionary<Guid, RequestWorkbenchWorkspaceState> _workspaceStates = [];
+	private readonly Dictionary<string, DocumentTextHistory> _documentTextHistories = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly Guid HttpBinWorkspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 	private static readonly Guid JsonPlaceholderWorkspaceId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
@@ -116,6 +118,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private bool _suppressSettingsAutosave;
 	private bool _suppressRequestAutosave;
 	private bool _suppressDocumentSynchronization;
+	private bool _suppressDocumentHistory;
 	private bool _isInitialized;
 	private bool _isShuttingDown;
 	private bool _isSending;
@@ -432,6 +435,7 @@ public sealed class MainPageViewModel : ObservableObject
 				OnPropertyChanged(nameof(ActiveDocumentSummary));
 				OnPropertyChanged(nameof(CanMoveRequestUp));
 				OnPropertyChanged(nameof(CanMoveRequestDown));
+				RefreshUndoRedoState();
 			}
 		}
 	}
@@ -569,6 +573,8 @@ public sealed class MainPageViewModel : ObservableObject
 		get => _activeEditorText;
 		set
 		{
+			string previousValue = _activeEditorText;
+
 			if (IsActiveSettingsEditor &&
 			    string.IsNullOrWhiteSpace(value) &&
 			    !string.IsNullOrWhiteSpace(_themeConfigText))
@@ -585,6 +591,7 @@ public sealed class MainPageViewModel : ObservableObject
 			if (IsActiveSettingsEditor)
 			{
 				_themeConfigText = value;
+				ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
 				if (!_suppressSettingsAutosave)
 				{
 					if (_settingsTomlDocumentService.CanAutoSave(_themeConfigText))
@@ -599,6 +606,8 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				ApplyRequestEditorChange(value);
 			}
+
+			RecordActiveDocumentHistoryChange(previousValue);
 		}
 	}
 
@@ -881,12 +890,18 @@ public sealed class MainPageViewModel : ObservableObject
 			if (SetProperty(ref _isSending, value))
 			{
 				OnPropertyChanged(nameof(CanSend));
+				OnPropertyChanged(nameof(CanUndo));
+				OnPropertyChanged(nameof(CanRedo));
 				OnPropertyChanged(nameof(SendButtonText));
 			}
 		}
 	}
 
 	public bool CanSend => !IsSending && IsActiveRequestEditor && _canExecuteRequests;
+
+	public bool CanUndo => !IsSending && TryGetActiveDocumentHistory(out _, out DocumentTextHistory? history) && history is not null && history.CanUndo;
+
+	public bool CanRedo => !IsSending && TryGetActiveDocumentHistory(out _, out DocumentTextHistory? history) && history is not null && history.CanRedo;
 
 	public string SendButtonText => IsSending ? string.Empty : "\u25B6";
 
@@ -1465,6 +1480,7 @@ public sealed class MainPageViewModel : ObservableObject
 		CaptureActiveRequestIntoWorkspaceState();
 		RequestWorkbenchWorkspaceState currentWorkspace = GetSelectedWorkspaceState() ?? workspace;
 		RequestWorkbenchWorkspaceState renamedWorkspace = RenameWorkspace(currentWorkspace, normalizedName);
+		RekeyWorkspaceDocumentHistory(currentWorkspace, renamedWorkspace);
 		_workspaceStates[renamedWorkspace.Id] = renamedWorkspace;
 		ApplyWorkspaceSelection(renamedWorkspace.Id);
 		if (_isInitialized)
@@ -1523,6 +1539,7 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		int currentIndex = GetSelectedWorkspaceIndex();
+		ClearWorkspaceDocumentHistory(workspace);
 		_workspaceStates.Remove(workspace.Id);
 
 		WorkspaceItemViewModel? workspaceItem = Workspaces.FirstOrDefault(item => item.Id == workspace.Id);
@@ -1566,6 +1583,8 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			return;
 		}
+
+		ClearDocumentHistory(BuildRequestHistoryKey(workspace.Id, workspace.Documents[currentIndex].Location));
 
 		List<RequestWorkbenchDocumentState> remainingDocuments = [.. workspace.Documents];
 		remainingDocuments.RemoveAt(currentIndex);
@@ -1685,6 +1704,54 @@ public sealed class MainPageViewModel : ObservableObject
 
 		await Clipboard.Default.SetTextAsync(content);
 		ExecutionStatus = "Copied current editor text.";
+	}
+
+	public void Undo()
+	{
+		if (IsSending)
+		{
+			return;
+		}
+
+		if (!TryGetActiveDocumentHistory(out _, out DocumentTextHistory? history) || history is null)
+		{
+			RefreshUndoRedoState();
+			return;
+		}
+
+		string currentText = GetActiveDocumentTextSnapshot();
+		if (!history.TryUndo(currentText, out string previousText))
+		{
+			RefreshUndoRedoState();
+			return;
+		}
+
+		ApplyHistoryDocumentText(previousText);
+		RefreshUndoRedoState();
+	}
+
+	public void Redo()
+	{
+		if (IsSending)
+		{
+			return;
+		}
+
+		if (!TryGetActiveDocumentHistory(out _, out DocumentTextHistory? history) || history is null)
+		{
+			RefreshUndoRedoState();
+			return;
+		}
+
+		string currentText = GetActiveDocumentTextSnapshot();
+		if (!history.TryRedo(currentText, out string nextText))
+		{
+			RefreshUndoRedoState();
+			return;
+		}
+
+		ApplyHistoryDocumentText(nextText);
+		RefreshUndoRedoState();
 	}
 
 	public void ToggleLanguageHelp()
@@ -1929,6 +1996,205 @@ public sealed class MainPageViewModel : ObservableObject
 		_pendingEditorCursorLineNumber = 0;
 		_pendingEditorCursorColumnNumber = 0;
 		return lineNumber > 0 && column > 0;
+	}
+
+	private void RecordActiveDocumentHistoryChange(string previousEditorText)
+	{
+		if (_suppressDocumentHistory)
+		{
+			return;
+		}
+
+		string? documentKey = GetActiveDocumentHistoryKey();
+		if (string.IsNullOrWhiteSpace(documentKey))
+		{
+			return;
+		}
+
+		RecordDocumentTextChange(documentKey, previousEditorText, GetActiveDocumentTextSnapshot());
+	}
+
+	private void RecordDocumentTextChange(string? documentKey, string previousText, string currentText)
+	{
+		if (_suppressDocumentHistory || string.IsNullOrWhiteSpace(documentKey))
+		{
+			return;
+		}
+
+		string normalizedPrevious = NormalizeLineEndings(previousText);
+		string normalizedCurrent = NormalizeLineEndings(currentText);
+		if (string.Equals(normalizedPrevious, normalizedCurrent, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		GetOrCreateDocumentHistory(documentKey).RecordChange(normalizedPrevious, normalizedCurrent);
+		RefreshUndoRedoState();
+	}
+
+	private DocumentTextHistory GetOrCreateDocumentHistory(string documentKey)
+	{
+		if (_documentTextHistories.TryGetValue(documentKey, out DocumentTextHistory? history))
+		{
+			return history;
+		}
+
+		history = new DocumentTextHistory(MaxDocumentHistoryEntries);
+		_documentTextHistories[documentKey] = history;
+		return history;
+	}
+
+	private bool TryGetActiveDocumentHistory(out string documentKey, out DocumentTextHistory? history)
+	{
+		documentKey = GetActiveDocumentHistoryKey() ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(documentKey))
+		{
+			history = null;
+			return false;
+		}
+
+		return _documentTextHistories.TryGetValue(documentKey, out history);
+	}
+
+	private string? GetActiveDocumentHistoryKey()
+	{
+		if (IsActiveRequestEditor)
+		{
+			return BuildRequestHistoryKey(_selectedWorkspaceId, RequestLocation);
+		}
+
+		if (IsActiveSettingsEditor)
+		{
+			return BuildSettingsHistoryKey();
+		}
+
+		return null;
+	}
+
+	private static string? BuildRequestHistoryKey(Guid workspaceId, string? location)
+	{
+		if (workspaceId == Guid.Empty || string.IsNullOrWhiteSpace(location))
+		{
+			return null;
+		}
+
+		return $"request:{workspaceId:N}:{NormalizeExplorerLocation(location)}";
+	}
+
+	private string BuildSettingsHistoryKey()
+	{
+		return $"settings:{_settingsTomlDocumentService.ConfigFilePath}";
+	}
+
+	private string GetActiveDocumentTextSnapshot()
+	{
+		if (IsActiveSettingsEditor)
+		{
+			return NormalizeLineEndings(_themeConfigText);
+		}
+
+		if (IsActiveRequestEditor)
+		{
+			return NormalizeLineEndings(_requestEditorText);
+		}
+
+		return NormalizeLineEndings(_activeEditorText);
+	}
+
+	private void ApplyHistoryDocumentText(string documentText)
+	{
+		_suppressDocumentHistory = true;
+		try
+		{
+			string normalized = NormalizeLineEndings(documentText);
+			if (IsActiveSettingsEditor)
+			{
+				ActiveEditorText = normalized;
+				ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
+				return;
+			}
+
+			if (IsActiveRequestEditor)
+			{
+				ApplyRequestDocumentText(
+					normalized,
+					updateActiveEditor: true,
+					forceActiveEditorRefresh: true,
+					recordHistory: false,
+					reconcileIdentity: false,
+					scheduleAutosave: true);
+			}
+		}
+		finally
+		{
+			_suppressDocumentHistory = false;
+		}
+	}
+
+	private void RefreshUndoRedoState()
+	{
+		OnPropertyChanged(nameof(CanUndo));
+		OnPropertyChanged(nameof(CanRedo));
+	}
+
+	private void ClearDocumentHistory(string? documentKey)
+	{
+		if (string.IsNullOrWhiteSpace(documentKey))
+		{
+			return;
+		}
+
+		if (_documentTextHistories.Remove(documentKey))
+		{
+			RefreshUndoRedoState();
+		}
+	}
+
+	private void ClearWorkspaceDocumentHistory(RequestWorkbenchWorkspaceState workspace)
+	{
+		bool removedAny = false;
+		foreach (RequestWorkbenchDocumentState document in workspace.Documents)
+		{
+			string? documentKey = BuildRequestHistoryKey(workspace.Id, document.Location);
+			if (string.IsNullOrWhiteSpace(documentKey))
+			{
+				continue;
+			}
+
+			removedAny |= _documentTextHistories.Remove(documentKey);
+		}
+
+		if (removedAny)
+		{
+			RefreshUndoRedoState();
+		}
+	}
+
+	private void RekeyDocumentHistory(string? previousDocumentKey, string? nextDocumentKey)
+	{
+		if (string.IsNullOrWhiteSpace(previousDocumentKey) ||
+		    string.IsNullOrWhiteSpace(nextDocumentKey) ||
+		    string.Equals(previousDocumentKey, nextDocumentKey, StringComparison.OrdinalIgnoreCase))
+		{
+			return;
+		}
+
+		if (_documentTextHistories.Remove(previousDocumentKey, out DocumentTextHistory? history))
+		{
+			_documentTextHistories[nextDocumentKey] = history;
+			RefreshUndoRedoState();
+		}
+	}
+
+	private void RekeyWorkspaceDocumentHistory(RequestWorkbenchWorkspaceState previousWorkspace, RequestWorkbenchWorkspaceState nextWorkspace)
+	{
+		int documentCount = Math.Min(previousWorkspace.Documents.Count, nextWorkspace.Documents.Count);
+		for (int index = 0; index < documentCount; index++)
+		{
+			RekeyDocumentHistory(
+				BuildRequestHistoryKey(previousWorkspace.Id, previousWorkspace.Documents[index].Location),
+				BuildRequestHistoryKey(nextWorkspace.Id, nextWorkspace.Documents[index].Location));
+		}
 	}
 
 	private void ApplyWorkspaceSelection(Guid workspaceId)
@@ -2536,6 +2802,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		_activeDocumentKind = RequestDocumentKind;
 		ActivateCurrentCenterTabEditor();
+		RefreshUndoRedoState();
 		OnPropertyChanged(nameof(ShowEditorDebugStrip));
 		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
 		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
@@ -2559,6 +2826,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ActiveEditorDiagnosticsJson = "[]";
 		SetActiveEditorTextInternal(_themeConfigText);
 		ForceActiveEditorRefresh();
+		RefreshUndoRedoState();
 		OnPropertyChanged(nameof(ShowEditorDebugStrip));
 		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
 		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
@@ -2932,7 +3200,8 @@ public sealed class MainPageViewModel : ObservableObject
 			ApplyAiConversationText(
 				repairedUpdatedText,
 				repairedSuggestedCursorLineNumber,
-				repairedSuggestedCursorColumn);
+				repairedSuggestedCursorColumn,
+				originalSource);
 			if (repairedSuggestedCursorLineNumber is int suggestedCursorLineNumber)
 			{
 				RequestActiveEditorCursorMove(suggestedCursorLineNumber, repairedSuggestedCursorColumn);
@@ -3223,16 +3492,12 @@ public sealed class MainPageViewModel : ObservableObject
 			return normalized;
 		}
 
-		_requestEditorText = normalized;
-		OnPropertyChanged(nameof(RequestEditorText));
-		if (IsActiveRequestEditor && !string.Equals(_activeEditorText, normalized, StringComparison.Ordinal))
-		{
-			SetActiveEditorTextInternal(normalized);
-		}
-
-		SyncSupportEditorsFromRequestSource();
-		UpdateRequestMetadataFromSource();
-		MarkCurrentDocumentDirty();
+		ApplyRequestDocumentText(
+			normalized,
+			updateActiveEditor: IsActiveRequestEditor,
+			forceActiveEditorRefresh: false,
+			recordHistory: true,
+			reconcileIdentity: false);
 		return normalized;
 	}
 
@@ -3246,7 +3511,14 @@ public sealed class MainPageViewModel : ObservableObject
 		return NormalizeLineEndings(AiInlineConversationFormatter.BlankConversationLines(sourceText));
 	}
 
-	private void ApplyAiConversationText(string updatedText, int? suggestedCursorLineNumber = null, int? suggestedCursorColumn = null)
+	private void ApplyRequestDocumentText(
+		string updatedText,
+		bool updateActiveEditor,
+		bool forceActiveEditorRefresh,
+		bool recordHistory,
+		bool reconcileIdentity,
+		bool scheduleAutosave = false,
+		string? historyBaselineText = null)
 	{
 		string previousRequestName = RequestName;
 		string previousRequestMethod = SelectedMethod;
@@ -3254,43 +3526,86 @@ public sealed class MainPageViewModel : ObservableObject
 		string previousRequestSummary = RequestSummary;
 		string previousRequestLocation = RequestLocation;
 		string normalized = NormalizeLineEndings(updatedText);
-		if (string.Equals(_requestEditorText, normalized, StringComparison.Ordinal))
+		string historySourceText = NormalizeLineEndings(historyBaselineText ?? _requestEditorText);
+
+		if (recordHistory)
+		{
+			RecordDocumentTextChange(
+				BuildRequestHistoryKey(_selectedWorkspaceId, previousRequestLocation),
+				historySourceText,
+				normalized);
+		}
+
+		bool requestTextChanged = !string.Equals(_requestEditorText, normalized, StringComparison.Ordinal);
+		bool activeEditorTextChanged =
+			updateActiveEditor &&
+			IsActiveRequestEditor &&
+			!string.Equals(_activeEditorText, normalized, StringComparison.Ordinal);
+
+		if (!requestTextChanged && !activeEditorTextChanged)
+		{
+			if (forceActiveEditorRefresh && IsActiveRequestEditor)
+			{
+				ForceActiveEditorRefresh();
+			}
+
+			return;
+		}
+
+		if (requestTextChanged)
+		{
+			_requestEditorText = normalized;
+			OnPropertyChanged(nameof(RequestEditorText));
+		}
+
+		if (activeEditorTextChanged)
+		{
+			SetActiveEditorTextInternal(normalized);
+		}
+
+		if (forceActiveEditorRefresh && IsActiveRequestEditor)
+		{
+			ForceActiveEditorRefresh();
+		}
+
+		if (!requestTextChanged)
 		{
 			return;
 		}
 
-		if (IsActiveRequestEditor)
+		SyncSupportEditorsFromRequestSource();
+		UpdateRequestMetadataFromSource();
+		if (reconcileIdentity)
 		{
-			_requestEditorText = normalized;
-			OnPropertyChanged(nameof(RequestEditorText));
-			if (!string.Equals(_activeEditorText, normalized, StringComparison.Ordinal))
-			{
-				SetActiveEditorTextInternal(normalized);
-				ForceActiveEditorRefresh();
-			}
-			SyncSupportEditorsFromRequestSource();
-			UpdateRequestMetadataFromSource();
 			ReconcileRequestIdentityAfterAiEdit(
 				previousRequestName,
 				previousRequestMethod,
 				previousRequestTarget,
 				previousRequestSummary,
 				previousRequestLocation);
-			MarkCurrentDocumentDirty();
-			return;
 		}
 
-		_requestEditorText = normalized;
-		OnPropertyChanged(nameof(RequestEditorText));
-		SyncSupportEditorsFromRequestSource();
-		UpdateRequestMetadataFromSource();
-		ReconcileRequestIdentityAfterAiEdit(
-			previousRequestName,
-			previousRequestMethod,
-			previousRequestTarget,
-			previousRequestSummary,
-			previousRequestLocation);
 		MarkCurrentDocumentDirty();
+		if (scheduleAutosave && !_suppressRequestAutosave)
+		{
+			ScheduleRequestAutosave();
+		}
+	}
+
+	private void ApplyAiConversationText(
+		string updatedText,
+		int? suggestedCursorLineNumber = null,
+		int? suggestedCursorColumn = null,
+		string? historyBaselineText = null)
+	{
+		ApplyRequestDocumentText(
+			updatedText,
+			updateActiveEditor: IsActiveRequestEditor,
+			forceActiveEditorRefresh: IsActiveRequestEditor,
+			recordHistory: true,
+			reconcileIdentity: true,
+			scheduleAutosave: false,
+			historyBaselineText: historyBaselineText);
 	}
 
 	private void ReconcileRequestIdentityAfterAiEdit(
@@ -3342,6 +3657,10 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			_suppressRequestAutosave = false;
 		}
+
+		RekeyDocumentHistory(
+			BuildRequestHistoryKey(_selectedWorkspaceId, previousLocation),
+			BuildRequestHistoryKey(_selectedWorkspaceId, nextLocation));
 
 		if (workspace is null)
 		{
@@ -3968,7 +4287,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		try
 		{
-			return _settingsTomlDocumentService.LoadOrCreate(_themeService.CurrentSettings with { Theme = currentTheme });
+			return NormalizeLineEndings(_settingsTomlDocumentService.LoadOrCreate(_themeService.CurrentSettings with { Theme = currentTheme }));
 		}
 		catch (Exception exception)
 		{
@@ -4721,6 +5040,93 @@ public sealed class MainPageViewModel : ObservableObject
 			>= 1_024 => $"{sizeBytes / 1_024d:0.##} KB",
 			_ => $"{sizeBytes} B"
 		};
+	}
+
+	private sealed class DocumentTextHistory
+	{
+		private readonly int _capacity;
+		private readonly List<string> _undoStates = [];
+		private readonly List<string> _redoStates = [];
+
+		public DocumentTextHistory(int capacity)
+		{
+			_capacity = Math.Max(1, capacity);
+		}
+
+		public bool CanUndo => _undoStates.Count > 0;
+
+		public bool CanRedo => _redoStates.Count > 0;
+
+		public void RecordChange(string previousText, string currentText)
+		{
+			if (string.Equals(previousText, currentText, StringComparison.Ordinal))
+			{
+				return;
+			}
+
+			PushState(_undoStates, previousText);
+			_redoStates.Clear();
+		}
+
+		public bool TryUndo(string currentText, out string previousText)
+		{
+			previousText = string.Empty;
+			while (_undoStates.Count > 0)
+			{
+				string candidate = PopState(_undoStates);
+				if (string.Equals(candidate, currentText, StringComparison.Ordinal))
+				{
+					continue;
+				}
+
+				PushState(_redoStates, currentText);
+				previousText = candidate;
+				return true;
+			}
+
+			return false;
+		}
+
+		public bool TryRedo(string currentText, out string nextText)
+		{
+			nextText = string.Empty;
+			while (_redoStates.Count > 0)
+			{
+				string candidate = PopState(_redoStates);
+				if (string.Equals(candidate, currentText, StringComparison.Ordinal))
+				{
+					continue;
+				}
+
+				PushState(_undoStates, currentText);
+				nextText = candidate;
+				return true;
+			}
+
+			return false;
+		}
+
+		private void PushState(List<string> states, string text)
+		{
+			if (states.Count > 0 &&
+			    string.Equals(states[^1], text, StringComparison.Ordinal))
+			{
+				return;
+			}
+
+			states.Add(text);
+			if (states.Count > _capacity)
+			{
+				states.RemoveAt(0);
+			}
+		}
+
+		private static string PopState(List<string> states)
+		{
+			string value = states[^1];
+			states.RemoveAt(states.Count - 1);
+			return value;
+		}
 	}
 
 	private sealed class ActiveRequestDocumentHost : IAiActiveDocumentHost

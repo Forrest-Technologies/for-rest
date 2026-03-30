@@ -9,7 +9,7 @@
             Stroke="{DynamicResource ThemeDividerColor}">
         <Grid RowDefinitions="Auto,Auto,*">
             <Grid Padding="8,4,8,2"
-                  ColumnDefinitions="Auto,*,Auto,Auto"
+                  ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto"
                   ColumnSpacing="6">
                 <Label Text="{Binding ActiveDocumentKindLabel}"
                        VerticalTextAlignment="Start"
@@ -28,6 +28,20 @@
                         SemanticProperties.Description="Open or close the ForRest language reference" />
 
                 <Button Grid.Column="3"
+                        Text="Undo"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnUndoClicked"
+                        IsEnabled="{Binding CanUndo}"
+                        SemanticProperties.Description="Undo the latest change in the current document" />
+
+                <Button Grid.Column="4"
+                        Text="Redo"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnRedoClicked"
+                        IsEnabled="{Binding CanRedo}"
+                        SemanticProperties.Description="Redo the latest undone change in the current document" />
+
+                <Button Grid.Column="5"
                         Text="Copy"
                         Style="{StaticResource DenseTabButtonStyle}"
                         Clicked="OnCopyClicked"

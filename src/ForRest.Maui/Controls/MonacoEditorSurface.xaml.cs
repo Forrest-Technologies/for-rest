@@ -18,6 +18,8 @@ namespace ForRest.Maui.Controls;
 public partial class MonacoEditorSurface : ContentView
 {
 	public event EventHandler? SendRequested;
+	public event EventHandler? UndoRequested;
+	public event EventHandler? RedoRequested;
 	public event EventHandler<MonacoResponseVarRequestEventArgs>? ResponseVarCopyRequested;
 	public event EventHandler<MonacoCursorPositionChangedEventArgs>? CursorPositionChanged;
 	private static readonly double DefaultEditorFontSize = OperatingSystem.IsAndroid() ? 14d : 13.5d;
@@ -667,6 +669,32 @@ public partial class MonacoEditorSurface : ContentView
           const lineText = this.model.getLineContent(position.lineNumber) || "";
           return this.isInlineAiPromptLine(lineText);
         },
+        hasPrimaryModifier: function (event) {
+          return !!(event && (event.ctrlKey || event.metaKey));
+        },
+        shouldHandleUndoShortcut: function (event, monaco) {
+          if (this.pendingReadOnly || !this.editor || !event || !monaco) {
+            return false;
+          }
+
+          if (!this.hasPrimaryModifier(event) || event.altKey || event.shiftKey) {
+            return false;
+          }
+
+          return event.keyCode === monaco.KeyCode.KeyZ;
+        },
+        shouldHandleRedoShortcut: function (event, monaco) {
+          if (this.pendingReadOnly || !this.editor || !event || !monaco) {
+            return false;
+          }
+
+          if (!this.hasPrimaryModifier(event) || event.altKey) {
+            return false;
+          }
+
+          return event.keyCode === monaco.KeyCode.KeyY ||
+            (event.shiftKey && event.keyCode === monaco.KeyCode.KeyZ);
+        },
         scheduleAndroidFontRemeasure: function () {
           if (!this.isAndroid || !this.editor || !window.monaco || this.androidFontRemeasureHandle) {
             return;
@@ -804,6 +832,20 @@ public partial class MonacoEditorSurface : ContentView
             requestHostCommand("send", getCursorPayload(window.forRestHost && window.forRestHost.editor));
           });
           this.editor.onKeyDown((event) => {
+            if (this.shouldHandleUndoShortcut(event, monaco)) {
+              event.preventDefault();
+              event.stopPropagation();
+              requestHostCommand("undo");
+              return;
+            }
+
+            if (this.shouldHandleRedoShortcut(event, monaco)) {
+              event.preventDefault();
+              event.stopPropagation();
+              requestHostCommand("redo");
+              return;
+            }
+
             if (this.shouldSubmitInlineAiPromptOnEnter(event, monaco)) {
               event.preventDefault();
               event.stopPropagation();
@@ -1692,6 +1734,22 @@ public partial class MonacoEditorSurface : ContentView
 
 			await SyncEditorTextAsync();
 			SendRequested?.Invoke(this, EventArgs.Empty);
+			return;
+		}
+
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "undo", StringComparison.OrdinalIgnoreCase))
+		{
+			await SyncEditorTextAsync();
+			UndoRequested?.Invoke(this, EventArgs.Empty);
+			return;
+		}
+
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "redo", StringComparison.OrdinalIgnoreCase))
+		{
+			await SyncEditorTextAsync();
+			RedoRequested?.Invoke(this, EventArgs.Empty);
 			return;
 		}
 
