@@ -8,12 +8,19 @@ public sealed record AiActiveDocumentDiagnostic(
     int Line,
     int Column);
 
+public sealed record AiActiveDocumentRuntimeContext(
+    string Status,
+    string ErrorMessage,
+    string DebugText,
+    string ResponseBodyPreview);
+
 public sealed record AiActiveDocumentSnapshot(
     string DocumentId,
     string Title,
     string Language,
     string SourceText,
-    IReadOnlyList<AiActiveDocumentDiagnostic> Diagnostics);
+    IReadOnlyList<AiActiveDocumentDiagnostic> Diagnostics,
+    AiActiveDocumentRuntimeContext? RuntimeContext = null);
 
 public sealed record AiActiveDocumentUpdateResult(
     bool Succeeded,
@@ -66,8 +73,8 @@ public sealed class AiActiveDocumentToolCatalog : IAiActiveDocumentToolCatalog
         [
             new(
                 "read_active_document",
-                "Read the active document from the host canvas, including current source text and compiler diagnostics.",
-                "Call this before patching so the agent can inspect the current document state, syntax errors, and whether a full rewrite is safer. The returned source text excludes inline chat scaffolding like ## prompts and #> replies.",
+                "Read the active document from the host canvas, including current source text, compiler diagnostics, and latest runtime failure context when available.",
+                "Call this before patching so the agent can inspect the current document state, syntax errors, and recent runtime failures before deciding whether a targeted edit or a full rewrite is safer. The returned source text excludes inline chat scaffolding like ## prompts and #> replies.",
                 MutatesDocument: false),
             new(
                 "patch_active_document",

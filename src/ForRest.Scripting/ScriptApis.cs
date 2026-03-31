@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Collections;
 using System.Dynamic;
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -341,7 +342,7 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
             return true;
         }
 
-        result = null;
+        result = DynamicJsonNull.Instance;
         return true;
     }
 
@@ -362,7 +363,7 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
                 result = DynamicJsonObject.Wrap(jsonArray[index]);
                 return true;
             default:
-                result = null;
+                result = DynamicJsonNull.Instance;
                 return true;
         }
     }
@@ -443,6 +444,178 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
     #endregion
 }
 
+internal sealed class DynamicJsonNull : DynamicObject, IEnumerable<object?>
+{
+    public static DynamicJsonNull Instance { get; } = new();
+
+    private DynamicJsonNull()
+    {
+    }
+
+    public override bool TryGetMember(GetMemberBinder binder, out object? result)
+    {
+        result = this;
+        return true;
+    }
+
+    public override bool TryGetIndex(GetIndexBinder binder, object?[] indexes, out object? result)
+    {
+        result = this;
+        return true;
+    }
+
+    public override bool TryInvokeMember(InvokeMemberBinder binder, object[] args, out object? result)
+    {
+        result = this;
+        return true;
+    }
+
+    public override bool TryUnaryOperation(UnaryOperationBinder binder, out object? result)
+    {
+        switch (binder.Operation)
+        {
+            case ExpressionType.IsTrue:
+                result = false;
+                return true;
+            case ExpressionType.IsFalse:
+            case ExpressionType.Not:
+                result = true;
+                return true;
+            default:
+                result = this;
+                return true;
+        }
+    }
+
+    public override bool TryBinaryOperation(BinaryOperationBinder binder, object? arg, out object? result)
+    {
+        switch (binder.Operation)
+        {
+            case ExpressionType.Equal:
+                result = arg is null or DynamicJsonNull;
+                return true;
+            case ExpressionType.NotEqual:
+                result = arg is not null && arg is not DynamicJsonNull;
+                return true;
+            case ExpressionType.GreaterThan:
+            case ExpressionType.GreaterThanOrEqual:
+            case ExpressionType.LessThan:
+            case ExpressionType.LessThanOrEqual:
+                result = false;
+                return true;
+            default:
+                result = this;
+                return true;
+        }
+    }
+
+    public override bool TryConvert(ConvertBinder binder, out object? result)
+    {
+        Type targetType = Nullable.GetUnderlyingType(binder.Type) ?? binder.Type;
+
+        if (targetType == typeof(string))
+        {
+            result = null;
+            return true;
+        }
+
+        if (targetType == typeof(bool))
+        {
+            result = false;
+            return true;
+        }
+
+        if (targetType == typeof(int))
+        {
+            result = 0;
+            return true;
+        }
+
+        if (targetType == typeof(long))
+        {
+            result = 0L;
+            return true;
+        }
+
+        if (targetType == typeof(float))
+        {
+            result = 0f;
+            return true;
+        }
+
+        if (targetType == typeof(double))
+        {
+            result = 0d;
+            return true;
+        }
+
+        if (targetType == typeof(decimal))
+        {
+            result = 0m;
+            return true;
+        }
+
+        if (targetType == typeof(JsonNode) || targetType == typeof(object) || !targetType.IsValueType)
+        {
+            result = null;
+            return true;
+        }
+
+        result = Activator.CreateInstance(targetType);
+        return true;
+    }
+
+    public override IEnumerable<string> GetDynamicMemberNames()
+    {
+        return [];
+    }
+
+    public IEnumerator<object?> GetEnumerator()
+    {
+        return Enumerable.Empty<object?>().GetEnumerator();
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
+    public override bool Equals(object? obj)
+    {
+        return obj is null or DynamicJsonNull;
+    }
+
+    public override int GetHashCode()
+    {
+        return 0;
+    }
+
+    public override string ToString()
+    {
+        return string.Empty;
+    }
+
+    public static bool operator ==(DynamicJsonNull? left, object? right)
+    {
+        return right is null || right is DynamicJsonNull;
+    }
+
+    public static bool operator !=(DynamicJsonNull? left, object? right)
+    {
+        return !(left == right);
+    }
+
+    public static implicit operator string?(DynamicJsonNull? value)
+    {
+        return null;
+    }
+
+    public static implicit operator bool(DynamicJsonNull? value)
+    {
+        return false;
+    }
+}
+
 internal sealed class DynamicJsonObject(JsonObject source) : DynamicObject
 {
     public override bool TryGetMember(GetMemberBinder binder, out object? result)
@@ -474,7 +647,7 @@ internal sealed class DynamicJsonObject(JsonObject source) : DynamicObject
             return true;
         }
 
-        result = null;
+        result = DynamicJsonNull.Instance;
         return true;
     }
 
@@ -504,7 +677,7 @@ internal sealed class DynamicJsonObject(JsonObject source) : DynamicObject
     {
         return node switch
         {
-            null => null,
+            null => DynamicJsonNull.Instance,
             JsonObject jsonObject => new DynamicJsonObject(jsonObject),
             JsonArray jsonArray => jsonArray.Select(Wrap).ToList(),
             JsonValue jsonValue => UnwrapScalar(jsonValue),
@@ -1256,6 +1429,7 @@ public sealed class ConvertApi
     {
         return value switch
         {
+            DynamicJsonNull => null,
             JsonValue jsonValue => UnwrapJsonValue(jsonValue),
             JsonObject jsonObject => jsonObject.ToJsonString(),
             JsonArray jsonArray => jsonArray.ToJsonString(),

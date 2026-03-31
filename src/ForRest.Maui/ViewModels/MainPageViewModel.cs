@@ -87,6 +87,9 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _responseTimeStatus;
 	private string _responseSizeStatus;
 	private ResponseSnapshot? _latestResponseSnapshot;
+	private string _latestRuntimeStateText = string.Empty;
+	private string _latestRuntimeErrorText = string.Empty;
+	private string _latestRuntimeDebugText = string.Empty;
 	private bool _isResponsePrettyPrintEnabled = true;
 	private string _debugOutputText;
 	private string _executionStatus;
@@ -1152,6 +1155,17 @@ public sealed class MainPageViewModel : ObservableObject
 					? "Execution failed"
 					: "Compiled request document";
 			DebugOutputText = BuildDebugOutput(outcome);
+			if (outcome.Execution is not null)
+			{
+				RecordLatestRuntimeContext(
+					outcome.Execution.State.ToString(),
+					latestRun?.ErrorMessage,
+					DebugOutputText);
+			}
+			else
+			{
+				ClearLatestRuntimeContext();
+			}
 
 			ResponseHeaderRows.Clear();
 			foreach (KeyValueDefinition header in outcome.Execution?.LatestResponse?.Headers ?? [])
@@ -1206,6 +1220,7 @@ public sealed class MainPageViewModel : ObservableObject
 			ResponseBodyText = string.Empty;
 			ResponseRawText = string.Empty;
 			DebugOutputText = exception.ToString();
+			RecordLatestRuntimeContext("Failed", exception.Message, DebugOutputText);
 			ResponseHeaderRows.Clear();
 			OnPropertyChanged(nameof(CanCopyHeaders));
 			ClearStashTable();
@@ -2743,6 +2758,7 @@ public sealed class MainPageViewModel : ObservableObject
 			document => string.Equals(document.Location, location, StringComparison.OrdinalIgnoreCase))
 			?? BuildDefaultDocumentState(title, method, summary, location);
 		_requestEditorDiagnosticsJson = string.IsNullOrWhiteSpace(state.DiagnosticsJson) ? "[]" : state.DiagnosticsJson;
+		ClearLatestRuntimeContext();
 
 		_suppressRequestAutosave = true;
 		_suppressDocumentSynchronization = true;
@@ -4597,6 +4613,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_responseTimeStatus = response is not null ? $"{response.DurationMilliseconds} ms" : "--";
 		_responseSizeStatus = response is not null ? FormatResponseSize(response.SizeBytes) : "--";
 		DebugOutputText = BuildDebugOutput(run, SelectedWorkspace, SelectedEnvironment, method);
+		RecordLatestRuntimeContext(run.State.ToString(), run.ErrorMessage, DebugOutputText);
 
 		ResponseHeaderRows.Clear();
 		foreach (KeyValueDefinition header in response?.Headers ?? [])
@@ -4742,6 +4759,81 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		return string.Join(Environment.NewLine, lines);
+	}
+
+	private void RecordLatestRuntimeContext(string? statusText, string? errorText, string? debugText)
+	{
+		_latestRuntimeStateText = statusText ?? string.Empty;
+		_latestRuntimeErrorText = errorText ?? string.Empty;
+		_latestRuntimeDebugText = debugText ?? string.Empty;
+	}
+
+	private void ClearLatestRuntimeContext()
+	{
+		_latestRuntimeStateText = string.Empty;
+		_latestRuntimeErrorText = string.Empty;
+		_latestRuntimeDebugText = string.Empty;
+	}
+
+	private AiActiveDocumentRuntimeContext? BuildLatestRuntimeContext()
+	{
+		string debugText = string.IsNullOrWhiteSpace(_latestRuntimeDebugText) && LooksLikeRuntimeDebugOutput(DebugOutputText)
+			? DebugOutputText
+			: _latestRuntimeDebugText;
+		string statusText = string.IsNullOrWhiteSpace(_latestRuntimeStateText)
+			? ExtractRuntimeDebugLine(debugText, "Execution state:")
+				?? (LooksLikeRuntimeDebugOutput(DebugOutputText) ? ExtractRuntimeDebugLine(DebugOutputText, "Execution state:") : string.Empty)
+				?? string.Empty
+			: _latestRuntimeStateText;
+		string errorText = string.IsNullOrWhiteSpace(_latestRuntimeErrorText)
+			? ExtractRuntimeDebugLine(debugText, "Error:")
+				?? (LooksLikeRuntimeDebugOutput(DebugOutputText) ? ExtractRuntimeDebugLine(DebugOutputText, "Error:") : string.Empty)
+				?? string.Empty
+			: _latestRuntimeErrorText;
+		string responsePreview = BuildRuntimeResponsePreview(_latestResponseSnapshot?.Body);
+		if (string.IsNullOrWhiteSpace(statusText) &&
+			string.IsNullOrWhiteSpace(errorText) &&
+			string.IsNullOrWhiteSpace(debugText) &&
+			string.IsNullOrWhiteSpace(responsePreview))
+		{
+			return null;
+		}
+
+		return new(
+			Status: statusText,
+			ErrorMessage: errorText,
+			DebugText: debugText,
+			ResponseBodyPreview: responsePreview);
+	}
+
+	private static string BuildRuntimeResponsePreview(string? value)
+	{
+		string normalized = (value ?? string.Empty).Trim();
+		return normalized.Length <= 400
+			? normalized
+			: normalized[..400].TrimEnd() + " ...";
+	}
+
+	private static bool LooksLikeRuntimeDebugOutput(string? value)
+	{
+		string normalized = value ?? string.Empty;
+		return normalized.Contains("Execution state:", StringComparison.Ordinal) ||
+			normalized.Contains("Response:", StringComparison.Ordinal) ||
+			normalized.Contains("Error:", StringComparison.Ordinal) ||
+			normalized.Contains("Console:", StringComparison.Ordinal);
+	}
+
+	private static string? ExtractRuntimeDebugLine(string? value, string prefix)
+	{
+		foreach (string line in (value ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+		{
+			if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			{
+				return line[prefix.Length..].Trim();
+			}
+		}
+
+		return null;
 	}
 
 	private Color ResolveEditorDebugAccentColor(ForRestEditorDebugState state)
@@ -5279,7 +5371,8 @@ public sealed class MainPageViewModel : ObservableObject
 				Title: _owner.RequestName,
 				Language: _owner.ActiveEditorLanguage,
 				SourceText: _sourceText,
-				Diagnostics: BuildDiagnostics(_sourceText));
+				Diagnostics: BuildDiagnostics(_sourceText),
+				RuntimeContext: _owner.BuildLatestRuntimeContext());
 		}
 
 		public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)

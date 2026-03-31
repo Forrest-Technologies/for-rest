@@ -18,7 +18,12 @@ public sealed class AiActiveDocumentToolServiceTests
                 "name \"Example\"",
                 [
                     new("error", "Unexpected token 'time'.", 5, 1),
-                ]));
+                ],
+                new(
+                    "Failed",
+                    "Cannot perform runtime binding on a null reference.",
+                    "Execution state: Failed\nError: Cannot perform runtime binding on a null reference.",
+                    """[{ "id": "1", "data": null }]""")));
 
         string response = service.ReadActiveDocument(BuildSettings(), host);
 
@@ -28,6 +33,8 @@ public sealed class AiActiveDocumentToolServiceTests
         Assert.AreEqual("name \"Example\"", document.RootElement.GetProperty("document").GetProperty("sourceText").GetString());
         Assert.AreEqual("error", document.RootElement.GetProperty("document").GetProperty("diagnostics")[0].GetProperty("severity").GetString());
         Assert.AreEqual("Unexpected token 'time'.", document.RootElement.GetProperty("document").GetProperty("diagnostics")[0].GetProperty("message").GetString());
+        Assert.AreEqual("Failed", document.RootElement.GetProperty("document").GetProperty("runtimeContext").GetProperty("status").GetString());
+        Assert.AreEqual("Cannot perform runtime binding on a null reference.", document.RootElement.GetProperty("document").GetProperty("runtimeContext").GetProperty("errorMessage").GetString());
     }
 
     [TestMethod]

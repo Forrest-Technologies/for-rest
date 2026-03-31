@@ -908,6 +908,60 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_exposes_latest_runtime_failure_to_inline_ai()
+	{
+		using TestHarness harness = new();
+		AiActiveDocumentSnapshot? capturedDocument = null;
+		FakeAiInlineConversationService aiService = new(
+			new AiInlineConversationResult(
+				Handled: false,
+				Succeeded: false,
+				UpdatedText: string.Empty,
+				StatusText: "AI could not complete the request.",
+				DebugText: "ai debug"),
+			onTryHandle: request =>
+			{
+				if (request.SourceText.Contains("## fix this", StringComparison.Ordinal))
+				{
+					capturedDocument = request.ActiveDocumentHost.GetActiveDocument();
+				}
+			},
+			tryHandleAsync: (request, _) => Task.FromResult(
+				request.SourceText.Contains("## fix this", StringComparison.Ordinal)
+					? new AiInlineConversationResult(
+						Handled: true,
+						Succeeded: false,
+						UpdatedText: string.Empty,
+						StatusText: "AI could not complete the request.",
+						DebugText: "ai debug")
+					: new AiInlineConversationResult(
+						Handled: false,
+						Succeeded: false,
+						UpdatedText: request.SourceText,
+						StatusText: string.Empty,
+						DebugText: string.Empty)));
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: new RuntimeFailureExecutionService(),
+			aiInlineConversationService: aiService,
+			scriptEngine: new FakeScriptEngine());
+
+		viewModel.ActiveEditorText = "name \"demo\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\n";
+		await viewModel.SendAsync();
+
+		viewModel.ActiveEditorText = $"{NormalizeLineEndings(viewModel.ActiveEditorText)}\n## fix this";
+		viewModel.UpdateActiveEditorCursor(viewModel.ActiveEditorText.Split('\n').Length, 4);
+
+		await viewModel.SendAsync();
+
+		Assert.IsNotNull(capturedDocument);
+		Assert.IsNotNull(capturedDocument.RuntimeContext);
+		Assert.AreEqual("Failed", capturedDocument.RuntimeContext.Status);
+		StringAssert.Contains(capturedDocument.RuntimeContext.ErrorMessage, "Cannot perform runtime binding on a null reference");
+		StringAssert.Contains(capturedDocument.RuntimeContext.DebugText, "Execution state: Failed");
+		StringAssert.Contains(capturedDocument.RuntimeContext.ResponseBodyPreview, "\"data\": null");
+	}
+
+	[TestMethod]
 	public void TryValidateCompiledRequestScripts_accepts_array_root_validation_samples_when_object_root_fails()
 	{
 		using TestHarness harness = new();
@@ -1307,6 +1361,106 @@ public sealed class MainPageViewModelLayoutTests
 			CancellationToken cancellationToken = default)
 		{
 			throw new NotSupportedException("Execution is not used in this AI diagnostics test.");
+		}
+	}
+
+	private sealed class RuntimeFailureExecutionService : IForRestScriptExecutionService
+	{
+		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
+		{
+			return new(
+				null,
+				new ForRestExecutionPayload
+				{
+					SourceText = source,
+					Request = new RequestDefinition
+					{
+						WorkspaceId = workspaceId,
+						Name = defaultRequestName ?? "Demo",
+						Method = HttpMethodKind.Get,
+						UrlTemplate = "https://api.restful-api.dev/objects",
+						Headers = [],
+						Variables = [],
+						TestsScript = "expect status == 200 \"returns 200\"",
+					},
+				},
+				[]);
+		}
+
+		public Task<ForRestScriptExecutionOutcome> Execute(
+			AppProfile profile,
+			WorkspaceSnapshot workspace,
+			string source,
+			EnvironmentDefinition? environment,
+			string? defaultRequestName = null,
+			string? preRequestScriptOverride = null,
+			CancellationToken cancellationToken = default)
+		{
+			ResponseSnapshot response = new()
+			{
+				StatusCode = 200,
+				ReasonPhrase = "OK",
+				ContentType = "application/json",
+				DurationMilliseconds = 12,
+				SizeBytes = 128,
+				Body = """[{ "id": "1", "name": "Apple Watch", "data": null }]""",
+				RawResponse = "HTTP/1.1 200 OK",
+			};
+
+			RequestDefinition request = new()
+			{
+				WorkspaceId = workspace.Workspace.Id,
+				Name = defaultRequestName ?? "Demo",
+				Method = HttpMethodKind.Get,
+				UrlTemplate = "https://api.restful-api.dev/objects",
+			};
+
+			ExecutionRun run = new()
+			{
+				WorkspaceId = workspace.Workspace.Id,
+				RequestId = request.Id,
+				RequestName = request.Name,
+				State = ExecutionState.Failed,
+				TargetUri = request.UrlTemplate,
+				RawRequest = "GET https://api.restful-api.dev/objects",
+				ErrorMessage = "Cannot perform runtime binding on a null reference.",
+				Response = response,
+				ConsoleEntries =
+				[
+					new()
+					{
+						Level = ConsoleEntryLevel.Error,
+						Message = "Cannot perform runtime binding on a null reference.",
+					},
+				],
+			};
+
+			return Task.FromResult(
+				new ForRestScriptExecutionOutcome
+				{
+					Compilation = new ForRestScriptCompilationResult(
+						null,
+						new ForRestExecutionPayload
+						{
+							SourceText = source,
+							Request = request,
+						},
+						[]),
+					Execution = new RequestExecutionResult
+					{
+						State = ExecutionState.Failed,
+						Runs = [run],
+						LatestResponse = response,
+						ConsoleEntries =
+						[
+							new()
+							{
+								Level = ConsoleEntryLevel.Error,
+								Message = "Cannot perform runtime binding on a null reference.",
+							},
+						],
+					},
+				});
 		}
 	}
 

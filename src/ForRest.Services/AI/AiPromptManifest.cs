@@ -61,8 +61,9 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- Keep responses brief and practical.");
         prompt.AppendLine("- Prefer the local docs search tool before guessing about language or app behavior.");
         prompt.AppendLine("- Use search_docs first for targeted lookups. If it returns no useful hits, immediately use read_all_docs or the built-in full-corpus fallback from search_docs instead of retrying the same search.");
-        prompt.AppendLine("- Read the active document before editing so you can inspect the current source text and compiler diagnostics.");
+        prompt.AppendLine("- Read the active document before editing so you can inspect the current source text, compiler diagnostics, and latest runtime context.");
         prompt.AppendLine("- If the active document has syntax or compilation errors, use those diagnostics plus local docs to fix the request.");
+        prompt.AppendLine("- If the active document includes a recent runtime failure or response preview, use that evidence to repair the request instead of asking the user to rerun it just so you can inspect the failure again.");
         prompt.AppendLine("- Only patch documents when the user asked for an edit or when a correction is clearly required.");
         prompt.AppendLine("- Keep patch operations bounded and explicit.");
         prompt.AppendLine("- When the user asked to rewrite the request from scratch, prefer replace_active_document over patch_active_document.");

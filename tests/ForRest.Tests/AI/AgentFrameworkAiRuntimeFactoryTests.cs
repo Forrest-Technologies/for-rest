@@ -145,10 +145,13 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "`expect` statements are top-level assertions");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Ask at most 2 clarification turn");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "read_all_docs or the built-in full-corpus fallback");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "latest runtime context");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Treat inline editor chat markers");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "If patch_active_document fails or the active document looks garbled");
         Assert.AreEqual("Active document", runtime.PromptManifest.Topics[0].Title);
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Unexpected token 'time'.");
+        StringAssert.Contains(runtime.PromptManifest.Topics[0].Content, "Runtime error: Cannot perform runtime binding on a null reference.");
+        StringAssert.Contains(runtime.PromptManifest.Topics[0].Content, "\"data\": null");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "name \"Example\"");
     }
 
@@ -175,7 +178,12 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
                 "name \"Example\"",
                 [
                     new("error", "Unexpected token 'time'.", 5, 1),
-                ]);
+                ],
+                new(
+                    "Failed",
+                    "Cannot perform runtime binding on a null reference.",
+                    "Execution state: Failed\nError: Cannot perform runtime binding on a null reference.",
+                    """[{ "id": "1", "data": null }]"""));
         }
 
         public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)

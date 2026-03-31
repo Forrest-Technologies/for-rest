@@ -93,7 +93,7 @@ public sealed class RoslynScriptEngineTests
             {
                 Script =
                 """
-                var price = response.item.data.price;
+                var price = response.Json()["item"]["data"].price;
                 """,
                 PreparedRequest = new()
                 {
@@ -115,6 +115,37 @@ public sealed class RoslynScriptEngineTests
         StringAssert.Contains(result.ErrorMessage, "if item.data != null");
         Assert.AreEqual(ConsoleEntryLevel.Error, result.ConsoleEntries.Single().Level);
         StringAssert.Contains(result.ConsoleEntries.Single().Message, "optional text fields");
+    }
+
+    [TestMethod]
+    public async Task Run_treats_null_json_members_as_safe_dynamic_sentinels()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                tests.Equal("", convert.ToString(response.item.data.price), "null chain converts to empty text");
+                tests.Equal(0d, convert.ToDouble(response.item.data.price), "null chain converts to zero");
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    StatusCode = 200,
+                    Body = """{"item":{"data":null}}""",
+                    ContentType = "application/json",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
     }
 
     [TestMethod]
@@ -533,6 +564,7 @@ public sealed class RoslynScriptEngineTests
                     """
                     [
                       { "id": "1", "name": "Acer Swift 5", "data": { "price": 1299.99 } },
+                      { "id": "x", "name": "Beta Placeholder", "data": null },
                       { "id": "2", "name": "Dell XPS 13", "data": { "price": 999.99 } },
                       { "id": "3", "name": "Canon R5 Pro", "data": { "price": 3899 } },
                       { "id": "4", "name": "Beats Studio Pro", "data": { "price": 199.99 } }

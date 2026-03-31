@@ -105,6 +105,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                 diagnostics.Count == 0
                     ? "Diagnostics: none"
                     : $"Diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}",
+                BuildRuntimeContextBlock(activeDocument.RuntimeContext),
                 "Source:",
                 activeDocument.SourceText,
             ]);
@@ -113,11 +114,51 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             0,
             new(
                 "Active document",
-                "The current request document and its latest compiler diagnostics. Use this instead of asking the user to paste the script or error list again.",
+                "The current request document plus its latest compiler diagnostics and runtime context. Use this instead of asking the user to paste the script or error list again.",
                 "active-document",
                 content));
 
         return topics;
+    }
+
+    private static string BuildRuntimeContextBlock(AiActiveDocumentRuntimeContext? runtimeContext)
+    {
+        if (runtimeContext is null)
+        {
+            return "Runtime context: none";
+        }
+
+        List<string> lines =
+        [
+            string.IsNullOrWhiteSpace(runtimeContext.Status)
+                ? "Runtime status: unknown"
+                : $"Runtime status: {runtimeContext.Status}",
+            string.IsNullOrWhiteSpace(runtimeContext.ErrorMessage)
+                ? "Runtime error: none"
+                : $"Runtime error: {runtimeContext.ErrorMessage}",
+        ];
+
+        if (!string.IsNullOrWhiteSpace(runtimeContext.ResponseBodyPreview))
+        {
+            lines.Add("Response preview:");
+            lines.Add(TrimRuntimeBlock(runtimeContext.ResponseBodyPreview, 400));
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtimeContext.DebugText))
+        {
+            lines.Add("Runtime debug:");
+            lines.Add(TrimRuntimeBlock(runtimeContext.DebugText, 1200));
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string TrimRuntimeBlock(string value, int maxLength)
+    {
+        string normalized = (value ?? string.Empty).Trim();
+        return normalized.Length <= maxLength
+            ? normalized
+            : normalized[..maxLength].TrimEnd() + " ...";
     }
 
     private AITool[] BuildRuntimeTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost)
