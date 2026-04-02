@@ -452,8 +452,7 @@ public static class RequestWorkbenchDocumentNormalizer
 	private static bool TryRepairDanglingExpression(string line, out string? repairedLine)
 	{
 		repairedLine = null;
-		int separatorIndex = line.IndexOf('=');
-		if (separatorIndex < 0)
+		if (!TryFindAssignmentSeparatorIndex(line, out int separatorIndex))
 		{
 			return false;
 		}
@@ -467,6 +466,109 @@ public static class RequestWorkbenchDocumentNormalizer
 
 		repairedLine = $"{line[..separatorIndex].TrimEnd()} = {repairedValue}";
 		return true;
+	}
+
+	private static bool TryFindAssignmentSeparatorIndex(string line, out int separatorIndex)
+	{
+		separatorIndex = -1;
+		bool inString = false;
+		bool escaped = false;
+		int parenthesisDepth = 0;
+		int bracketDepth = 0;
+		int braceDepth = 0;
+
+		for (int index = 0; index < line.Length; index++)
+		{
+			char character = line[index];
+			if (inString)
+			{
+				if (character == '"' && !escaped)
+				{
+					inString = false;
+				}
+
+				escaped = character == '\\' && !escaped;
+				if (character != '\\')
+				{
+					escaped = false;
+				}
+				continue;
+			}
+
+			switch (character)
+			{
+				case '"':
+					inString = true;
+					escaped = false;
+					continue;
+
+				case '(':
+					parenthesisDepth++;
+					continue;
+
+				case ')':
+					parenthesisDepth = Math.Max(0, parenthesisDepth - 1);
+					continue;
+
+				case '[':
+					bracketDepth++;
+					continue;
+
+				case ']':
+					bracketDepth = Math.Max(0, bracketDepth - 1);
+					continue;
+
+				case '{':
+					braceDepth++;
+					continue;
+
+				case '}':
+					braceDepth = Math.Max(0, braceDepth - 1);
+					continue;
+
+				case '=' when parenthesisDepth == 0 && bracketDepth == 0 && braceDepth == 0:
+				{
+					char previous = FindPreviousNonWhitespaceCharacter(line, index);
+					char next = FindNextNonWhitespaceCharacter(line, index);
+					if (previous is '>' or '<' or '!' or '=' ||
+					    next is '=' or '>')
+					{
+						continue;
+					}
+
+					separatorIndex = index;
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	private static char FindPreviousNonWhitespaceCharacter(string line, int startIndex)
+	{
+		for (int index = startIndex - 1; index >= 0; index--)
+		{
+			if (!char.IsWhiteSpace(line[index]))
+			{
+				return line[index];
+			}
+		}
+
+		return '\0';
+	}
+
+	private static char FindNextNonWhitespaceCharacter(string line, int startIndex)
+	{
+		for (int index = startIndex + 1; index < line.Length; index++)
+		{
+			if (!char.IsWhiteSpace(line[index]))
+			{
+				return line[index];
+			}
+		}
+
+		return '\0';
 	}
 
 	private static string TrimDanglingTrailingClosers(string value)

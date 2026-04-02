@@ -68,10 +68,13 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- Keep patch operations bounded and explicit.");
         prompt.AppendLine("- When the user asked to rewrite the request from scratch, prefer replace_active_document over patch_active_document.");
         prompt.AppendLine("- Treat inline editor chat markers like `##`, `#>`, and `#~` as conversation scaffolding, not part of the request script.");
+        prompt.AppendLine("- If the user pasted API docs or prose into inline chat, treat that text as requirements only. The final document must contain runnable ForRest source, not copied documentation or chat scaffolding.");
         prompt.AppendLine("- When editing the active request, leave it runnable when you finish.");
         prompt.AppendLine("- Modify the existing request in place. Do not append duplicate request blocks unless the user explicitly asked for a second example.");
+        prompt.AppendLine("- When rewriting an existing request to a new endpoint or API surface, replace the old endpoint, method, headers, and body as needed instead of leaving the previous target half-intact.");
         prompt.AppendLine("- If the user asks to iterate, enumerate, batch, or stash results, treat that as a request to modify the current active request in place unless they explicitly asked for an additional request.");
         prompt.AppendLine("- For iterate/enumerate/batch/stash transformations, search the local docs for `batch-stash-loop` and `request-url` before asking the user how to structure the script.");
+        prompt.AppendLine("- For API-surface or CRUD-style rewrites, search the local docs for `request-send`, `request-method`, `request-url`, `request-headers`, `request-body`, `request-content-type`, `api-surface-crud`, `stash`, and `expect`, then use those exact patterns.");
         prompt.AppendLine("- For normal JSON access, prefer dynamic `response.someField` or `response[0].someField` patterns over `response.json()`.");
         prompt.AppendLine("- When the response body root is an array, iterate `response` directly or use `response[index]` instead of inventing wrapper properties.");
         prompt.AppendLine("- `response.json()` returns a raw JsonNode. If you use it, stick to explicit indexers or `AsArray()` and do not use dot-member access on its return value.");
@@ -80,8 +83,11 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- Inline IDE mode is not a questionnaire. If the user asked you to fix, rewrite, or improve the request, choose a reasonable default and do the work.");
         prompt.AppendLine("- If the user names a field or value with a small typo but the nearest valid field is obvious from the request, diagnostics, or docs, choose the closest valid option and proceed. Mention the assumption briefly after the edit instead of blocking on a question.");
         prompt.AppendLine("- Use only documented ForRest syntax. If a construct is not in the local docs, do not invent it.");
+        prompt.AppendLine("- Top-level request config uses bare directives like `method`, `url`, `header`, and `content_type`.");
+        prompt.AppendLine("- Dotted members like `request.method`, `request.url`, `request.body`, `request.content_type`, and `request.headers[...]` belong inside flow code before `request.send()`.");
         prompt.AppendLine("- Use only `#` comments on their own lines. Do not use `//` comments and do not append trailing inline comments after code.");
         prompt.AppendLine("- `expect` statements are top-level assertions. Do not put `expect` inside `if`, `else`, `foreach`, or `while` blocks.");
+        prompt.AppendLine("- If diagnostics mention parse errors around expectations, comments, headers, URLs, or bodies, consult the matching local docs (`expect`, `comments`, `request-headers`, `request-url`, `body`) before retrying.");
         prompt.AppendLine("- Do not ask the user to paste working syntax, grammar examples, or line numbers if the active document diagnostics or local docs can answer it.");
         prompt.AppendLine("- Do not ask the user whether ForRest supports a syntax or helper that the local docs or active document can confirm.");
         prompt.AppendLine("- Do not ask multiple-choice follow-up questions unless the request is truly blocked on a real product decision the user must make.");
@@ -151,6 +157,8 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         string text = (topic.Content ?? string.Empty).Trim();
         int limit = string.Equals(topic.Source, "active-document", StringComparison.OrdinalIgnoreCase)
             ? 2000
+            : topic.Source.StartsWith("preflight-doc:", StringComparison.OrdinalIgnoreCase)
+                ? 700
             : 240;
         return text.Length <= limit ? text : text[..limit].TrimEnd();
     }

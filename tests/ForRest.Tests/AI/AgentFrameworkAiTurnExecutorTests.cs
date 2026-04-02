@@ -185,6 +185,9 @@ public sealed class AgentFrameworkAiTurnExecutorTests
         Assert.AreEqual("name \"Example\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"\nmax_send_iterations 50", host.SourceText);
         StringAssert.Contains(agent.Calls[1].MessageText, "full replace_active_document call");
         StringAssert.Contains(agent.Calls[1].MessageText, "The previous turn did not modify the active document");
+        StringAssert.Contains(agent.Calls[1].MessageText, "request-send/request.method/request.url/request.headers/request.body/request.content_type/api-surface-crud/stash/top-level expect patterns");
+        StringAssert.Contains(agent.Calls[1].MessageText, "leave only runnable ForRest source");
+        StringAssert.Contains(agent.Calls[1].MessageText, "replace that target instead of leaving the previous URL or method in place");
     }
 
     [TestMethod]
@@ -222,9 +225,13 @@ public sealed class AgentFrameworkAiTurnExecutorTests
 
     private sealed class StubRuntimeFactory(AIAgent agent) : IAiRuntimeFactory
     {
-        public AiPreparedRuntime Prepare(AiSettings settings, string objective, IAiActiveDocumentHost? activeDocumentHost = null)
+        public AiPreparedRuntime Prepare(
+            AiSettings settings,
+            string objective,
+            IAiActiveDocumentHost? activeDocumentHost = null,
+            string? prompt = null)
         {
-            return new(new(string.Empty, [], []), [], agent);
+            return new(new(string.Empty, [], []), [], agent, new AiDebugTraceBuffer());
         }
     }
 

@@ -38,7 +38,7 @@ internal static class ForRestLanguageReference
             "request",
             "Request",
             "Group request metadata under a dedicated section.",
-            "Use `request { ... }` when you want to keep request settings together. The parser also accepts top-level aliases for `method`, `url`, `timeout`, `redirects`, `ssl`, `history`, `content_type`, and `max_send_iterations`.",
+            "Use `request { ... }` when you want to keep request settings together. At the top level, configure request metadata with bare directives like `method`, `url`, `timeout`, `redirects`, `ssl`, `history`, `content_type`, and `max_send_iterations`. Dotted members like `request.method` and `request.url` are reserved for flow mutations between `request.send()` calls.",
             """
             request {
               method = GET
@@ -130,7 +130,7 @@ internal static class ForRestLanguageReference
             "Use `content_type` to shape the outgoing body header without having to set `Content-Type` manually.",
             "content_type \"application/json\"",
             ["content type", "mime type", "body type"],
-            ["content_type", "request.content_type"],
+            ["content_type"],
             "Keyword",
             "content_type \"${1:application/json}\"",
             true),
@@ -348,6 +348,51 @@ internal static class ForRestLanguageReference
             "request.send()",
             false),
         new(
+            "request-method",
+            "request.method",
+            "Request",
+            "Mutate the outgoing HTTP method from flow code.",
+            "Use `request.method` when one scripted request needs to probe `GET`, `POST`, `PUT`, `PATCH`, or `DELETE` variants between `request.send()` calls.",
+            """
+            request.method = "POST"
+            request.content_type = "application/json"
+            request.body = "{\"name\":\"Validation Widget\"}"
+            let sent = request.send()
+            log sent.status
+            """,
+            ["request method", "mutate method", "post put patch delete", "crud"],
+            ["request.method", "request.Method"],
+            "Property",
+            "request.method = \"${1|GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD|}\"",
+            true),
+        new(
+            "request-body",
+            "request.body",
+            "Request",
+            "Mutate the outgoing raw request body from flow code.",
+            "Use `request.body` when POST, PUT, or PATCH payloads depend on earlier responses, runtime variables, or multi-step scripted workflows. Pair it with `request.content_type` for JSON payloads.",
+            """
+            runtime item_name = "Validation Widget"
+            request.body = $"{{\"name\":\"{item_name}\"}}"
+            """,
+            ["request body", "payload mutation", "post body", "patch body"],
+            ["request.body", "request.Body"],
+            "Property",
+            "request.body = \"${1:{\\\"name\\\":\\\"demo\\\"}}\"",
+            true),
+        new(
+            "request-content-type",
+            "request.content_type",
+            "Request",
+            "Mutate the outgoing content type from flow code.",
+            "Use `request.content_type` when a scripted workflow changes the body format before the next `request.send()` call.",
+            "request.content_type = \"application/json\"",
+            ["request content type", "content type mutation", "json payload"],
+            ["request.content_type", "request.ContentType"],
+            "Property",
+            "request.content_type = \"${1:application/json}\"",
+            true),
+        new(
             "workspace-execute",
             "workspace.execute()",
             "Workspace",
@@ -517,6 +562,131 @@ internal static class ForRestLanguageReference
             "max_send_iterations 20\n\nforeach ${1:todoId} in [1..20] {\n  request.url = $\"https://jsonplaceholder.typicode.com/todos/{todoId}\"\n  let sent = request.send()\n  if sent.completed {\n    stash.UserId = sent.userId\n    stash.TodoId = sent.id\n    stash.Title = sent.title\n    stash.Commit()\n  }\n}\n\nexpect status == 200 \"returns 200\"",
             true),
         new(
+            "api-surface-crud",
+            "CRUD send loop",
+            "Flow",
+            "Exercise multiple API methods from one request script while verifying and stashing each step.",
+            "For API-surface tests, mutate `request.method`, `request.url`, `request.content_type`, and `request.body` between `request.send()` calls. Use `tests.Assert(...)` or `tests.Equal(...)` inside flow when you need per-step verification, stash the interesting fields per step, and leave `expect` statements top-level for the final response snapshot.",
+            """
+            timeout 15000
+            max_send_iterations 8
+            redirects true
+            ssl true
+            history true
+
+            runtime trace_id = guid()
+            header "Accept" = "application/json"
+            header "X-Correlation-Id" = "{{trace_id}}"
+
+            let created_name = $"ForRest Widget {trace_id}"
+            let patched_name = $"ForRest Widget Updated {trace_id}"
+
+            log $"Trace {trace_id}: GET /objects"
+            request.method = "GET"
+            request.url = "https://api.restful-api.dev/objects"
+            let sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "list returns 2xx")
+            tests.Assert(sent.length() >= 3, "list returns at least 3 objects")
+            let sample_id_a = convert.ToString(sent[0].id)
+            let sample_id_b = convert.ToString(sent[1].id)
+            let sample_id_c = convert.ToString(sent[2].id)
+            stash.Step = "list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.SampleIds = $"{sample_id_a},{sample_id_b},{sample_id_c}"
+            stash.Trace = trace_id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects?id=..."
+            request.url = $"https://api.restful-api.dev/objects?id={sample_id_a}&id={sample_id_b}&id={sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "filtered list returns 2xx")
+            tests.Equal(3, sent.length(), "filtered list returns requested ids")
+            stash.Step = "filtered-list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.FirstId = sent[0].id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects/{sample_id_c}"
+            request.url = $"https://api.restful-api.dev/objects/{sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "single object returns 2xx")
+            tests.Equal(sample_id_c, convert.ToString(sent.id), "single object returns requested id")
+            stash.Step = "single"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.Commit()
+
+            log $"Trace {trace_id}: POST /objects"
+            request.method = "POST"
+            request.url = "https://api.restful-api.dev/objects"
+            request.content_type = "application/json"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":1849.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "create returns 2xx")
+            tests.Equal(created_name, convert.ToString(sent.name), "create echoes name")
+            let created_id = sent.id
+            stash.Step = "create"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.Name = sent.name
+            stash.CreatedAt = sent.createdAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PUT /objects/{created_id}"
+            request.method = "PUT"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":2049.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\",\"color\":\"silver\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "put returns 2xx")
+            tests.Equal(2049.99, convert.ToDouble(sent.data.price), "put replaces price")
+            tests.Equal("silver", convert.ToString(sent.data.color), "put adds color")
+            stash.Step = "put"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Price = sent.data.price
+            stash.Color = sent.data.color
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PATCH /objects/{created_id}"
+            request.method = "PATCH"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{patched_name}\"}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "patch returns 2xx")
+            tests.Equal(patched_name, convert.ToString(sent.name), "patch updates name")
+            stash.Step = "patch"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: DELETE /objects/{created_id}"
+            request.method = "DELETE"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = ""
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "delete returns 2xx")
+            tests.Assert(strings.Contains(convert.ToString(sent.message), convert.ToString(created_id)), "delete message includes id")
+            stash.Step = "delete"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.DeleteMessage = sent.message
+            stash.Commit()
+
+            expect status == 200 "final delete returns 200"
+            expect header "Content-Type" contains "json" "json response"
+            """,
+            ["crud", "api surface", "post put patch delete", "request.method", "request.body", "request.content_type", "restful-api.dev", "tests.assert", "tests.equal", "query ids"],
+            ["request.method", "request.body", "request.content_type", "request.send", "tests", "api.restful-api.dev/objects"],
+            "Snippet",
+            "max_send_iterations 8\n\nrequest.method = \"GET\"\nrequest.url = \"https://api.restful-api.dev/objects\"\nlet sent = request.send()\ntests.Assert(sent.status >= 200 and sent.status < 300, \"list returns 2xx\")\nstash.Step = \"list\"\nstash.Status = sent.status\nstash.Count = sent.length()\nstash.Commit()\n\nrequest.method = \"POST\"\nrequest.url = \"https://api.restful-api.dev/objects\"\nrequest.content_type = \"application/json\"\nrequest.body = \"{\\\"name\\\":\\\"Validation Widget\\\"}\"\nsent = request.send()\nlet created_id = sent.id\ntests.Assert(sent.status >= 200 and sent.status < 300, \"create returns 2xx\")\nstash.Step = \"create\"\nstash.ObjectId = created_id\nstash.Commit()\n\nrequest.method = \"DELETE\"\nrequest.url = $\"https://api.restful-api.dev/objects/{created_id}\"\nrequest.body = \"\"\nsent = request.send()\ntests.Assert(sent.status >= 200 and sent.status < 300, \"delete returns 2xx\")\nstash.Step = \"delete\"\nstash.ObjectId = created_id\nstash.DeleteMessage = sent.message\nstash.Commit()\n\nexpect header \"Content-Type\" contains \"json\" \"json response\"",
+            true),
+        new(
             "count-alias",
             "value.length()",
             "Data",
@@ -679,7 +849,8 @@ internal static class ForRestLanguageReference
         builder.AppendLine("Supported top-level aliases:");
         builder.AppendLine();
         builder.AppendLine("- `method`, `url`, `timeout`, `redirects`, `ssl`, `history`, `content_type`, and `max_send_iterations` can be written at the top level or under `request`.");
-        builder.AppendLine("- `request.ssl`, `request.history`, and `request.max_send_iterations` are valid aliases and are kept in the same source of truth.");
+        builder.AppendLine("- Dotted members like `request.method`, `request.url`, `request.body`, `request.content_type`, and `request.headers` belong to flow code and mutate the next `request.send()` call.");
+        builder.AppendLine("- Compatibility aliases like `request.ssl`, `request.history`, and `request.max_send_iterations` still map to request metadata, but prefer the bare directives in new scripts.");
         builder.AppendLine();
         builder.AppendLine("## Auth Surface");
         builder.AppendLine();
@@ -713,7 +884,7 @@ internal static class ForRestLanguageReference
         builder.AppendLine("ForRest language reference.");
         builder.AppendLine("Use the exact syntax from the canonical catalog below.");
         builder.AppendLine();
-        AppendPromptSection(builder, "Request surface", RequestDirectiveKeys.Select(key => Entries.First(entry => string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase))));
+        AppendPromptSection(builder, "Request surface", Entries.Where(entry => entry.Category == "Request"));
         builder.AppendLine();
         AppendPromptSection(builder, "Auth modes", SupportedAuthModes.Select(mode => new ForRestLanguageHelpEntry(
             mode,
@@ -729,6 +900,8 @@ internal static class ForRestLanguageReference
             false)));
         builder.AppendLine();
         AppendPromptSection(builder, "Core flow", Entries.Where(entry => entry.Category is "Flow" or "Workspace" or "Response"));
+        builder.AppendLine();
+        AppendPromptSection(builder, "Assertions", Entries.Where(entry => entry.Category == "Assertions"));
         builder.AppendLine();
         AppendPromptSection(builder, "Helpers", Entries.Where(entry => entry.Category is "Data" or "Security" or "Variables"));
         builder.AppendLine();

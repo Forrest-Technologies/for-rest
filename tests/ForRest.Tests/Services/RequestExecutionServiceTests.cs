@@ -526,6 +526,11 @@ public sealed class RequestExecutionServiceTests
 
     private sealed class NoOpScriptEngine : IScriptEngine
     {
+        public ScriptValidationResult Validate(string script)
+        {
+            return new();
+        }
+
         public Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new ScriptExecutionResult

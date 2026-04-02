@@ -25,6 +25,46 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
 
     #region Public Methods
 
+    public ScriptValidationResult Validate(string script)
+    {
+        if (string.IsNullOrWhiteSpace(script))
+        {
+            return new();
+        }
+
+        try
+        {
+            Script<object> compiledScript = CreateScript(script);
+            ImmutableArray<Diagnostic> diagnostics = compiledScript.Compile();
+            string message = string.Join(
+                Environment.NewLine,
+                diagnostics
+                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
+                    .Select(static item => item.ToString()));
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return new();
+            }
+
+            logger.LogWarning("Script validation failed: {Message}", message);
+            return new()
+            {
+                ErrorMessage = message,
+            };
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Script validation failed");
+            string message = ShouldReportReferenceDiagnostics(exception)
+                ? BuildFriendlyRuntimeErrorMessage(exception) + Environment.NewLine + BuildReferenceDiagnostics()
+                : BuildFriendlyRuntimeErrorMessage(exception);
+            return new()
+            {
+                ErrorMessage = message,
+            };
+        }
+    }
+
     public async Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Script))
@@ -87,12 +127,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 stash = stashApi,
             };
 
-            var scriptRuntime = ScriptRuntime.Value;
-            var script = CSharpScript.Create(
-                request.Script,
-                scriptRuntime.Options,
-                typeof(ScriptGlobals),
-                CreateAssemblyLoader(scriptRuntime.ReferenceAssemblies));
+            Script<object> script = CreateScript(request.Script);
             await script.RunAsync(globals, cancellationToken: cancellationToken);
         }
         catch (CompilationErrorException exception)
@@ -177,7 +212,17 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             ],
             ErrorMessage = errorMessage,
             Stash = stashApi.BuildTable(),
-        };
+            };
+    }
+
+    private static Script<object> CreateScript(string script)
+    {
+        ScriptRuntimeConfiguration scriptRuntime = ScriptRuntime.Value;
+        return CSharpScript.Create(
+            script,
+            scriptRuntime.Options,
+            typeof(ScriptGlobals),
+            CreateAssemblyLoader(scriptRuntime.ReferenceAssemblies));
     }
 
     private static string BuildFriendlyRuntimeErrorMessage(Exception exception)

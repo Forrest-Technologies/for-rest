@@ -61,6 +61,8 @@ public sealed record AiConversationSettings
 
     public int MaxClarificationTurns { get; init; } = 2;
 
+    public int ExecutionTimeoutSeconds { get; init; } = 45;
+
     public bool StreamResponses { get; init; } = true;
 }
 

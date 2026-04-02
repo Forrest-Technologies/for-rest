@@ -590,6 +590,187 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_executes_compiled_restful_api_surface_qa_script_through_pre_request_and_tests()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var compilation = compiler.Compile(
+            """
+            name "restful-api QA"
+            method GET
+            url "https://api.restful-api.dev/objects"
+            timeout 15000
+            max_send_iterations 8
+            redirects true
+            ssl true
+            history true
+
+            runtime trace_id = guid()
+
+            header "Accept" = "application/json"
+            header "X-Workspace" = "{{workspace_name}}"
+            header "X-Environment" = "{{environment_name}}"
+            header "X-Correlation-Id" = "{{trace_id}}"
+
+            let created_name = $"ForRest Widget {trace_id}"
+            let patched_name = $"ForRest Widget Updated {trace_id}"
+
+            log $"Trace {trace_id}: GET /objects"
+            request.method = "GET"
+            request.url = "https://api.restful-api.dev/objects"
+            let sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "list returns 2xx")
+            tests.Assert(sent.length() >= 3, "list returns at least 3 objects")
+            let sample_id_a = convert.ToString(sent[0].id)
+            let sample_id_b = convert.ToString(sent[1].id)
+            let sample_id_c = convert.ToString(sent[2].id)
+            stash.Step = "list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.SampleIds = $"{sample_id_a},{sample_id_b},{sample_id_c}"
+            stash.Trace = trace_id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects?id=..."
+            request.url = $"https://api.restful-api.dev/objects?id={sample_id_a}&id={sample_id_b}&id={sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "filtered list returns 2xx")
+            tests.Equal(3, sent.length(), "filtered list returns requested ids")
+            stash.Step = "filtered-list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.FirstId = sent[0].id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects/{sample_id_c}"
+            request.url = $"https://api.restful-api.dev/objects/{sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "single object returns 2xx")
+            tests.Equal(sample_id_c, convert.ToString(sent.id), "single object returns requested id")
+            stash.Step = "single"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.Commit()
+
+            log $"Trace {trace_id}: POST /objects"
+            request.method = "POST"
+            request.url = "https://api.restful-api.dev/objects"
+            request.content_type = "application/json"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":1849.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "create returns 2xx")
+            tests.Equal(created_name, convert.ToString(sent.name), "create echoes name")
+            let created_id = sent.id
+            stash.Step = "create"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.Name = sent.name
+            stash.CreatedAt = sent.createdAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PUT /objects/{created_id}"
+            request.method = "PUT"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":2049.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\",\"color\":\"silver\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "put returns 2xx")
+            tests.Equal(2049.99, convert.ToDouble(sent.data.price), "put replaces price")
+            tests.Equal("silver", convert.ToString(sent.data.color), "put adds color")
+            stash.Step = "put"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Price = sent.data.price
+            stash.Color = sent.data.color
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PATCH /objects/{created_id}"
+            request.method = "PATCH"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{patched_name}\"}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "patch returns 2xx")
+            tests.Equal(patched_name, convert.ToString(sent.name), "patch updates name")
+            stash.Step = "patch"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: DELETE /objects/{created_id}"
+            request.method = "DELETE"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = ""
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "delete returns 2xx")
+            tests.Assert(strings.Contains(convert.ToString(sent.message), convert.ToString(created_id)), "delete message includes id")
+            stash.Step = "delete"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.DeleteMessage = sent.message
+            stash.Commit()
+
+            expect status == 200 "final delete returns 200"
+            expect header "Content-Type" contains "json" "json response"
+            """,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(compilation.Succeeded, string.Join(Environment.NewLine, compilation.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(compilation.Payload);
+
+        PreparedRequest initialRequest = BuildPreparedRequest(compilation.Payload.Request);
+        var runtimeVariables = new ForRestRuntimeVariableSeedEvaluator().Evaluate(compilation.Payload.RuntimeSeeds);
+
+        Task<ResponseSnapshot?> SendAsync(PreparedRequest preparedRequest)
+        {
+            return Task.FromResult<ResponseSnapshot?>(BuildRestfulApiDevResponse(preparedRequest));
+        }
+
+        ScriptExecutionResult preRequestResult = await scriptEngine.Run(
+            new()
+            {
+                Script = compilation.Payload.Request.PreRequestScript,
+                PreparedRequest = initialRequest,
+                Response = BuildRestfulApiDevResponse(initialRequest),
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+                RequestVariables = [.. compilation.Payload.Request.Variables],
+                RuntimeVariables = runtimeVariables,
+                SendAsync = SendAsync,
+                MaxSendIterations = compilation.Payload.Request.MaxSendIterations,
+            });
+
+        Assert.AreEqual(string.Empty, preRequestResult.ErrorMessage, compilation.Payload.Request.PreRequestScript);
+        Assert.AreEqual(7, preRequestResult.SendCount);
+        Assert.HasCount(7, preRequestResult.Stash.Rows);
+
+        ScriptExecutionResult testsResult = await scriptEngine.Run(
+            new()
+            {
+                Script = compilation.Payload.Request.TestsScript,
+                PreparedRequest = preRequestResult.PreparedRequest,
+                Response = preRequestResult.SentResponse ?? preRequestResult.Response,
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+                RequestVariables = [.. compilation.Payload.Request.Variables],
+                RuntimeVariables = [.. preRequestResult.RuntimeVariables],
+                SendAsync = SendAsync,
+                MaxSendIterations = compilation.Payload.Request.MaxSendIterations,
+            });
+
+        Assert.AreEqual(string.Empty, testsResult.ErrorMessage, compilation.Payload.Request.TestsScript);
+        Assert.IsTrue(testsResult.Tests.All(static item => item.State == TestOutcomeState.Passed));
+    }
+
+    [TestMethod]
     public async Task Run_renders_dollar_brace_templates_when_sending_requests()
     {
         string? capturedUrl = null;
@@ -1008,6 +1189,216 @@ public sealed class RoslynScriptEngineTests
         Assert.AreEqual(string.Empty, result.ErrorMessage);
         Assert.AreEqual(ConsoleEntryLevel.Warning, result.ConsoleEntries.First().Level);
         Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
+    }
+
+    private static PreparedRequest BuildPreparedRequest(RequestDefinition request)
+    {
+        return new()
+        {
+            Method = request.Method,
+            Uri = Uri.TryCreate(request.UrlTemplate, UriKind.Absolute, out Uri? uri)
+                ? uri
+                : new Uri("https://localhost"),
+            Headers = [.. request.Headers],
+            Body = request.Body,
+            Auth = request.Auth,
+            TimeoutMilliseconds = request.TimeoutMilliseconds,
+            FollowRedirects = request.FollowRedirects,
+            ValidateSsl = request.ValidateSsl,
+            RawRequest = $"{request.Method.ToString().ToUpperInvariant()} {request.UrlTemplate}",
+        };
+    }
+
+    private static ResponseSnapshot BuildRestfulApiDevResponse(PreparedRequest preparedRequest)
+    {
+        string[] pathSegments = preparedRequest.Uri.AbsolutePath
+            .Trim('/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string? objectId = pathSegments.Length > 1 ? pathSegments[1] : null;
+        string timestamp = "2026-03-30T10:15:00.000Z";
+
+        return preparedRequest.Method switch
+        {
+            HttpMethodKind.Get when !string.IsNullOrWhiteSpace(objectId) => BuildJsonResponse(
+                200,
+                new
+                {
+                    id = objectId,
+                    name = objectId switch
+                    {
+                        "1" => "Google Pixel 6 Pro",
+                        "2" => "Apple iPhone 12 Mini, 256GB, Blue",
+                        _ => "Apple iPhone 12 Pro Max",
+                    },
+                    data = new
+                    {
+                        price = 1849.99,
+                    },
+                }),
+            HttpMethodKind.Get when preparedRequest.Uri.Query.Contains("id=", StringComparison.OrdinalIgnoreCase) => BuildJsonResponse(
+                200,
+                GetQueryValues(preparedRequest.Uri, "id")
+                    .Select(
+                        id => new
+                        {
+                            id,
+                            name = $"Object {id}",
+                            data = new
+                            {
+                                price = 1849.99,
+                            },
+                        })
+                    .ToArray()),
+            HttpMethodKind.Get => BuildJsonResponse(
+                200,
+                new object[]
+                {
+                    new
+                    {
+                        id = "1",
+                        name = "Google Pixel 6 Pro",
+                        data = new
+                        {
+                            price = 999.99,
+                        },
+                    },
+                    new
+                    {
+                        id = "2",
+                        name = "Apple iPhone 12 Mini, 256GB, Blue",
+                        data = (object?)null,
+                    },
+                    new
+                    {
+                        id = "3",
+                        name = "Apple iPhone 12 Pro Max",
+                        data = new
+                        {
+                            price = 1849.99,
+                        },
+                    },
+                }),
+            HttpMethodKind.Post => BuildJsonResponse(
+                201,
+                new
+                {
+                    id = "701",
+                    name = ReadJsonString(preparedRequest.Body.RawContent, "name") ?? "Validation Object",
+                    createdAt = timestamp,
+                }),
+            HttpMethodKind.Put => BuildJsonResponse(
+                200,
+                new
+                {
+                    id = objectId ?? "701",
+                    name = ReadJsonString(preparedRequest.Body.RawContent, "name") ?? "Validation Object",
+                    data = new
+                    {
+                        price = ReadJsonNumber(preparedRequest.Body.RawContent, "data", "price") ?? 2049.99,
+                        color = ReadJsonString(preparedRequest.Body.RawContent, "data", "color") ?? "silver",
+                    },
+                    updatedAt = timestamp,
+                }),
+            HttpMethodKind.Patch => BuildJsonResponse(
+                200,
+                new
+                {
+                    id = objectId ?? "701",
+                    name = ReadJsonString(preparedRequest.Body.RawContent, "name") ?? "Validation Object Updated",
+                    updatedAt = timestamp,
+                }),
+            HttpMethodKind.Delete => BuildJsonResponse(
+                200,
+                new
+                {
+                    message = $"Object with id = {objectId ?? "701"}, has been deleted.",
+                }),
+            _ => BuildJsonResponse(200, new { ok = true }),
+        };
+    }
+
+    private static ResponseSnapshot BuildJsonResponse<T>(int statusCode, T body)
+    {
+        string bodyJson = System.Text.Json.JsonSerializer.Serialize(body);
+        return new()
+        {
+            StatusCode = statusCode,
+            ReasonPhrase = statusCode == 201 ? "Created" : "OK",
+            ContentType = "application/json",
+            Body = bodyJson,
+            RawResponse = $"HTTP/1.1 {statusCode}",
+            SizeBytes = bodyJson.Length,
+            Headers =
+            [
+                new()
+                {
+                    Key = "Content-Type",
+                    Value = "application/json",
+                },
+            ],
+        };
+    }
+
+    private static string[] GetQueryValues(Uri uri, string key)
+    {
+        if (string.IsNullOrWhiteSpace(uri.Query))
+        {
+            return [];
+        }
+
+        return uri.Query
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(
+                static pair =>
+                {
+                    string[] parts = pair.Split('=', 2);
+                    return new
+                    {
+                        Key = Uri.UnescapeDataString(parts[0]),
+                        Value = parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : string.Empty,
+                    };
+                })
+            .Where(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase))
+            .Select(static item => item.Value)
+            .ToArray();
+    }
+
+    private static string? ReadJsonString(string json, params string[] path)
+    {
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(json);
+        System.Text.Json.JsonElement current = document.RootElement;
+        foreach (string segment in path)
+        {
+            if (current.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                !current.TryGetProperty(segment, out current))
+            {
+                return null;
+            }
+        }
+
+        return current.ValueKind == System.Text.Json.JsonValueKind.String
+            ? current.GetString()
+            : current.ToString();
+    }
+
+    private static double? ReadJsonNumber(string json, params string[] path)
+    {
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(json);
+        System.Text.Json.JsonElement current = document.RootElement;
+        foreach (string segment in path)
+        {
+            if (current.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                !current.TryGetProperty(segment, out current))
+            {
+                return null;
+            }
+        }
+
+        return current.ValueKind == System.Text.Json.JsonValueKind.Number &&
+               current.TryGetDouble(out double number)
+            ? number
+            : null;
     }
 
     #endregion

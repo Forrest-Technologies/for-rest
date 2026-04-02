@@ -13,17 +13,29 @@
             <Grid x:Name="WorkbenchGrid"
                   ColumnSpacing="0">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="{Binding LeftRestoreRailWidth}" />
                     <ColumnDefinition Width="{Binding LeftPaneWidth}" />
                     <ColumnDefinition Width="{Binding LeftSplitterWidth}" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="{Binding RightSplitterWidth}" />
                     <ColumnDefinition Width="{Binding RightPaneWidth}" />
+                    <ColumnDefinition Width="{Binding RightRestoreRailWidth}" />
                 </Grid.ColumnDefinitions>
 
-                <controls:ExplorerPane Grid.Column="0"
+                <Border Grid.Column="0"
+                        IsVisible="{Binding ShowLeftPaneRestoreButton}"
+                        Style="{StaticResource CollapsedPaneRailBorderStyle}">
+                    <Button Text="Explorer"
+                            Clicked="OnToggleLeftPaneClicked"
+                            VerticalOptions="Start"
+                            HorizontalOptions="Fill"
+                            Style="{StaticResource CollapsedPaneRestoreButtonStyle}" />
+                </Border>
+
+                <controls:ExplorerPane Grid.Column="1"
                                        IsVisible="{Binding IsLeftPaneVisible}" />
 
-                <Grid Grid.Column="1"
+                <Grid Grid.Column="2"
                       x:Name="LeftSplitterLane"
                       IsVisible="{Binding IsLeftPaneVisible}"
                       BackgroundColor="Transparent">
@@ -39,9 +51,9 @@
                 </Grid>
 
                 <controls:WorkbenchCenterPane x:Name="CenterPane"
-                                              Grid.Column="2" />
+                                              Grid.Column="3" />
 
-                <Grid Grid.Column="3"
+                <Grid Grid.Column="4"
                       x:Name="RightSplitterLane"
                       IsVisible="{Binding IsRightPaneVisible}"
                       BackgroundColor="Transparent">
@@ -56,8 +68,18 @@
                              Color="{DynamicResource ThemeSplitterColor}" />
                 </Grid>
 
-                <controls:InspectorPane Grid.Column="4"
+                <controls:InspectorPane Grid.Column="5"
                                         IsVisible="{Binding IsRightPaneVisible}" />
+
+                <Border Grid.Column="6"
+                        IsVisible="{Binding ShowRightPaneRestoreButton}"
+                        Style="{StaticResource CollapsedPaneRailBorderStyle}">
+                    <Button Text="Inspect"
+                            Clicked="OnToggleRightPaneClicked"
+                            VerticalOptions="Start"
+                            HorizontalOptions="Fill"
+                            Style="{StaticResource CollapsedPaneRestoreButtonStyle}" />
+                </Border>
             </Grid>
 
             <Grid IsVisible="{Binding IsOverlayBackdropVisible}"
@@ -80,23 +102,6 @@
                                     VerticalOptions="Fill"
                                     ZIndex="6" />
 
-            <Button Text="Explorer"
-                    Clicked="OnToggleLeftPaneClicked"
-                    IsVisible="{Binding ShowLeftPaneRestoreButton}"
-                    HorizontalOptions="Start"
-                    VerticalOptions="Center"
-                    Margin="14,0,0,0"
-                    Style="{StaticResource CompactToolbarButtonStyle}"
-                    ZIndex="7" />
-
-            <Button Text="Inspect"
-                    Clicked="OnToggleRightPaneClicked"
-                    IsVisible="{Binding ShowRightPaneRestoreButton}"
-                    HorizontalOptions="End"
-                    VerticalOptions="Center"
-                    Margin="0,0,14,0"
-                    Style="{StaticResource CompactToolbarButtonStyle}"
-                    ZIndex="7" />
         </Grid>
 
         <Border Grid.Row="1"

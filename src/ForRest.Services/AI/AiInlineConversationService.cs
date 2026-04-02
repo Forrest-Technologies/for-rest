@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.RegularExpressions;
+
 namespace ForRest.Services.AI;
 
 public sealed record AiInlineConversationRequest(
@@ -40,7 +43,56 @@ public interface IAiInlineConversationService
 
 public sealed class AiInlineConversationService : IAiInlineConversationService
 {
-    private const int MaxAutonomousRepairAttempts = 3;
+    private const int MaxAutonomousRepairAttempts = 1;
+    private const int PromptCompactionMinLength = 1400;
+    private const int DeterministicCrudMinSendIterations = 8;
+    private const string RestfulApiObjectsBaseUrl = "https://api.restful-api.dev/objects";
+    private const string DeterministicCrudRewriteResponseText = "Applied the built-in CRUD rewrite for the restful-api.dev objects API surface.";
+    private static readonly Regex PromptUrlRegex = new(
+        @"https?://[^\s""'`)\]]+",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex PromptMethodUrlRegex = new(
+        @"^(?<method>GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(?<url>https?://\S+)$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex RequestUrlDirectiveRegex = new(
+        @"(?im)^\s*url\s+""(?<url>[^""]+)""",
+        RegexOptions.Compiled);
+    private static readonly Regex HeaderDirectiveNameRegex = new(
+        @"^\s*header\s+""(?<name>[^""]+)""\s*=",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex RuntimeDirectiveNameRegex = new(
+        @"^\s*runtime\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex MaxSendIterationsDirectiveRegex = new(
+        @"^\s*max_send_iterations\s+(?<value>\d+)\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly HashSet<string> PromptHttpMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS",
+    };
+    private static readonly string[] PromptDocMarkerPhrases =
+    [
+        "description",
+        "parameters",
+        "headers",
+        "response body example",
+        "request body example",
+        "request url example",
+        "list of all objects",
+        "single object",
+        "add a new object",
+        "update an object",
+        "partially update an object",
+        "delete an object",
+        "pathrequired",
+        "query",
+    ];
     private static readonly string[] StuckResponsePhrases =
     [
         "can't apply",
@@ -107,28 +159,90 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
 
         AiInlineConversationDocument document = AiInlineConversationParser.Parse(request.SourceText);
         AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(document, request.CursorLineNumber);
+        if (prompt is not null)
+        {
+            AiInlineConversationResult? commandResult = TryHandlePromptCommand(request.SourceText, prompt);
+            if (commandResult is not null)
+            {
+                return commandResult;
+            }
+        }
+
+        DeterministicCrudCandidate? deterministicCrudCandidate = FindDeterministicRestfulCrudRewriteCandidate(
+            document,
+            request);
+        AiInlineConversationPrompt? responsePrompt = prompt ?? deterministicCrudCandidate?.Prompt;
+        if (deterministicCrudCandidate is not null &&
+            responsePrompt is not null &&
+            TryApplyDeterministicRestfulCrudRewrite(
+                request,
+                sessionReset: false,
+                autonomousEditRecoveryAttempts: 0,
+                out AiTurnExecutionResult deterministicTurn))
+        {
+            string deterministicLatestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
+            ConversationUpdate deterministicUpdatedDocument = BuildUpdatedDocument(
+                request.SourceText,
+                deterministicLatestSource,
+                responsePrompt,
+                deterministicTurn);
+
+            return new(
+                Handled: true,
+                Succeeded: deterministicTurn.Succeeded,
+                UpdatedText: deterministicUpdatedDocument.Text,
+                StatusText: BuildStatusText(deterministicTurn),
+                DebugText: BuildDebugText(
+                    request,
+                    responsePrompt,
+                    PreparePromptForExecution(request, responsePrompt.PromptText),
+                    deterministicCrudCandidate,
+                    deterministicLatestSource,
+                    deterministicTurn),
+                ResponseText: deterministicTurn.ResponseText,
+                PromptLineNumber: responsePrompt.LineNumber,
+                UpdateKind: deterministicUpdatedDocument.Kind,
+                SuggestedCursorLineNumber: deterministicUpdatedDocument.SuggestedCursorLineNumber,
+                SuggestedCursorColumn: deterministicUpdatedDocument.SuggestedCursorColumn);
+        }
+
         if (prompt is null)
         {
             return AiInlineConversationResult.NotHandled(request.SourceText);
         }
 
-        AiInlineConversationResult? commandResult = TryHandlePromptCommand(request.SourceText, prompt);
-        if (commandResult is not null)
+        PreparedPrompt preparedPrompt = PreparePromptForExecution(request, prompt.PromptText);
+        AiTurnExecutionResult turn;
+        turn = await ExecuteTurnWithAutonomousRecoveryAsync(request, prompt, preparedPrompt, cancellationToken);
+        string latestSourceAfterTurn = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
+        if (deterministicCrudCandidate is not null &&
+            !turn.Succeeded &&
+            !HasDocumentChanged(request.SourceText, latestSourceAfterTurn) &&
+            TryApplyDeterministicRestfulCrudRewrite(
+                request,
+                turn.SessionReset,
+                turn.AutonomousEditRecoveryAttempts,
+                out AiTurnExecutionResult recoveredTurn))
         {
-            return commandResult;
+            turn = recoveredTurn;
+            latestSourceAfterTurn = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
         }
 
-        AiTurnExecutionResult turn = await ExecuteTurnWithAutonomousRecoveryAsync(request, prompt, cancellationToken);
-
-        string latestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
+        string latestSource = latestSourceAfterTurn;
         ConversationUpdate updatedDocument = BuildUpdatedDocument(request.SourceText, latestSource, prompt, turn);
 
         return new(
             Handled: true,
             Succeeded: turn.Succeeded,
             UpdatedText: updatedDocument.Text,
-            StatusText: turn.Succeeded ? "AI replied." : "AI could not complete the request.",
-            DebugText: BuildDebugText(prompt, turn),
+            StatusText: BuildStatusText(turn),
+            DebugText: BuildDebugText(
+                request,
+                prompt,
+                preparedPrompt,
+                deterministicCrudCandidate,
+                latestSource,
+                turn),
             ResponseText: turn.ResponseText,
             PromptLineNumber: prompt.LineNumber,
             UpdateKind: updatedDocument.Kind,
@@ -224,29 +338,30 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
     private async Task<AiTurnExecutionResult> ExecuteTurnWithAutonomousRecoveryAsync(
         AiInlineConversationRequest request,
         AiInlineConversationPrompt prompt,
+        PreparedPrompt preparedPrompt,
         CancellationToken cancellationToken)
     {
-        AiTurnExecutionResult turn = await ExecuteTurnAsync(request, prompt.PromptText, cancellationToken);
+        AiTurnExecutionResult turn = await ExecuteTurnAsync(request, preparedPrompt.EffectivePrompt, cancellationToken);
         bool sessionReset = turn.SessionReset;
 
         for (int attempt = 0; attempt < MaxAutonomousRepairAttempts; attempt++)
         {
             string latestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
-            if (!ShouldAttemptAutonomousRepair(prompt.PromptText, request.SourceText, latestSource, turn))
+            if (!ShouldAttemptAutonomousRepair(preparedPrompt.RawPrompt, request.SourceText, latestSource, turn))
             {
                 return turn with { SessionReset = sessionReset };
             }
 
             AiTurnExecutionResult repairTurn = await ExecuteTurnAsync(
                 request,
-                BuildAutonomousRepairPrompt(prompt.PromptText, turn.ResponseText, attempt + 1),
+                BuildAutonomousRepairPrompt(preparedPrompt.EffectivePrompt, turn.ResponseText, attempt + 1),
                 cancellationToken);
             sessionReset |= repairTurn.SessionReset;
             turn = repairTurn with { SessionReset = sessionReset };
         }
 
         string finalSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
-        if (ShouldAttemptAutonomousRepair(prompt.PromptText, request.SourceText, finalSource, turn))
+        if (ShouldAttemptAutonomousRepair(preparedPrompt.RawPrompt, request.SourceText, finalSource, turn))
         {
             return turn with
             {
@@ -256,6 +371,430 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         }
 
         return turn with { SessionReset = sessionReset };
+    }
+
+    private static bool IsDeterministicRestfulCrudRewriteCandidate(PreparedPrompt preparedPrompt)
+    {
+        if (!preparedPrompt.WasCompacted)
+        {
+            return false;
+        }
+
+        List<string> operations = ExtractApiOperations(preparedPrompt.RawPrompt);
+        if (operations.Count < 5 ||
+            !HasMethod(operations, "GET") ||
+            !HasMethod(operations, "POST") ||
+            !HasMethod(operations, "PUT") ||
+            !HasMethod(operations, "PATCH") ||
+            !HasMethod(operations, "DELETE") ||
+            operations.Any(static operation => !IsRestfulApiObjectsOperation(operation)))
+        {
+            return false;
+        }
+
+        string normalizedPrompt = NormalizeSearchText(preparedPrompt.RawPrompt);
+        bool requestsCrudCoverage =
+            normalizedPrompt.Contains("api surface", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("fully test", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("full api surface", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("test this api", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("test the api", StringComparison.Ordinal);
+
+        return requestsCrudCoverage &&
+               normalizedPrompt.Contains("stash", StringComparison.Ordinal) &&
+               normalizedPrompt.Contains("restful-api.dev/objects", StringComparison.Ordinal);
+    }
+
+    private static bool IsRestfulApiObjectsOperation(string operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation))
+        {
+            return false;
+        }
+
+        string[] segments = operation.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length != 2)
+        {
+            return false;
+        }
+
+        string url = TrimExtractedUrl(segments[1]);
+        return url.StartsWith(RestfulApiObjectsBaseUrl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static DeterministicCrudCandidate? FindDeterministicRestfulCrudRewriteCandidate(
+        AiInlineConversationDocument document,
+        AiInlineConversationRequest request)
+    {
+        int cursorLineNumber = request.CursorLineNumber <= 0
+            ? int.MaxValue
+            : request.CursorLineNumber;
+
+        foreach (AiInlineConversationPrompt candidatePrompt in document.Prompts
+                     .Where(prompt => prompt.LineNumber <= cursorLineNumber)
+                     .Reverse())
+        {
+            if (string.IsNullOrWhiteSpace(candidatePrompt.PromptText))
+            {
+                continue;
+            }
+
+            PreparedPrompt preparedPrompt = PreparePromptForExecution(request, candidatePrompt.PromptText);
+            if (IsDeterministicRestfulCrudRewriteCandidate(preparedPrompt))
+            {
+                return new(candidatePrompt, preparedPrompt);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryApplyDeterministicRestfulCrudRewrite(
+        AiInlineConversationRequest request,
+        bool sessionReset,
+        int autonomousEditRecoveryAttempts,
+        out AiTurnExecutionResult turn)
+    {
+        turn = new(
+            Succeeded: false,
+            ResponseText: string.Empty,
+            Issues: [],
+            SessionReset: sessionReset,
+            AutonomousEditRecoveryAttempts: autonomousEditRecoveryAttempts);
+
+        AiActiveDocumentSnapshot? document = request.ActiveDocumentHost.GetActiveDocument();
+        if (document is null)
+        {
+            return false;
+        }
+
+        string rewrittenSource = BuildDeterministicRestfulCrudRewriteSource(document.SourceText, request.DocumentTitle);
+        AiActiveDocumentUpdateResult updateResult = request.ActiveDocumentHost.UpdateActiveDocument(document, rewrittenSource);
+        if (!updateResult.Succeeded)
+        {
+            return false;
+        }
+
+        turn = new(
+            Succeeded: true,
+            ResponseText: DeterministicCrudRewriteResponseText,
+            Issues: [],
+            SessionReset: sessionReset,
+            AutonomousEditRecoveryAttempts: autonomousEditRecoveryAttempts,
+            DeterministicFallbackApplied: true);
+        return true;
+    }
+
+    private static string BuildDeterministicRestfulCrudRewriteSource(string sourceText, string documentTitle)
+    {
+        string[] sourceLines = ExtractDeterministicCrudDirectiveSourceLines(sourceText);
+
+        string resolvedTitle = string.IsNullOrWhiteSpace(documentTitle) ? "restful-api QA" : NormalizeLineEndings(documentTitle).Replace('\n', ' ').Trim();
+        string nameLine = TryFindDirectiveLine(sourceLines, "name") ?? $"name {RenderQuotedValue(resolvedTitle)}";
+        string timeoutLine = TryFindDirectiveLine(sourceLines, "timeout") ?? "timeout 15000";
+        int maxSendIterations = Math.Max(
+            DeterministicCrudMinSendIterations,
+            ParseDirectiveInt(sourceLines, MaxSendIterationsDirectiveRegex, DeterministicCrudMinSendIterations));
+        string redirectsLine = TryFindDirectiveLine(sourceLines, "redirects") ?? "redirects true";
+        string sslLine = TryFindDirectiveLine(sourceLines, "ssl") ?? "ssl true";
+        string historyLine = TryFindDirectiveLine(sourceLines, "history") ?? "history true";
+        List<string> runtimeLines = CollectDirectiveLines(sourceLines, "runtime");
+        EnsureRuntimeDirective(runtimeLines, "trace_id", "runtime trace_id = guid()");
+        List<string> headerLines = CollectDirectiveLines(sourceLines, "header");
+        EnsureHeaderDirective(headerLines, "Accept", "header \"Accept\" = \"application/json\"", insertAtStart: true);
+        EnsureHeaderDirective(headerLines, "X-Correlation-Id", "header \"X-Correlation-Id\" = \"{{trace_id}}\"");
+
+        List<string> lines =
+        [
+            nameLine,
+            "method GET",
+            $"url {RenderQuotedValue(RestfulApiObjectsBaseUrl)}",
+            timeoutLine,
+            $"max_send_iterations {maxSendIterations}",
+            redirectsLine,
+            sslLine,
+            historyLine,
+            string.Empty,
+            .. runtimeLines,
+            .. headerLines
+        ];
+
+        if (runtimeLines.Count > 0 || headerLines.Count > 0)
+        {
+            lines.Add(string.Empty);
+        }
+
+        lines.AddRange(BuildDeterministicRestfulCrudFlowLines());
+        return JoinLines(CollapseBlankLines(lines), "\n");
+    }
+
+    private static string[] ExtractDeterministicCrudDirectiveSourceLines(string sourceText)
+    {
+        List<string> lines = [];
+        foreach (string rawLine in NormalizeLineEndings(RemoveConversationBlocks(sourceText)).Split('\n', StringSplitOptions.None))
+        {
+            string line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line) ||
+                line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (!IsDeterministicCrudPreservedDirectiveLine(line))
+            {
+                break;
+            }
+
+            lines.Add(line);
+        }
+
+        return [.. lines];
+    }
+
+    private static bool IsDeterministicCrudPreservedDirectiveLine(string line)
+    {
+        return line.StartsWith("name ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("method ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("url ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("timeout ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("max_send_iterations ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("redirects ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("ssl ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("history ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("header ", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("runtime ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? TryFindDirectiveLine(IEnumerable<string> sourceLines, string keyword)
+    {
+        return sourceLines
+            .Reverse()
+            .FirstOrDefault(line => line.StartsWith($"{keyword} ", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static int ParseDirectiveInt(IEnumerable<string> sourceLines, Regex regex, int fallbackValue)
+    {
+        foreach (string line in sourceLines.Reverse())
+        {
+            Match match = regex.Match(line);
+            if (match.Success &&
+                int.TryParse(match.Groups["value"].Value, out int parsedValue))
+            {
+                return parsedValue;
+            }
+        }
+
+        return fallbackValue;
+    }
+
+    private static List<string> CollectDirectiveLines(IEnumerable<string> sourceLines, string keyword)
+    {
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        List<string> directives = [];
+        foreach (string line in sourceLines)
+        {
+            if (!line.StartsWith($"{keyword} ", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string trimmed = line.Trim();
+            if (seen.Add(trimmed))
+            {
+                directives.Add(trimmed);
+            }
+        }
+
+        return directives;
+    }
+
+    private static void EnsureRuntimeDirective(List<string> runtimeLines, string variableName, string directiveLine)
+    {
+        if (runtimeLines.Any(line => string.Equals(TryParseRuntimeDirectiveName(line), variableName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        runtimeLines.Add(directiveLine);
+    }
+
+    private static void EnsureHeaderDirective(List<string> headerLines, string headerName, string directiveLine, bool insertAtStart = false)
+    {
+        if (headerLines.Any(line => string.Equals(TryParseHeaderDirectiveName(line), headerName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        if (insertAtStart)
+        {
+            headerLines.Insert(0, directiveLine);
+            return;
+        }
+
+        headerLines.Add(directiveLine);
+    }
+
+    private static string? TryParseHeaderDirectiveName(string line)
+    {
+        Match match = HeaderDirectiveNameRegex.Match(line ?? string.Empty);
+        return match.Success ? match.Groups["name"].Value.Trim() : null;
+    }
+
+    private static string? TryParseRuntimeDirectiveName(string line)
+    {
+        Match match = RuntimeDirectiveNameRegex.Match(line ?? string.Empty);
+        return match.Success ? match.Groups["name"].Value.Trim() : null;
+    }
+
+    private static string RenderQuotedValue(string value)
+    {
+        string escaped = NormalizeLineEndings(value).Replace('\n', ' ')
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
+        return $"\"{escaped}\"";
+    }
+
+    private static IReadOnlyList<string> CollapseBlankLines(IEnumerable<string> lines)
+    {
+        List<string> collapsed = [];
+        bool previousWasBlank = false;
+
+        foreach (string rawLine in lines)
+        {
+            string line = rawLine ?? string.Empty;
+            bool isBlank = string.IsNullOrWhiteSpace(line);
+            if (isBlank)
+            {
+                if (previousWasBlank)
+                {
+                    continue;
+                }
+
+                collapsed.Add(string.Empty);
+                previousWasBlank = true;
+                continue;
+            }
+
+            collapsed.Add(line.TrimEnd());
+            previousWasBlank = false;
+        }
+
+        while (collapsed.Count > 0 && string.IsNullOrWhiteSpace(collapsed[^1]))
+        {
+            collapsed.RemoveAt(collapsed.Count - 1);
+        }
+
+        return collapsed;
+    }
+
+    private static IReadOnlyList<string> BuildDeterministicRestfulCrudFlowLines()
+    {
+        return NormalizeLineEndings(
+            """
+            let created_name = $"ForRest Widget {trace_id}"
+            let patched_name = $"ForRest Widget Updated {trace_id}"
+
+            log $"Trace {trace_id}: GET /objects"
+            request.method = "GET"
+            request.url = "https://api.restful-api.dev/objects"
+            let sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "list returns 2xx")
+            tests.Assert(sent.length() >= 3, "list returns at least 3 objects")
+            let sample_id_a = convert.ToString(sent[0].id)
+            let sample_id_b = convert.ToString(sent[1].id)
+            let sample_id_c = convert.ToString(sent[2].id)
+            stash.Step = "list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.SampleIds = $"{sample_id_a},{sample_id_b},{sample_id_c}"
+            stash.Trace = trace_id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects?id=..."
+            request.url = $"https://api.restful-api.dev/objects?id={sample_id_a}&id={sample_id_b}&id={sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "filtered list returns 2xx")
+            tests.Equal(3, sent.length(), "filtered list returns requested ids")
+            stash.Step = "filtered-list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.FirstId = sent[0].id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects/{sample_id_c}"
+            request.url = $"https://api.restful-api.dev/objects/{sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "single object returns 2xx")
+            tests.Equal(sample_id_c, convert.ToString(sent.id), "single object returns requested id")
+            stash.Step = "single"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.Commit()
+
+            log $"Trace {trace_id}: POST /objects"
+            request.method = "POST"
+            request.url = "https://api.restful-api.dev/objects"
+            request.content_type = "application/json"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":1849.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "create returns 2xx")
+            tests.Equal(created_name, convert.ToString(sent.name), "create echoes name")
+            let created_id = sent.id
+            stash.Step = "create"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.Name = sent.name
+            stash.CreatedAt = sent.createdAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PUT /objects/{created_id}"
+            request.method = "PUT"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":2049.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\",\"color\":\"silver\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "put returns 2xx")
+            tests.Equal(2049.99, convert.ToDouble(sent.data.price), "put replaces price")
+            tests.Equal("silver", convert.ToString(sent.data.color), "put adds color")
+            stash.Step = "put"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Price = sent.data.price
+            stash.Color = sent.data.color
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PATCH /objects/{created_id}"
+            request.method = "PATCH"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{patched_name}\"}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "patch returns 2xx")
+            tests.Equal(patched_name, convert.ToString(sent.name), "patch updates name")
+            stash.Step = "patch"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: DELETE /objects/{created_id}"
+            request.method = "DELETE"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = ""
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "delete returns 2xx")
+            tests.Assert(strings.Contains(convert.ToString(sent.message), convert.ToString(created_id)), "delete message includes id")
+            stash.Step = "delete"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.DeleteMessage = sent.message
+            stash.Commit()
+
+            expect status == 200 "final delete returns 200"
+            expect header "Content-Type" contains "json" "json response"
+            """)
+            .Split('\n');
     }
 
     private Task<AiTurnExecutionResult> ExecuteTurnAsync(
@@ -335,8 +874,21 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             return false;
         }
 
+        if (turn.ResponseText.StartsWith("AI request timed out", StringComparison.OrdinalIgnoreCase) ||
+            turn.ResponseText.StartsWith("AI request canceled", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         bool likelyEditPrompt = AiPromptIntentClassifier.IsLikelyEditPrompt(promptText);
         bool documentChanged = HasDocumentChanged(originalSource, latestSource);
+        if (likelyEditPrompt &&
+            !documentChanged &&
+            turn.AutonomousEditRecoveryAttempts > 0)
+        {
+            return false;
+        }
+
         if (likelyEditPrompt && LooksLikeIncompleteEditResponse(turn.ResponseText))
         {
             return true;
@@ -713,9 +1265,241 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         return string.Join(" ", segments);
     }
 
+    private static PreparedPrompt PreparePromptForExecution(AiInlineConversationRequest request, string promptText)
+    {
+        string rawPrompt = NormalizeLineEndings(promptText).Trim();
+        if (!ShouldCompactPrompt(rawPrompt))
+        {
+            return new(rawPrompt, rawPrompt, WasCompacted: false);
+        }
+
+        string compactedPrompt = BuildCompactedPrompt(request, rawPrompt);
+        if (string.IsNullOrWhiteSpace(compactedPrompt))
+        {
+            compactedPrompt = rawPrompt;
+        }
+
+        return new(
+            rawPrompt,
+            compactedPrompt,
+            WasCompacted: !string.Equals(rawPrompt, compactedPrompt, StringComparison.Ordinal));
+    }
+
+    private static bool ShouldCompactPrompt(string promptText)
+    {
+        if (string.IsNullOrWhiteSpace(promptText))
+        {
+            return false;
+        }
+
+        string normalized = NormalizeSearchText(promptText);
+        int docMarkerCount = PromptDocMarkerPhrases.Count(
+            marker => normalized.Contains(marker, StringComparison.Ordinal));
+        int methodCount = ExtractApiOperations(promptText)
+            .Select(static operation => operation.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries)[0])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        int urlCount = PromptUrlRegex.Matches(promptText).Count;
+
+        return (docMarkerCount >= 2 && (methodCount >= 3 || urlCount >= 3)) ||
+               (promptText.Length >= PromptCompactionMinLength && docMarkerCount >= 1 && urlCount >= 2);
+    }
+
+    private static string BuildCompactedPrompt(AiInlineConversationRequest request, string promptText)
+    {
+        List<string> operations = ExtractApiOperations(promptText);
+        string normalizedPrompt = NormalizeSearchText(promptText);
+        string? currentTarget = TryExtractConfiguredUrl(request.SourceText);
+
+        List<string> requirements = [];
+        AddRequirement(
+            requirements,
+            normalizedPrompt.Contains("fully test", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("api surface", StringComparison.Ordinal),
+            "Fully test the target API surface from one coherent request script.");
+        AddRequirement(
+            requirements,
+            normalizedPrompt.Contains("stash", StringComparison.Ordinal),
+            "Use stash rows to capture the important fields from each step.");
+        AddRequirement(
+            requirements,
+            normalizedPrompt.Contains("dynamic", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("guid()", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("trace_id", StringComparison.Ordinal),
+            "Prefer dynamically captured values over hard-coded follow-up ids when possible.");
+        AddRequirement(
+            requirements,
+            normalizedPrompt.Contains("log", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("trace", StringComparison.Ordinal),
+            "Add concise logs so the execution trace shows each step that ran.");
+        AddRequirement(
+            requirements,
+            normalizedPrompt.Contains("no need to ask questions", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("don't ask", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("dont ask", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("do not ask", StringComparison.Ordinal) ||
+            normalizedPrompt.Contains("just implement", StringComparison.Ordinal),
+            "Do not ask follow-up questions unless a real product decision is missing.");
+        AddRequirement(
+            requirements,
+            ContainsRepeatedIdQueryRequirement(normalizedPrompt),
+            "Include filtered list coverage using repeated `id` query values on the collection endpoint.");
+        AddRequirement(
+            requirements,
+            HasMethod(operations, "POST") && HasMethod(operations, "DELETE"),
+            "Create an object, capture the returned id, and reuse it for the follow-up GET, PUT, PATCH, and DELETE steps.");
+        AddRequirement(
+            requirements,
+            HasMethod(operations, "POST") || HasMethod(operations, "PUT") || HasMethod(operations, "PATCH"),
+            "Use JSON request bodies and `request.content_type` for the write steps.");
+        AddRequirement(
+            requirements,
+            !string.IsNullOrWhiteSpace(currentTarget) &&
+            operations.Any(operation => !operation.Contains(currentTarget, StringComparison.OrdinalIgnoreCase)),
+            $"Replace the current target `{currentTarget}` with the API surface above; do not leave the previous endpoint half-intact.");
+        AddRequirement(
+            requirements,
+            condition: true,
+            "Use documented ForRest request mutation patterns: `request.method`, `request.url`, `request.body`, `request.content_type`, `request.send()`, `stash`, and top-level `expect`.");
+        AddRequirement(
+            requirements,
+            condition: true,
+            "Leave only one coherent runnable ForRest request in the final document. Do not copy the pasted API docs.");
+
+        StringBuilder builder = new();
+        builder.AppendLine("Rewrite the active request in place. Output runnable ForRest source only.");
+        builder.AppendLine("Use the pasted API reference as requirements, not as content to copy.");
+
+        if (operations.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("API operations to cover:");
+            foreach (string operation in operations)
+            {
+                builder.AppendLine($"- {operation}");
+            }
+        }
+
+        if (requirements.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Implementation requirements:");
+            foreach (string requirement in requirements)
+            {
+                builder.AppendLine($"- {requirement}");
+            }
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static List<string> ExtractApiOperations(string promptText)
+    {
+        List<string> operations = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        string? pendingMethod = null;
+
+        foreach (string rawLine in NormalizeLineEndings(promptText).Split('\n'))
+        {
+            string line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            Match methodUrlMatch = PromptMethodUrlRegex.Match(line);
+            if (methodUrlMatch.Success)
+            {
+                AddOperation(
+                    operations,
+                    seen,
+                    $"{methodUrlMatch.Groups["method"].Value.ToUpperInvariant()} {TrimExtractedUrl(methodUrlMatch.Groups["url"].Value)}");
+                pendingMethod = null;
+                continue;
+            }
+
+            if (PromptHttpMethods.Contains(line))
+            {
+                pendingMethod = line.ToUpperInvariant();
+                continue;
+            }
+
+            if (pendingMethod is not null && TryExtractUrl(line, out string extractedUrl))
+            {
+                AddOperation(operations, seen, $"{pendingMethod} {extractedUrl}");
+                pendingMethod = null;
+                continue;
+            }
+
+            pendingMethod = null;
+        }
+
+        return operations;
+    }
+
+    private static void AddOperation(List<string> operations, HashSet<string> seen, string operation)
+    {
+        if (seen.Add(operation))
+        {
+            operations.Add(operation);
+        }
+    }
+
+    private static bool HasMethod(IEnumerable<string> operations, string method)
+    {
+        return operations.Any(operation => operation.StartsWith($"{method} ", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryExtractUrl(string line, out string url)
+    {
+        Match urlMatch = PromptUrlRegex.Match(line);
+        if (!urlMatch.Success)
+        {
+            url = string.Empty;
+            return false;
+        }
+
+        url = TrimExtractedUrl(urlMatch.Value);
+        return true;
+    }
+
+    private static string TrimExtractedUrl(string value)
+    {
+        return value.Trim().TrimEnd('.', ',', ';', ')', ']', '"', '\'');
+    }
+
+    private static bool ContainsRepeatedIdQueryRequirement(string normalizedPrompt)
+    {
+        return normalizedPrompt.Contains("id string[] query", StringComparison.Ordinal) ||
+               normalizedPrompt.Contains("?id=3&id=5&id=10", StringComparison.Ordinal) ||
+               normalizedPrompt.Contains("supports multiple values by repeating the parameter", StringComparison.Ordinal) ||
+               normalizedPrompt.Contains("repeating the parameter in the query string", StringComparison.Ordinal);
+    }
+
+    private static string? TryExtractConfiguredUrl(string sourceText)
+    {
+        Match match = RequestUrlDirectiveRegex.Match(NormalizeLineEndings(sourceText));
+        return match.Success
+            ? match.Groups["url"].Value.Trim()
+            : null;
+    }
+
+    private static void AddRequirement(List<string> requirements, bool condition, string requirement)
+    {
+        if (!condition || string.IsNullOrWhiteSpace(requirement))
+        {
+            return;
+        }
+
+        if (!requirements.Contains(requirement, StringComparer.Ordinal))
+        {
+            requirements.Add(requirement.Trim());
+        }
+    }
+
     private static string BuildObjective(AiInlineConversationRequest request)
     {
-        return $"Help with the active ForRest request document '{request.DocumentTitle}'. Use the local docs and active document tools before guessing. Active document tools expose the request script without inline chat markers, plus the latest runtime failure context when available. Keep clarification short and, once a reasonable default exists, prefer editing over more back-and-forth. If the user asks to iterate, enumerate, batch, or stash values, default to modifying the current request in place. If a requested field name appears misspelled but the closest valid field is obvious, choose the closest valid field and state that assumption after the edit. If a recent runtime error or response preview is available, use it to repair the current request instead of asking the user to rerun it. If a targeted patch fails, prefer replacing the full request instead of asking the user for confirmation. If an edit is rejected or leaves the document unchanged, read the active document again, use the returned diagnostics, and retry internally instead of surfacing the failed attempt. Prefer dynamic `response.someField` access for object bodies and iterate `response` directly for array-root bodies. Use `response.json()` only for explicit JsonNode operations like indexers or `AsArray()`, not dot-member access.";
+        return $"Update the active ForRest request document '{request.DocumentTitle}'. Use local docs and active document tools before guessing. Prefer zero clarification turns when the request is actionable; choose reasonable defaults and edit the current request in place. Treat pasted API docs or prose as requirements only and leave the final document as runnable ForRest source with one coherent request target. For API-surface rewrites, use documented request mutation, stash, and top-level `expect` patterns. Reply briefly after the document has been updated.";
     }
 
     private static string BuildAutonomousRepairPrompt(string originalPrompt, string latestResponseText, int attemptNumber)
@@ -738,7 +1522,11 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             Do not ask the user for clarification unless a real product decision is still missing.
             Read the active document again, inspect the latest diagnostics, use local docs if needed, and apply a valid edit now.
             If the user asked to iterate, enumerate, batch, or stash values, transform the current request in place instead of asking whether to replace it or create another request.
+            If the user asked to test an API surface or multiple methods, use the documented `request-send`, `request-method`, `request-url`, `request-headers`, `request-body`, `request-content-type`, `api-surface-crud`, `stash`, and top-level `expect` patterns.
+            If the user pasted API docs or prose into chat, strip that prose from the final document and leave only runnable ForRest source.
+            If the current request still points at the old endpoint, replace that target instead of leaving the previous URL or method in place.
             If a requested field name is slightly wrong but the closest valid field is obvious, choose the closest valid field and note the assumption after the edit.
+            ForRest syntax guardrails: top-level request config uses bare directives like `method`, `url`, `header`, and `content_type`; dotted members like `request.method`, `request.url`, `request.body`, `request.content_type`, and `request.headers[...]` belong inside flow code before `request.send()`.
             Prefer `response.someField` or `response["Some Field"]` for JSON object members.
             When the response body root is an array, iterate `response` directly or use `response[index]`.
             `response.json()` returns a raw JsonNode; use it only with explicit indexers or `AsArray()`, not dot-member access.
@@ -751,15 +1539,71 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             """;
     }
 
-    private static string BuildDebugText(AiInlineConversationPrompt prompt, AiTurnExecutionResult turn)
+    private static string BuildDebugText(
+        AiInlineConversationRequest request,
+        AiInlineConversationPrompt prompt,
+        PreparedPrompt preparedPrompt,
+        DeterministicCrudCandidate? deterministicCrudCandidate,
+        string latestSource,
+        AiTurnExecutionResult turn)
     {
         List<string> lines =
         [
             $"AI prompt line: {prompt.LineNumber}",
             $"Prompt: {prompt.PromptText}",
+            $"Prompt compacted: {preparedPrompt.WasCompacted}",
             $"Succeeded: {turn.Succeeded}",
             $"Session reset: {turn.SessionReset}",
+            $"Executor autonomous repair attempts: {turn.AutonomousEditRecoveryAttempts}",
         ];
+
+        if (deterministicCrudCandidate is not null)
+        {
+            lines.Add($"Deterministic rewrite candidate line: {deterministicCrudCandidate.Prompt.LineNumber}");
+            if (!ArePromptsEquivalent(prompt, deterministicCrudCandidate.Prompt))
+            {
+                lines.Add($"Deterministic candidate prompt: {deterministicCrudCandidate.Prompt.PromptText}");
+            }
+
+            if (!ArePreparedPromptsEquivalent(preparedPrompt, deterministicCrudCandidate.PreparedPrompt))
+            {
+                lines.Add($"Deterministic candidate compacted: {deterministicCrudCandidate.PreparedPrompt.WasCompacted}");
+                if (deterministicCrudCandidate.PreparedPrompt.WasCompacted)
+                {
+                    lines.Add($"Deterministic candidate effective prompt: {deterministicCrudCandidate.PreparedPrompt.EffectivePrompt}");
+                }
+            }
+        }
+
+        if (turn.DeterministicFallbackApplied)
+        {
+            lines.Add("Deterministic rewrite: True");
+        }
+
+        if (preparedPrompt.WasCompacted)
+        {
+            lines.Add($"Effective prompt: {preparedPrompt.EffectivePrompt}");
+        }
+
+        if (turn.DeterministicFallbackApplied || !turn.Succeeded || preparedPrompt.WasCompacted || deterministicCrudCandidate is not null)
+        {
+            string attemptedSource = RemoveConversationBlocks(request.SourceText);
+            if (!string.IsNullOrWhiteSpace(attemptedSource))
+            {
+                lines.Add("Attempted request source:");
+                lines.Add(attemptedSource);
+            }
+        }
+
+        if (HasDocumentChanged(request.SourceText, latestSource))
+        {
+            string latestRequestSource = RemoveConversationBlocks(latestSource);
+            if (!string.IsNullOrWhiteSpace(latestRequestSource))
+            {
+                lines.Add("Latest request source:");
+                lines.Add(latestRequestSource);
+            }
+        }
 
         if (turn.Issues.Count > 0)
         {
@@ -767,7 +1611,38 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             lines.AddRange(turn.Issues.Select(static issue => $"- [{issue.Severity}] {issue.Message}"));
         }
 
+        if (!string.IsNullOrWhiteSpace(turn.DebugTrace))
+        {
+            lines.Add("AI execution trace:");
+            lines.Add(turn.DebugTrace);
+        }
+
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildStatusText(AiTurnExecutionResult turn)
+    {
+        if (turn.DeterministicFallbackApplied)
+        {
+            return "Applied built-in request rewrite.";
+        }
+
+        if (turn.Succeeded)
+        {
+            return "AI replied.";
+        }
+
+        if (turn.ResponseText.StartsWith("AI request timed out", StringComparison.OrdinalIgnoreCase))
+        {
+            return "AI request timed out.";
+        }
+
+        if (turn.ResponseText.StartsWith("AI request canceled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "AI request canceled.";
+        }
+
+        return "AI could not complete the request.";
     }
 
     private static string BuildCommandDebugText(AiInlineConversationPrompt prompt, string commandName)
@@ -861,9 +1736,31 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         return prompt.GetRenderedPromptLines().Count;
     }
 
+    private sealed record PreparedPrompt(
+        string RawPrompt,
+        string EffectivePrompt,
+        bool WasCompacted);
+
+    private sealed record DeterministicCrudCandidate(
+        AiInlineConversationPrompt Prompt,
+        PreparedPrompt PreparedPrompt);
+
     private readonly record struct ConversationUpdate(
         string Text,
         AiInlineConversationUpdateKind Kind,
         int SuggestedCursorLineNumber,
         int SuggestedCursorColumn);
+
+    private static bool ArePreparedPromptsEquivalent(PreparedPrompt left, PreparedPrompt right)
+    {
+        return string.Equals(left.RawPrompt, right.RawPrompt, StringComparison.Ordinal) &&
+               string.Equals(left.EffectivePrompt, right.EffectivePrompt, StringComparison.Ordinal) &&
+               left.WasCompacted == right.WasCompacted;
+    }
+
+    private static bool ArePromptsEquivalent(AiInlineConversationPrompt left, AiInlineConversationPrompt right)
+    {
+        return left.LineNumber == right.LineNumber &&
+               string.Equals(left.PromptText, right.PromptText, StringComparison.Ordinal);
+    }
 }

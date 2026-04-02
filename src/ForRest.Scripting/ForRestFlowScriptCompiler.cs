@@ -183,6 +183,8 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
+            TryCollectStatementText(lines, index, out string statementText, out int consumedLineCount);
+
             if (IsUnsupportedClassicForLoop(trimmed))
             {
                 diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "Classic C-style for loops are not supported in .frs flow. Use 'foreach item in range(...) { }' or 'while ... { }'.", index + 1, 1));
@@ -190,53 +192,59 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
-            if (TryCompileLetStatement(builder, trimmed, locals, templateBoundIdentifiers))
+            if (TryCompileLetStatement(builder, statementText, locals, templateBoundIdentifiers))
             {
-                index++;
+                index += consumedLineCount;
                 continue;
             }
 
-            if (TryCompileRuntimeStatement(builder, trimmed, locals, ref tempCounter))
+            if (TryCompileRuntimeStatement(builder, statementText, locals, ref tempCounter))
             {
-                index++;
+                index += consumedLineCount;
                 continue;
             }
 
-            if (TryCompileLogStatement(builder, trimmed, "Log", locals))
+            if (TryCompileLogStatement(builder, statementText, "Log", locals))
             {
-                index++;
+                index += consumedLineCount;
                 continue;
             }
 
-            if (TryCompileLogStatement(builder, trimmed, "Warn", locals))
+            if (TryCompileLogStatement(builder, statementText, "Warn", locals))
             {
-                index++;
+                index += consumedLineCount;
                 continue;
             }
 
-            if (TryCompileLogStatement(builder, trimmed, "Error", locals))
+            if (TryCompileLogStatement(builder, statementText, "Error", locals))
             {
-                index++;
+                index += consumedLineCount;
                 continue;
             }
 
-            if (TryReportMalformedLegacyHelperCall(trimmed, index, diagnostics))
+            if (TryReportMisplacedExpectation(statementText, index, diagnostics))
             {
-                index++;
+                index += consumedLineCount;
                 continue;
             }
 
-            if (trimmed.EndsWith('{'))
+            if (TryReportMalformedLegacyHelperCall(statementText, index, diagnostics))
             {
-                builder.AppendLine(TranslateRawStatement(trimmed, locals));
-                index++;
+                index += consumedLineCount;
+                continue;
+            }
+
+            if (statementText.EndsWith('{'))
+            {
+                builder.AppendLine(TranslateRawStatement(statementText, locals));
+                index += consumedLineCount;
                 CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
                 builder.AppendLine("}");
                 continue;
             }
 
-            builder.AppendLine(TranslateRawStatement(trimmed, locals));
-            index++;
+            builder.AppendLine(TranslateRawStatement(statementText, locals));
+            index += consumedLineCount;
         }
 
         if (allowBlockTerminator)
@@ -488,6 +496,16 @@ internal static class ForRestFlowScriptCompiler
     private static string TranslateRawStatement(string statement, HashSet<string> locals)
     {
         var trimmed = TrimStatement(statement);
+        if (TryTranslateStructuredRequestBodyAssignment(trimmed, locals, out string structuredLiteralAssignment))
+        {
+            return structuredLiteralAssignment;
+        }
+
+        if (TryTranslateBareRequestDirectiveStatement(trimmed, locals, out string requestDirectiveAssignment))
+        {
+            return requestDirectiveAssignment;
+        }
+
         var suffix = statement.TrimEnd().EndsWith('{') ? " {" : ";";
         if (suffix == " {")
         {
@@ -495,6 +513,161 @@ internal static class ForRestFlowScriptCompiler
         }
 
         return TranslateExpression(trimmed, locals) + suffix;
+    }
+
+    private static bool TryTranslateStructuredRequestBodyAssignment(
+        string statement,
+        HashSet<string> locals,
+        out string translated)
+    {
+        translated = string.Empty;
+        if (!TryFindAssignmentIndex(statement, out int separatorIndex) || separatorIndex < 1)
+        {
+            return false;
+        }
+
+        string left = statement[..separatorIndex].Trim();
+        if (!string.Equals(left, "request.body", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string expression = TrimStatement(statement[(separatorIndex + 1)..]);
+        if (!TryRenderStructuredJsonLiteral(expression, out string renderedJson))
+        {
+            if (!TryRenderDynamicStructuredJsonLiteral(expression, locals, out string renderedStructuredJsonExpression))
+            {
+                return false;
+            }
+
+            translated = $"{TranslateExpression(left, locals)} = json.Stringify({renderedStructuredJsonExpression}, false);";
+            return true;
+        }
+
+        translated = $"{TranslateExpression(left, locals)} = {renderedJson};";
+        return true;
+    }
+
+    private static bool TryTranslateBareRequestDirectiveStatement(
+        string statement,
+        HashSet<string> locals,
+        out string translated)
+    {
+        translated = string.Empty;
+
+        foreach ((string Keyword, string TargetProperty) mapping in new[]
+                 {
+                     ("method", "request.Method"),
+                     ("url", "request.Url"),
+                     ("content_type", "request.ContentType"),
+                 })
+        {
+            if (!TryReadKeywordRemainder(statement, mapping.Keyword, out string remainder))
+            {
+                continue;
+            }
+
+            translated = $"{mapping.TargetProperty} = {RenderDirectiveMutationValue(mapping.Keyword, remainder, locals)};";
+            return true;
+        }
+
+        if (!TryReadKeywordRemainder(statement, "header", out string headerRemainder))
+        {
+            return false;
+        }
+
+        if (!TryParseNamedDirectiveAssignment(headerRemainder, out string key, out string valueExpression))
+        {
+            return false;
+        }
+
+        translated = $"request.Headers[{RenderString(key)}] = {TranslateExpression(valueExpression, locals)};";
+        return true;
+    }
+
+    private static string RenderDirectiveMutationValue(string keyword, string expression, HashSet<string> locals)
+    {
+        string trimmed = TrimStatement(expression);
+        if (string.Equals(keyword, "method", StringComparison.OrdinalIgnoreCase) &&
+            Regex.IsMatch(trimmed, "^[A-Za-z]+$", RegexOptions.CultureInvariant))
+        {
+            return RenderString(trimmed.ToUpperInvariant());
+        }
+
+        return TranslateExpression(trimmed, locals);
+    }
+
+    private static bool TryParseNamedDirectiveAssignment(string remainder, out string key, out string valueExpression)
+    {
+        key = string.Empty;
+        valueExpression = string.Empty;
+
+        int index = 0;
+        SkipWhitespace(remainder, ref index);
+        if (!TryReadQuotedToken(remainder, ref index, out key))
+        {
+            return false;
+        }
+
+        SkipWhitespace(remainder, ref index);
+        if (index >= remainder.Length || remainder[index] != '=')
+        {
+            return false;
+        }
+
+        index++;
+        SkipWhitespace(remainder, ref index);
+        if (index >= remainder.Length)
+        {
+            return false;
+        }
+
+        valueExpression = TrimStatement(remainder[index..]);
+        return !string.IsNullOrWhiteSpace(valueExpression);
+    }
+
+    private static bool TryRenderStructuredJsonLiteral(string expression, out string renderedJson)
+    {
+        renderedJson = string.Empty;
+        string normalized = Normalize(expression).Trim();
+        if (!IsStructuredLiteralStart(normalized))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument _ = JsonDocument.Parse(normalized);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        renderedJson = RenderString(normalized);
+        return true;
+    }
+
+    private static bool TryRenderDynamicStructuredJsonLiteral(
+        string expression,
+        HashSet<string> locals,
+        out string renderedExpression)
+    {
+        renderedExpression = string.Empty;
+        string normalized = Normalize(expression).Trim();
+        if (!IsStructuredLiteralStart(normalized))
+        {
+            return false;
+        }
+
+        if (!TryParseStructuredLiteralNode(normalized, out StructuredLiteralNode? node) ||
+            node is null)
+        {
+            return false;
+        }
+
+        renderedExpression = RenderStructuredLiteralNode(node, locals);
+        return true;
     }
 
     private static string TranslateExpression(string expression, HashSet<string> locals)
@@ -1127,6 +1300,22 @@ internal static class ForRestFlowScriptCompiler
         return true;
     }
 
+    private static bool TryReportMisplacedExpectation(string statementText, int index, List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!StartsWithKeywordBoundary(statementText.TrimStart(), "expect"))
+        {
+            return false;
+        }
+
+        diagnostics.Add(
+            new(
+                ForRestScriptDiagnosticSeverity.Error,
+                "`expect` is a top-level assertion. Move it outside `if`, `else`, `foreach`, and `while` blocks or rewrite it as `tests.Assert(...)` / `tests.Equal(...)` inside flow.",
+                index + 1,
+                1));
+        return true;
+    }
+
     private static bool LooksLikeLegacyHelperCall(string value)
     {
         return value.StartsWith("console.Log(", StringComparison.Ordinal)
@@ -1377,6 +1566,677 @@ internal static class ForRestFlowScriptCompiler
         return string.Equals(combinedHeader[..^1].TrimEnd(), "else", StringComparison.Ordinal);
     }
 
+    private static void TryCollectStatementText(
+        IReadOnlyList<string> lines,
+        int startIndex,
+        out string combinedText,
+        out int consumedLineCount)
+    {
+        combinedText = string.Empty;
+        consumedLineCount = 0;
+        if (startIndex < 0 || startIndex >= lines.Count)
+        {
+            return;
+        }
+
+        string current = lines[startIndex].Trim();
+        if (string.IsNullOrWhiteSpace(current) || current.StartsWith('#'))
+        {
+            return;
+        }
+
+        if (TryCollectStructuredLiteralAssignmentText(lines, startIndex, current, out combinedText, out consumedLineCount))
+        {
+            return;
+        }
+
+        StringBuilder builder = new(current);
+        consumedLineCount = 1;
+
+        while (startIndex + consumedLineCount < lines.Count)
+        {
+            string nextTrimmed = lines[startIndex + consumedLineCount].Trim();
+            if (string.IsNullOrWhiteSpace(nextTrimmed) || nextTrimmed.StartsWith('#'))
+            {
+                break;
+            }
+
+            if (!ShouldContinueStatement(builder.ToString(), nextTrimmed))
+            {
+                break;
+            }
+
+            builder.Append(' ');
+            builder.Append(nextTrimmed);
+            consumedLineCount++;
+        }
+
+        combinedText = builder.ToString();
+    }
+
+    private static bool TryCollectStructuredLiteralAssignmentText(
+        IReadOnlyList<string> lines,
+        int startIndex,
+        string current,
+        out string combinedText,
+        out int consumedLineCount)
+    {
+        combinedText = string.Empty;
+        consumedLineCount = 0;
+
+        if (!TryFindAssignmentIndex(current, out int separatorIndex))
+        {
+            return false;
+        }
+
+        string expression = TrimStatement(current[(separatorIndex + 1)..]);
+        if (!string.IsNullOrWhiteSpace(expression) || startIndex + 1 >= lines.Count)
+        {
+            return false;
+        }
+
+        if (!TryCollectStructuredLiteral(lines, startIndex + 1, out string structuredLiteral, out int structuredLiteralLineCount))
+        {
+            return false;
+        }
+
+        combinedText = current + Environment.NewLine + structuredLiteral;
+        consumedLineCount = 1 + structuredLiteralLineCount;
+        return true;
+    }
+
+    private static bool TryCollectStructuredLiteral(
+        IReadOnlyList<string> lines,
+        int startIndex,
+        out string structuredLiteral,
+        out int consumedLineCount)
+    {
+        structuredLiteral = string.Empty;
+        consumedLineCount = 0;
+        if (startIndex < 0 || startIndex >= lines.Count)
+        {
+            return false;
+        }
+
+        int braceDepth = 0;
+        int bracketDepth = 0;
+        bool inString = false;
+        bool escaped = false;
+        char quote = '\0';
+        bool sawStart = false;
+        StringBuilder builder = new();
+
+        for (int index = startIndex; index < lines.Count; index++)
+        {
+            string rawLine = lines[index];
+            string trimmed = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                if (!sawStart)
+                {
+                    return false;
+                }
+
+                builder.AppendLine();
+                consumedLineCount++;
+                continue;
+            }
+
+            if (trimmed.StartsWith('#'))
+            {
+                return false;
+            }
+
+            if (!sawStart)
+            {
+                if (!IsStructuredLiteralStart(trimmed))
+                {
+                    return false;
+                }
+
+                sawStart = true;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.Append(rawLine.TrimEnd());
+            consumedLineCount++;
+
+            foreach (char character in rawLine)
+            {
+                if (inString)
+                {
+                    if (character == quote && !escaped)
+                    {
+                        inString = false;
+                        quote = '\0';
+                    }
+
+                    if (character == '\\' && !escaped)
+                    {
+                        escaped = true;
+                    }
+                    else
+                    {
+                        escaped = false;
+                    }
+
+                    continue;
+                }
+
+                if (IsSupportedDoubleQuoteDelimiter(character) || character == '\'')
+                {
+                    inString = true;
+                    escaped = false;
+                    quote = character;
+                    continue;
+                }
+
+                if (character == '{')
+                {
+                    braceDepth++;
+                }
+                else if (character == '}')
+                {
+                    braceDepth--;
+                }
+                else if (character == '[')
+                {
+                    bracketDepth++;
+                }
+                else if (character == ']')
+                {
+                    bracketDepth--;
+                }
+            }
+
+            if (!inString && braceDepth <= 0 && bracketDepth <= 0 && sawStart)
+            {
+                structuredLiteral = builder.ToString();
+                return true;
+            }
+        }
+
+        structuredLiteral = string.Empty;
+        consumedLineCount = 0;
+        return false;
+    }
+
+    private static bool IsStructuredLiteralStart(string trimmed)
+    {
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return false;
+        }
+
+        return trimmed[0] is '{' or '[';
+    }
+
+    private static bool TryParseStructuredLiteralNode(string source, out StructuredLiteralNode? node)
+    {
+        node = null;
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return false;
+        }
+
+        int index = 0;
+        if (!TryParseStructuredLiteralNode(source, ref index, out node))
+        {
+            node = null;
+            return false;
+        }
+
+        SkipWhitespace(source, ref index);
+        return node is not null && index == source.Length;
+    }
+
+    private static bool TryParseStructuredLiteralNode(string source, ref int index, out StructuredLiteralNode? node)
+    {
+        node = null;
+        SkipWhitespace(source, ref index);
+        if (index >= source.Length)
+        {
+            return false;
+        }
+
+        return source[index] switch
+        {
+            '{' => TryParseStructuredObjectNode(source, ref index, out node),
+            '[' => TryParseStructuredArrayNode(source, ref index, out node),
+            _ => TryParseStructuredExpressionNode(source, ref index, out node),
+        };
+    }
+
+    private static bool TryParseStructuredObjectNode(string source, ref int index, out StructuredLiteralNode? node)
+    {
+        node = null;
+        if (index >= source.Length || source[index] != '{')
+        {
+            return false;
+        }
+
+        index++;
+        List<StructuredLiteralProperty> properties = [];
+        SkipWhitespace(source, ref index);
+        if (index < source.Length && source[index] == '}')
+        {
+            index++;
+            node = new StructuredLiteralObjectNode(properties);
+            return true;
+        }
+
+        while (index < source.Length)
+        {
+            if (!TryParseStructuredLiteralProperty(source, ref index, out StructuredLiteralProperty? property) ||
+                property is null)
+            {
+                return false;
+            }
+
+            properties.Add(property);
+            SkipWhitespace(source, ref index);
+            if (index >= source.Length)
+            {
+                return false;
+            }
+
+            if (source[index] == ',')
+            {
+                index++;
+                SkipWhitespace(source, ref index);
+                if (index < source.Length && source[index] == '}')
+                {
+                    index++;
+                    node = new StructuredLiteralObjectNode(properties);
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (source[index] == '}')
+            {
+                index++;
+                node = new StructuredLiteralObjectNode(properties);
+                return true;
+            }
+
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseStructuredArrayNode(string source, ref int index, out StructuredLiteralNode? node)
+    {
+        node = null;
+        if (index >= source.Length || source[index] != '[')
+        {
+            return false;
+        }
+
+        index++;
+        List<StructuredLiteralNode> items = [];
+        SkipWhitespace(source, ref index);
+        if (index < source.Length && source[index] == ']')
+        {
+            index++;
+            node = new StructuredLiteralArrayNode(items);
+            return true;
+        }
+
+        while (index < source.Length)
+        {
+            if (!TryParseStructuredLiteralNode(source, ref index, out StructuredLiteralNode? item) ||
+                item is null)
+            {
+                return false;
+            }
+
+            items.Add(item);
+            SkipWhitespace(source, ref index);
+            if (index >= source.Length)
+            {
+                return false;
+            }
+
+            if (source[index] == ',')
+            {
+                index++;
+                SkipWhitespace(source, ref index);
+                if (index < source.Length && source[index] == ']')
+                {
+                    index++;
+                    node = new StructuredLiteralArrayNode(items);
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (source[index] == ']')
+            {
+                index++;
+                node = new StructuredLiteralArrayNode(items);
+                return true;
+            }
+
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseStructuredLiteralProperty(string source, ref int index, out StructuredLiteralProperty? property)
+    {
+        property = null;
+        if (!TryReadStructuredLiteralKey(source, ref index, out string key))
+        {
+            return false;
+        }
+
+        SkipWhitespace(source, ref index);
+        if (index >= source.Length || source[index] is not (':' or '='))
+        {
+            return false;
+        }
+
+        index++;
+        if (!TryParseStructuredLiteralNode(source, ref index, out StructuredLiteralNode? value) || value is null)
+        {
+            return false;
+        }
+
+        property = new(key, value);
+        return true;
+    }
+
+    private static bool TryParseStructuredExpressionNode(string source, ref int index, out StructuredLiteralNode? node)
+    {
+        node = null;
+        if (!TryReadStructuredLiteralExpressionText(source, ref index, out string expression))
+        {
+            return false;
+        }
+
+        node = new StructuredLiteralExpressionNode(expression);
+        return true;
+    }
+
+    private static bool TryReadStructuredLiteralKey(string source, ref int index, out string key)
+    {
+        key = string.Empty;
+        SkipWhitespace(source, ref index);
+        if (index >= source.Length)
+        {
+            return false;
+        }
+
+        if (TryReadQuotedToken(source, ref index, out key))
+        {
+            return true;
+        }
+
+        if (!IsIdentifierStart(source[index]))
+        {
+            return false;
+        }
+
+        int start = index;
+        index++;
+        while (index < source.Length && IsIdentifierPart(source[index]))
+        {
+            index++;
+        }
+
+        key = source[start..index];
+        return !string.IsNullOrWhiteSpace(key);
+    }
+
+    private static bool TryReadQuotedToken(string source, ref int index, out string value)
+    {
+        value = string.Empty;
+        if (index >= source.Length)
+        {
+            return false;
+        }
+
+        char quote = source[index];
+        if (!IsSupportedDoubleQuoteDelimiter(quote) && quote != '\'')
+        {
+            return false;
+        }
+
+        bool normalizeDoubleQuote = IsSupportedDoubleQuoteDelimiter(quote);
+        index++;
+        StringBuilder builder = new();
+        bool escaped = false;
+
+        while (index < source.Length)
+        {
+            char character = source[index];
+            if ((normalizeDoubleQuote && IsSupportedDoubleQuoteDelimiter(character)) ||
+                (!normalizeDoubleQuote && character == quote))
+            {
+                if (!escaped)
+                {
+                    index++;
+                    value = builder.ToString();
+                    return true;
+                }
+            }
+
+            builder.Append(character);
+            if (character == '\\' && !escaped)
+            {
+                escaped = true;
+            }
+            else
+            {
+                escaped = false;
+            }
+
+            index++;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadStructuredLiteralExpressionText(string source, ref int index, out string expression)
+    {
+        expression = string.Empty;
+        SkipWhitespace(source, ref index);
+        if (index >= source.Length)
+        {
+            return false;
+        }
+
+        int start = index;
+        int parenthesisDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
+        bool inString = false;
+        bool escaped = false;
+        char quote = '\0';
+
+        while (index < source.Length)
+        {
+            char character = source[index];
+            if (inString)
+            {
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character)) ||
+                     (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote)) &&
+                    !escaped)
+                {
+                    inString = false;
+                    quote = '\0';
+                }
+
+                if (character == '\\' && !escaped)
+                {
+                    escaped = true;
+                }
+                else
+                {
+                    escaped = false;
+                }
+
+                index++;
+                continue;
+            }
+
+            if (IsSupportedDoubleQuoteDelimiter(character) || character == '\'')
+            {
+                inString = true;
+                quote = character;
+                escaped = false;
+                index++;
+                continue;
+            }
+
+            switch (character)
+            {
+                case '(':
+                    parenthesisDepth++;
+                    index++;
+                    continue;
+                case ')':
+                    if (parenthesisDepth > 0)
+                    {
+                        parenthesisDepth--;
+                    }
+
+                    index++;
+                    continue;
+                case '[':
+                    bracketDepth++;
+                    index++;
+                    continue;
+                case ']':
+                    if (bracketDepth == 0 && braceDepth == 0 && parenthesisDepth == 0)
+                    {
+                        goto Finish;
+                    }
+
+                    if (bracketDepth > 0)
+                    {
+                        bracketDepth--;
+                    }
+
+                    index++;
+                    continue;
+                case '{':
+                    braceDepth++;
+                    index++;
+                    continue;
+                case '}':
+                    if (braceDepth == 0 && bracketDepth == 0 && parenthesisDepth == 0)
+                    {
+                        goto Finish;
+                    }
+
+                    if (braceDepth > 0)
+                    {
+                        braceDepth--;
+                    }
+
+                    index++;
+                    continue;
+                case ',':
+                    if (braceDepth == 0 && bracketDepth == 0 && parenthesisDepth == 0)
+                    {
+                        goto Finish;
+                    }
+
+                    index++;
+                    continue;
+                default:
+                    index++;
+                    continue;
+            }
+        }
+
+    Finish:
+        expression = TrimStatement(source[start..index]);
+        return !string.IsNullOrWhiteSpace(expression);
+    }
+
+    private static void SkipWhitespace(string source, ref int index)
+    {
+        while (index < source.Length && char.IsWhiteSpace(source[index]))
+        {
+            index++;
+        }
+    }
+
+    private static string RenderStructuredLiteralNode(StructuredLiteralNode node, HashSet<string> locals)
+    {
+        return node switch
+        {
+            StructuredLiteralObjectNode objectNode => RenderStructuredObjectNode(objectNode, locals),
+            StructuredLiteralArrayNode arrayNode => RenderStructuredArrayNode(arrayNode, locals),
+            StructuredLiteralExpressionNode expressionNode => RenderStructuredLiteralLeaf(expressionNode.Expression, locals),
+            _ => throw new InvalidOperationException("Unsupported structured literal node."),
+        };
+    }
+
+    private static string RenderStructuredObjectNode(StructuredLiteralObjectNode node, HashSet<string> locals)
+    {
+        if (node.Properties.Count == 0)
+        {
+            return "new JsonObject()";
+        }
+
+        StringBuilder builder = new("new JsonObject { ");
+        for (int index = 0; index < node.Properties.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(", ");
+            }
+
+            StructuredLiteralProperty property = node.Properties[index];
+            builder.Append('[');
+            builder.Append(RenderString(property.Key));
+            builder.Append("] = ");
+            builder.Append(RenderStructuredLiteralNode(property.Value, locals));
+        }
+
+        builder.Append(" }");
+        return builder.ToString();
+    }
+
+    private static string RenderStructuredArrayNode(StructuredLiteralArrayNode node, HashSet<string> locals)
+    {
+        if (node.Items.Count == 0)
+        {
+            return "new JsonArray()";
+        }
+
+        StringBuilder builder = new("new JsonArray { ");
+        for (int index = 0; index < node.Items.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(", ");
+            }
+
+            builder.Append(RenderStructuredLiteralNode(node.Items[index], locals));
+        }
+
+        builder.Append(" }");
+        return builder.ToString();
+    }
+
+    private static string RenderStructuredLiteralLeaf(string expression, HashSet<string> locals)
+    {
+        return $"__flow.J({TranslateExpression(expression, locals)})";
+    }
+
     private static bool TryCollectHeaderText(
         IReadOnlyList<string> lines,
         int startIndex,
@@ -1419,12 +2279,201 @@ internal static class ForRestFlowScriptCompiler
         return false;
     }
 
+    private static bool ShouldContinueStatement(string currentStatement, string nextTrimmed)
+    {
+        if (string.IsNullOrWhiteSpace(nextTrimmed) || LooksLikeStandaloneFlowStatement(nextTrimmed))
+        {
+            return false;
+        }
+
+        return StatementNeedsContinuation(currentStatement) || StartsWithContinuationToken(nextTrimmed);
+    }
+
+    private static bool LooksLikeStandaloneFlowStatement(string trimmed)
+    {
+        if (string.IsNullOrWhiteSpace(trimmed) ||
+            trimmed is "{" or "}" ||
+            trimmed.EndsWith('{') ||
+            trimmed.StartsWith("else", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return StartsWithKeywordBoundary(trimmed, "if", allowOpenParenStart: true) ||
+               StartsWithKeywordBoundary(trimmed, "while", allowOpenParenStart: true) ||
+               StartsWithKeywordBoundary(trimmed, "foreach", allowOpenParenStart: true) ||
+               StartsWithKeywordBoundary(trimmed, "for", allowOpenParenStart: true) ||
+               StartsWithKeywordBoundary(trimmed, "let") ||
+               StartsWithKeywordBoundary(trimmed, "runtime") ||
+               StartsWithKeywordBoundary(trimmed, "log", allowOpenParenStart: true) ||
+               StartsWithKeywordBoundary(trimmed, "warn", allowOpenParenStart: true) ||
+               StartsWithKeywordBoundary(trimmed, "error", allowOpenParenStart: true) ||
+               string.Equals(trimmed, "break", StringComparison.Ordinal) ||
+               string.Equals(trimmed, "continue", StringComparison.Ordinal) ||
+               TryFindAssignmentIndex(trimmed, out _);
+    }
+
+    private static bool StatementNeedsContinuation(string statement)
+    {
+        string trimmed = TrimStatement(statement);
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return false;
+        }
+
+        if (HasUnbalancedDelimiters(trimmed) || EndsWithContinuationOperator(trimmed))
+        {
+            return true;
+        }
+
+        if (TryFindAssignmentIndex(trimmed, out int separatorIndex))
+        {
+            string expression = TrimStatement(trimmed[(separatorIndex + 1)..]);
+            return string.IsNullOrWhiteSpace(expression);
+        }
+
+        return string.Equals(trimmed, "log", StringComparison.Ordinal) ||
+               string.Equals(trimmed, "warn", StringComparison.Ordinal) ||
+               string.Equals(trimmed, "error", StringComparison.Ordinal);
+    }
+
+    private static bool StartsWithContinuationToken(string trimmed)
+    {
+        return trimmed.StartsWith(".", StringComparison.Ordinal) ||
+               trimmed.StartsWith("?.", StringComparison.Ordinal) ||
+               trimmed.StartsWith("??", StringComparison.Ordinal) ||
+               trimmed.StartsWith("&&", StringComparison.Ordinal) ||
+               trimmed.StartsWith("||", StringComparison.Ordinal) ||
+               trimmed.StartsWith("==", StringComparison.Ordinal) ||
+               trimmed.StartsWith("!=", StringComparison.Ordinal) ||
+               trimmed.StartsWith("<=", StringComparison.Ordinal) ||
+               trimmed.StartsWith(">=", StringComparison.Ordinal) ||
+               trimmed.StartsWith("=", StringComparison.Ordinal) ||
+               trimmed.StartsWith("+", StringComparison.Ordinal) ||
+               trimmed.StartsWith("-", StringComparison.Ordinal) ||
+               trimmed.StartsWith("*", StringComparison.Ordinal) ||
+               trimmed.StartsWith("/", StringComparison.Ordinal) ||
+               trimmed.StartsWith("%", StringComparison.Ordinal) ||
+               trimmed.StartsWith(",", StringComparison.Ordinal) ||
+               trimmed.StartsWith(":", StringComparison.Ordinal) ||
+               Regex.IsMatch(trimmed, "^(and|or)\\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool EndsWithContinuationOperator(string statement)
+    {
+        string trimmed = TrimStatement(statement);
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return false;
+        }
+
+        return trimmed.EndsWith("?.", StringComparison.Ordinal) ||
+               trimmed.EndsWith("??", StringComparison.Ordinal) ||
+               trimmed.EndsWith("&&", StringComparison.Ordinal) ||
+               trimmed.EndsWith("||", StringComparison.Ordinal) ||
+               trimmed.EndsWith("==", StringComparison.Ordinal) ||
+               trimmed.EndsWith("!=", StringComparison.Ordinal) ||
+               trimmed.EndsWith("<=", StringComparison.Ordinal) ||
+               trimmed.EndsWith(">=", StringComparison.Ordinal) ||
+               trimmed.EndsWith("=", StringComparison.Ordinal) ||
+               trimmed.EndsWith("+", StringComparison.Ordinal) ||
+               trimmed.EndsWith("-", StringComparison.Ordinal) ||
+               trimmed.EndsWith("*", StringComparison.Ordinal) ||
+               trimmed.EndsWith("/", StringComparison.Ordinal) ||
+               trimmed.EndsWith("%", StringComparison.Ordinal) ||
+               trimmed.EndsWith(",", StringComparison.Ordinal) ||
+               trimmed.EndsWith(":", StringComparison.Ordinal) ||
+               trimmed.EndsWith(".", StringComparison.Ordinal) ||
+               Regex.IsMatch(trimmed, "(^|\\s)(and|or)$", RegexOptions.IgnoreCase);
+    }
+
+    private static bool HasUnbalancedDelimiters(string text)
+    {
+        int parenthesesDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
+        bool inString = false;
+        bool escaped = false;
+        char quote = '\0';
+
+        foreach (char character in text)
+        {
+            if (inString)
+            {
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character)) ||
+                     (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote)) &&
+                    !escaped)
+                {
+                    inString = false;
+                }
+
+                if (character == '\\' && !escaped)
+                {
+                    escaped = true;
+                }
+                else
+                {
+                    escaped = false;
+                }
+
+                continue;
+            }
+
+            if (IsSupportedDoubleQuoteDelimiter(character) || character == '\'')
+            {
+                inString = true;
+                escaped = false;
+                quote = character;
+                continue;
+            }
+
+            switch (character)
+            {
+                case '(':
+                    parenthesesDepth++;
+                    break;
+                case ')':
+                    parenthesesDepth = Math.Max(0, parenthesesDepth - 1);
+                    break;
+                case '[':
+                    bracketDepth++;
+                    break;
+                case ']':
+                    bracketDepth = Math.Max(0, bracketDepth - 1);
+                    break;
+                case '{':
+                    braceDepth++;
+                    break;
+                case '}':
+                    braceDepth = Math.Max(0, braceDepth - 1);
+                    break;
+            }
+        }
+
+        return inString || parenthesesDepth > 0 || bracketDepth > 0 || braceDepth > 0;
+    }
+
+    private static bool StartsWithKeywordBoundary(string text, string keyword, bool allowOpenParenStart = false)
+    {
+        if (!text.StartsWith(keyword, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (text.Length == keyword.Length)
+        {
+            return true;
+        }
+
+        char nextCharacter = text[keyword.Length];
+        return char.IsWhiteSpace(nextCharacter) || (allowOpenParenStart && nextCharacter == '(');
+    }
+
     private static bool TrySplitAssignment(string source, out string name, out string expression)
     {
         name = string.Empty;
         expression = string.Empty;
-        var separatorIndex = source.IndexOf('=');
-        if (separatorIndex < 1)
+        if (!TryFindAssignmentIndex(source, out int separatorIndex) || separatorIndex < 1)
         {
             return false;
         }
@@ -1432,6 +2481,69 @@ internal static class ForRestFlowScriptCompiler
         name = source[..separatorIndex].Trim();
         expression = TrimStatement(source[(separatorIndex + 1)..]);
         return IsFlowIdentifier(name) && !string.IsNullOrWhiteSpace(expression);
+    }
+
+    private static bool TryFindAssignmentIndex(string source, out int separatorIndex)
+    {
+        separatorIndex = -1;
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return false;
+        }
+
+        bool inString = false;
+        bool escaped = false;
+        char quote = '\0';
+
+        for (int index = 0; index < source.Length; index++)
+        {
+            char character = source[index];
+            if (inString)
+            {
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character)) ||
+                     (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote)) &&
+                    !escaped)
+                {
+                    inString = false;
+                }
+
+                if (character == '\\' && !escaped)
+                {
+                    escaped = true;
+                }
+                else
+                {
+                    escaped = false;
+                }
+
+                continue;
+            }
+
+            if (IsSupportedDoubleQuoteDelimiter(character) || character == '\'')
+            {
+                inString = true;
+                escaped = false;
+                quote = character;
+                continue;
+            }
+
+            if (character != '=')
+            {
+                continue;
+            }
+
+            char previous = index > 0 ? source[index - 1] : '\0';
+            char next = index + 1 < source.Length ? source[index + 1] : '\0';
+            if (previous is '=' or '!' or '<' or '>' || next is '=' or '>')
+            {
+                continue;
+            }
+
+            separatorIndex = index;
+            return true;
+        }
+
+        return false;
     }
 
     private static string TrimStatement(string text)
@@ -1651,6 +2763,16 @@ internal static class ForRestFlowScriptCompiler
         return (source ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
     }
 
+    private abstract record StructuredLiteralNode;
+
+    private sealed record StructuredLiteralObjectNode(IReadOnlyList<StructuredLiteralProperty> Properties) : StructuredLiteralNode;
+
+    private sealed record StructuredLiteralArrayNode(IReadOnlyList<StructuredLiteralNode> Items) : StructuredLiteralNode;
+
+    private sealed record StructuredLiteralExpressionNode(string Expression) : StructuredLiteralNode;
+
+    private sealed record StructuredLiteralProperty(string Key, StructuredLiteralNode Value);
+
     private static string RenderString(string value)
     {
         return JsonSerializer.Serialize(value);
@@ -1749,6 +2871,27 @@ public sealed class ForRestFlowRuntime(VariablesApi variables)
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
             JsonNode jsonNode => jsonNode.ToJsonString(),
             _ => value.ToString() ?? string.Empty,
+        };
+    }
+
+    public JsonNode? J(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            JsonNode jsonNode => CloneNode(jsonNode),
+            ScriptResponseApi response => response.Json() ?? JsonValue.Create(response.Body),
+            string stringValue => JsonValue.Create(stringValue),
+            char charValue => JsonValue.Create(charValue.ToString()),
+            bool boolValue => JsonValue.Create(boolValue),
+            int intValue => JsonValue.Create(intValue),
+            long longValue => JsonValue.Create(longValue),
+            decimal decimalValue => JsonValue.Create(decimalValue),
+            double doubleValue => JsonValue.Create(doubleValue),
+            float floatValue => JsonValue.Create(floatValue),
+            Guid guidValue => JsonValue.Create(guidValue.ToString()),
+            DateTimeOffset dateTimeOffsetValue => JsonValue.Create(dateTimeOffsetValue.ToString("O", CultureInfo.InvariantCulture)),
+            _ => TrySerializeToJsonNode(value) ?? JsonValue.Create(S(value)),
         };
     }
 
@@ -1894,6 +3037,11 @@ public sealed class ForRestFlowRuntime(VariablesApi variables)
         }
 
         return value.ToJsonString().Trim('"');
+    }
+
+    private static JsonNode? CloneNode(JsonNode? node)
+    {
+        return node is null ? null : JsonNode.Parse(node.ToJsonString());
     }
 
     private static JsonNode? TrySerializeToJsonNode(object value)

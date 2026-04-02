@@ -46,8 +46,18 @@ public sealed class AiPromptManifestBuilderTests
         StringAssert.Contains(manifest.SystemPrompt, "Ask at most 2 clarification turn");
         StringAssert.Contains(manifest.SystemPrompt, "read_all_docs or the built-in full-corpus fallback");
         StringAssert.Contains(manifest.SystemPrompt, "Treat inline editor chat markers");
+        StringAssert.Contains(manifest.SystemPrompt, "runnable ForRest source");
+        StringAssert.Contains(manifest.SystemPrompt, "replace the old endpoint");
         StringAssert.Contains(manifest.SystemPrompt, "batch-stash-loop");
         StringAssert.Contains(manifest.SystemPrompt, "request-url");
+        StringAssert.Contains(manifest.SystemPrompt, "request-send");
+        StringAssert.Contains(manifest.SystemPrompt, "request-method");
+        StringAssert.Contains(manifest.SystemPrompt, "request-body");
+        StringAssert.Contains(manifest.SystemPrompt, "request-content-type");
+        StringAssert.Contains(manifest.SystemPrompt, "api-surface-crud");
+        StringAssert.Contains(manifest.SystemPrompt, "request-headers");
+        StringAssert.Contains(manifest.SystemPrompt, "body");
+        StringAssert.Contains(manifest.SystemPrompt, "expect");
         StringAssert.Contains(manifest.SystemPrompt, "closest valid field");
         StringAssert.Contains(manifest.SystemPrompt, "retryWithRead");
         StringAssert.Contains(manifest.SystemPrompt, "retryWithReplace");

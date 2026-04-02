@@ -316,6 +316,8 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
         HashSet<string> hints = new(StringComparer.OrdinalIgnoreCase);
 
         if (normalized.Contains("expect", StringComparison.Ordinal) ||
+            normalized.Contains("assert", StringComparison.Ordinal) ||
+            normalized.Contains("parse the expectation", StringComparison.Ordinal) ||
             normalized.Contains("top-level", StringComparison.Ordinal) ||
             normalized.Contains("request.send", StringComparison.Ordinal) ||
             normalized.Contains("send()", StringComparison.Ordinal) ||
@@ -325,7 +327,15 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             hints.Add("batch-stash-loop");
             hints.Add("request-url");
             hints.Add("max-send-iterations");
+            hints.Add("request-send");
             hints.Add("stash");
+        }
+
+        if (normalized.Contains("expect", StringComparison.Ordinal) ||
+            normalized.Contains("assert", StringComparison.Ordinal) ||
+            normalized.Contains("parse the expectation", StringComparison.Ordinal))
+        {
+            hints.Add("expect");
         }
 
         if (normalized.Contains("url", StringComparison.Ordinal) ||
@@ -334,9 +344,55 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             hints.Add("request-url");
         }
 
+        if (normalized.Contains("method", StringComparison.Ordinal) ||
+            normalized.Contains("request.method", StringComparison.Ordinal) ||
+            normalized.Contains("post", StringComparison.Ordinal) ||
+            normalized.Contains("put", StringComparison.Ordinal) ||
+            normalized.Contains("patch", StringComparison.Ordinal) ||
+            normalized.Contains("delete", StringComparison.Ordinal))
+        {
+            hints.Add("request-method");
+        }
+
+        if (normalized.Contains("header", StringComparison.Ordinal) ||
+            normalized.Contains("request.headers", StringComparison.Ordinal) ||
+            normalized.Contains("content-type", StringComparison.Ordinal))
+        {
+            hints.Add("request-headers");
+        }
+
+        if (normalized.Contains("body", StringComparison.Ordinal) ||
+            normalized.Contains("payload", StringComparison.Ordinal) ||
+            normalized.Contains("application/json", StringComparison.Ordinal) ||
+            normalized.Contains("content_type", StringComparison.Ordinal) ||
+            normalized.Contains("request.body", StringComparison.Ordinal))
+        {
+            hints.Add("body");
+            hints.Add("request-body");
+            hints.Add("content_type");
+            hints.Add("request-content-type");
+        }
+
+        if (normalized.Contains("comment", StringComparison.Ordinal) ||
+            normalized.Contains("//", StringComparison.Ordinal) ||
+            normalized.Contains("##", StringComparison.Ordinal))
+        {
+            hints.Add("comments");
+        }
+
         if (normalized.Contains("stash", StringComparison.Ordinal))
         {
             hints.Add("stash");
+        }
+
+        if ((normalized.Contains("request.send", StringComparison.Ordinal) || normalized.Contains("send()", StringComparison.Ordinal)) &&
+            (normalized.Contains("request.method", StringComparison.Ordinal) ||
+             normalized.Contains("post", StringComparison.Ordinal) ||
+             normalized.Contains("put", StringComparison.Ordinal) ||
+             normalized.Contains("patch", StringComparison.Ordinal) ||
+             normalized.Contains("delete", StringComparison.Ordinal)))
+        {
+            hints.Add("api-surface-crud");
         }
 
         if (normalized.Contains("jsonobject", StringComparison.Ordinal) ||

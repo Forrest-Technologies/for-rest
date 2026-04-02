@@ -134,6 +134,8 @@ public sealed class AiActiveDocumentToolServiceTests
         StringAssert.Contains(response, "\"docHints\"");
         StringAssert.Contains(response, "batch-stash-loop");
         StringAssert.Contains(response, "request-url");
+        StringAssert.Contains(response, "request-send");
+        StringAssert.Contains(response, "expect");
         StringAssert.Contains(response, "left the request invalid");
         StringAssert.Contains(response, "\"diagnostics\"");
         StringAssert.Contains(response, "Unexpected token \\u0027expect\\u0027.");
@@ -164,9 +166,46 @@ public sealed class AiActiveDocumentToolServiceTests
         StringAssert.Contains(response, "\"docHints\"");
         StringAssert.Contains(response, "batch-stash-loop");
         StringAssert.Contains(response, "request-url");
+        StringAssert.Contains(response, "request-send");
+        StringAssert.Contains(response, "expect");
         StringAssert.Contains(response, "left the request invalid");
         StringAssert.Contains(response, "Unexpected token \\u0027expect\\u0027.");
         Assert.AreEqual("abc", host.CurrentDocument?.SourceText);
+    }
+
+    [TestMethod]
+    public void ReplaceActiveDocument_adds_crud_doc_hints_for_api_surface_candidates()
+    {
+        AiActiveDocumentToolService service = new(new AiDocumentPatchService());
+        RejectingActiveDocumentHost host = new(
+            new AiActiveDocumentSnapshot(
+                "request-1",
+                "Example Request",
+                "forrest",
+                "abc",
+                []));
+
+        string response = service.ReplaceActiveDocument(
+            BuildSettings(),
+            host,
+            """
+            name "demo"
+            method GET
+            url "https://api.restful-api.dev/objects"
+            max_send_iterations 5
+
+            request.method = "POST"
+            request.content_type = "application/json"
+            request.body = "{\"name\":\"Validation Widget\"}"
+            let sent = request.send()
+
+            expect header "Content-Type" contains "json" "json response"
+            """);
+
+        StringAssert.Contains(response, "request-method");
+        StringAssert.Contains(response, "request-body");
+        StringAssert.Contains(response, "request-content-type");
+        StringAssert.Contains(response, "api-surface-crud");
     }
 
     [TestMethod]

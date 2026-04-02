@@ -17,7 +17,10 @@ public sealed record AiTurnExecutionResult(
     bool Succeeded,
     string ResponseText,
     IReadOnlyList<AiSettingsIssue> Issues,
-    bool SessionReset);
+    bool SessionReset,
+    int AutonomousEditRecoveryAttempts = 0,
+    bool DeterministicFallbackApplied = false,
+    string DebugTrace = "");
 
 public interface IAiTurnExecutor
 {
@@ -27,9 +30,10 @@ public interface IAiTurnExecutor
 public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 {
     private const int MaxAutomaticContinuationAttempts = 4;
-    private const int MaxAutonomousEditRecoveryAttempts = 3;
+    private const int MaxAutonomousEditRecoveryAttempts = 1;
     private const string AutomaticContinuationPrompt = "Continue the previous answer from exactly where it stopped. Do not repeat prior text, do not add a preamble, and do not ask a follow-up question. Output only the remaining continuation.";
     private const string IncompleteResponseNote = "The AI response ended before completion after multiple automatic continuation attempts.";
+    private const string TimedOutResponseNote = "AI request timed out before completion.";
     private readonly IAiRuntimeFactory _runtimeFactory;
     private readonly SemaphoreSlim _sessionGate = new(1, 1);
     private readonly Dictionary<string, ConversationSessionEntry> _sessions = new(StringComparer.OrdinalIgnoreCase);
@@ -43,48 +47,94 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        AiPreparedRuntime runtime = _runtimeFactory.Prepare(request.Settings, request.Objective, request.ActiveDocumentHost);
+        AiPreparedRuntime runtime = _runtimeFactory.Prepare(
+            request.Settings,
+            request.Objective,
+            request.ActiveDocumentHost,
+            request.Prompt);
+        runtime.DebugTrace.AddSection(
+            "Executor request",
+            string.Join(
+                Environment.NewLine,
+                [
+                    $"ConversationId: {request.ConversationId}",
+                    $"Objective: {request.Objective}",
+                    "Prompt:",
+                    request.Prompt,
+                ]));
         if (runtime.Agent is null)
         {
             return new(
                 Succeeded: false,
                 ResponseText: BuildUnavailableMessage(runtime.Issues),
                 Issues: runtime.Issues,
-                SessionReset: false);
+                SessionReset: false,
+                AutonomousEditRecoveryAttempts: 0,
+                DebugTrace: runtime.DebugTrace.Snapshot());
         }
-
-        (AgentSession session, bool sessionReset) = await GetOrCreateSessionAsync(
-            request.ConversationId,
-            runtime.Agent,
-            request.Settings,
-            cancellationToken);
 
         try
         {
+            (AgentSession session, bool sessionReset) = await GetOrCreateSessionAsync(
+                request.ConversationId,
+                runtime.Agent,
+                request.Settings,
+                cancellationToken);
+            runtime.DebugTrace.AddLine($"Session reset before turn: {sessionReset}");
             AiActiveDocumentSnapshot? initialDocument = request.ActiveDocumentHost?.GetActiveDocument();
-            TurnResponse turnResponse = await RunAgentWithAutonomousEditRecoveryAsync(
+            TurnExecutionOutcome turnOutcome = await RunAgentWithAutonomousEditRecoveryAsync(
                 runtime.Agent,
                 request,
                 session,
+                runtime.DebugTrace,
                 cancellationToken);
             bool editCompleted = !ShouldAttemptAutonomousEditRecovery(
                 request,
                 initialDocument,
                 request.ActiveDocumentHost?.GetActiveDocument());
             return new(
-                Succeeded: turnResponse.Completed && editCompleted,
-                ResponseText: BuildFinalResponseText(turnResponse.Text, turnResponse.Response),
+                Succeeded: turnOutcome.Response.Completed && editCompleted,
+                ResponseText: BuildFinalResponseText(turnOutcome.Response.Text, turnOutcome.Response.Response),
                 Issues: runtime.Issues,
-                SessionReset: sessionReset);
+                SessionReset: sessionReset,
+                AutonomousEditRecoveryAttempts: turnOutcome.AutonomousEditRecoveryAttempts,
+                DebugTrace: runtime.DebugTrace.Snapshot());
+        }
+        catch (TaskCanceledException)
+        {
+            await ResetSessionAsync(request.ConversationId);
+            runtime.DebugTrace.AddLine("Executor result: timed out and reset the session.");
+            return new(
+                Succeeded: false,
+                ResponseText: TimedOutResponseNote,
+                Issues: runtime.Issues,
+                SessionReset: true,
+                AutonomousEditRecoveryAttempts: 0,
+                DebugTrace: runtime.DebugTrace.Snapshot());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await ResetSessionAsync(request.ConversationId);
+            runtime.DebugTrace.AddLine("Executor result: canceled by caller and reset the session.");
+            return new(
+                Succeeded: false,
+                ResponseText: TimedOutResponseNote,
+                Issues: runtime.Issues,
+                SessionReset: true,
+                AutonomousEditRecoveryAttempts: 0,
+                DebugTrace: runtime.DebugTrace.Snapshot());
         }
         catch (Exception exception)
         {
             await ResetSessionAsync(request.ConversationId);
+            runtime.DebugTrace.AddSection("Executor exception", exception.ToString());
             return new(
                 Succeeded: false,
                 ResponseText: $"AI request failed: {exception.Message}",
                 Issues: runtime.Issues,
-                SessionReset: true);
+                SessionReset: true,
+                AutonomousEditRecoveryAttempts: 0,
+                DebugTrace: runtime.DebugTrace.Snapshot());
         }
     }
 
@@ -167,25 +217,35 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         AIAgent agent,
         string prompt,
         AgentSession session,
+        AiDebugTraceBuffer debugTrace,
         CancellationToken cancellationToken)
     {
+        debugTrace.AddSection("Agent prompt [initial]", prompt);
         AgentResponse response = await agent.RunAsync(prompt, session, cancellationToken: cancellationToken);
         string accumulatedText = ExtractResponseText(response);
+        debugTrace.AddSection("Agent response [initial]", DescribeAgentResponse(response, accumulatedText));
 
         for (int attempt = 0; attempt < MaxAutomaticContinuationAttempts && ShouldAutomaticallyContinue(response); attempt++)
         {
+            debugTrace.AddSection(
+                $"Agent continuation [{attempt + 1}]",
+                response.ContinuationToken is not null
+                    ? "Used provider continuation token."
+                    : AutomaticContinuationPrompt);
             response = await ContinueResponseAsync(agent, session, response, cancellationToken);
             string nextText = ExtractResponseText(response);
             accumulatedText = MergeContinuationText(accumulatedText, nextText);
+            debugTrace.AddSection($"Agent response continuation [{attempt + 1}]", DescribeAgentResponse(response, nextText));
         }
 
         return new(response, accumulatedText, Completed: !ShouldAutomaticallyContinue(response));
     }
 
-    private static async Task<TurnResponse> RunAgentWithAutonomousEditRecoveryAsync(
+    private static async Task<TurnExecutionOutcome> RunAgentWithAutonomousEditRecoveryAsync(
         AIAgent agent,
         AiTurnExecutionRequest request,
         AgentSession session,
+        AiDebugTraceBuffer debugTrace,
         CancellationToken cancellationToken)
     {
         AiActiveDocumentSnapshot? initialDocument = request.ActiveDocumentHost?.GetActiveDocument();
@@ -193,33 +253,50 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             agent,
             request.Prompt,
             session,
+            debugTrace,
             cancellationToken);
+        int recoveryAttempts = 0;
 
         if (!ShouldAttemptAutonomousEditRecovery(
                 request,
                 initialDocument,
                 request.ActiveDocumentHost?.GetActiveDocument()))
         {
-            return response;
+            debugTrace.AddLine("Autonomous edit recovery: not needed after the initial turn.");
+            return new(response, recoveryAttempts);
         }
 
         for (int attempt = 0; attempt < MaxAutonomousEditRecoveryAttempts; attempt++)
         {
+            recoveryAttempts++;
+            string repairPrompt = BuildAutonomousEditRecoveryPrompt(request.Prompt, response.Text, attempt + 1);
+            debugTrace.AddSection($"Autonomous edit recovery prompt [{attempt + 1}]", repairPrompt);
             response = await RunAgentWithAutomaticContinuationAsync(
                 agent,
-                BuildAutonomousEditRecoveryPrompt(request.Prompt, response.Text, attempt + 1),
+                repairPrompt,
                 session,
+                debugTrace,
                 cancellationToken);
             if (!ShouldAttemptAutonomousEditRecovery(
                     request,
                     initialDocument,
                     request.ActiveDocumentHost?.GetActiveDocument()))
             {
+                debugTrace.AddLine($"Autonomous edit recovery: attempt {attempt + 1} updated the document.");
                 break;
             }
         }
 
-        return response;
+        if (recoveryAttempts > 0 &&
+            ShouldAttemptAutonomousEditRecovery(
+                request,
+                initialDocument,
+                request.ActiveDocumentHost?.GetActiveDocument()))
+        {
+            debugTrace.AddLine("Autonomous edit recovery: exhausted retry budget with the document still unchanged.");
+        }
+
+        return new(response, recoveryAttempts);
     }
 
     private static Task<AgentResponse> ContinueResponseAsync(
@@ -383,6 +460,9 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             "Read the active document again, inspect any returned diagnostics or tool errors, consult local docs if needed, and apply a working change now." + Environment.NewLine +
             "Modify the current active request in place. Do not ask whether to create a second request unless the user explicitly asked for an additional request." + Environment.NewLine +
             "If the user asked to iterate, enumerate, batch, or stash values, use the documented foreach/request.send/request.url/max_send_iterations pattern instead of asking how to structure it." + Environment.NewLine +
+            "If the user asked to test an API surface or multiple methods, use the documented request-send/request.method/request.url/request.headers/request.body/request.content_type/api-surface-crud/stash/top-level expect patterns." + Environment.NewLine +
+            "If the user pasted API docs or prose into chat, treat that text as requirements only and leave only runnable ForRest source in the final document." + Environment.NewLine +
+            "If the current request still points at the old endpoint, replace that target instead of leaving the previous URL or method in place." + Environment.NewLine +
             "If a requested field name looks misspelled but the nearest valid field is obvious, choose the closest valid field and mention that assumption only after the edit succeeds." + Environment.NewLine +
             "Prefer response.someField or response[\"Some Field\"] for JSON object members." + Environment.NewLine +
             "When the response body root is an array, iterate response directly or use response[index]." + Environment.NewLine +
@@ -427,6 +507,30 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             ? "Done."
             : normalizedText;
     }
+
+    private static string DescribeAgentResponse(AgentResponse response, string responseText)
+    {
+        List<string> lines =
+        [
+            $"Finish reason: {response.FinishReason?.ToString() ?? "(none)"}",
+            $"Continuation token: {(response.ContinuationToken is null ? "no" : "yes")}",
+        ];
+
+        if (response.RawRepresentation is ResponseResult rawResponse)
+        {
+            lines.Add($"Raw status: {rawResponse.Status}");
+            if (rawResponse.IncompleteStatusDetails is not null)
+            {
+                lines.Add($"Incomplete reason: {rawResponse.IncompleteStatusDetails.Reason}");
+            }
+        }
+
+        lines.Add("Response text:");
+        lines.Add(AiDebugTraceBuffer.Truncate(responseText, 8000));
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private sealed record TurnExecutionOutcome(TurnResponse Response, int AutonomousEditRecoveryAttempts);
 
     private sealed class ConversationSessionEntry
     {

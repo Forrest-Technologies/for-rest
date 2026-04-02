@@ -318,4 +318,28 @@ public sealed class MainPageViewModelNormalizationTests
 		StringAssert.Contains(normalized, "log \"Prepared request before send.\"");
 		Assert.IsFalse(normalized.Contains("))", StringComparison.Ordinal));
 	}
+
+	[TestMethod]
+	public void NormalizeRequestDocumentSource_preserves_comparison_operators_inside_flow_assertions()
+	{
+		string source =
+			"""
+			name "restful-api QA"
+			method GET
+			url "https://api.restful-api.dev/objects"
+
+			let sent = request.send()
+			tests.Assert(sent.status >= 200 and sent.status < 300, "list returns 2xx")
+			if sent.status == 200 and not (sent.body.length() == 0) {
+			  log $"Attempt returned {sent.status}."
+			}
+			""";
+
+		string normalized = RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(source, string.Empty, "restful-api QA");
+
+		StringAssert.Contains(normalized, "tests.Assert(sent.status >= 200 and sent.status < 300, \"list returns 2xx\")");
+		StringAssert.Contains(normalized, "if sent.status == 200 and not (sent.body.length() == 0) {");
+		Assert.IsFalse(normalized.Contains("> =", StringComparison.Ordinal));
+		Assert.IsFalse(normalized.Contains("= =", StringComparison.Ordinal));
+	}
 }

@@ -2,7 +2,9 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Azure.AI.OpenAI;
+using ForRest.Scripting;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.OpenAI;
 using Microsoft.Extensions.AI;
@@ -16,16 +18,26 @@ namespace ForRest.Services.AI;
 public sealed record AiPreparedRuntime(
     AiPromptManifest PromptManifest,
     IReadOnlyList<AiSettingsIssue> Issues,
-    AIAgent? Agent);
+    AIAgent? Agent,
+    AiDebugTraceBuffer DebugTrace);
 
 public interface IAiRuntimeFactory
 {
-    AiPreparedRuntime Prepare(AiSettings settings, string objective, IAiActiveDocumentHost? activeDocumentHost = null);
+    AiPreparedRuntime Prepare(
+        AiSettings settings,
+        string objective,
+        IAiActiveDocumentHost? activeDocumentHost = null,
+        string? prompt = null);
 }
 
 public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
 {
     private const string AgentName = "ForRestAssistant";
+    private const string PromptContextTopicTitle = "ForRest prompt context";
+    private const int MaxPreflightPromptTopics = 4;
+    private const int MaxPreflightPatternLines = 18;
+    private const int MaxPreflightPatternLength = 900;
+    private static readonly Regex UrlRegex = new(@"https?://\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private readonly IAiSettingsValidator _settingsValidator;
     private readonly IAiToolCatalog _toolCatalog;
     private readonly IAiActiveDocumentToolCatalog _activeDocumentToolCatalog;
@@ -53,40 +65,80 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         _documentPatchService = documentPatchService;
     }
 
-    public AiPreparedRuntime Prepare(AiSettings settings, string objective, IAiActiveDocumentHost? activeDocumentHost = null)
+    public AiPreparedRuntime Prepare(
+        AiSettings settings,
+        string objective,
+        IAiActiveDocumentHost? activeDocumentHost = null,
+        string? prompt = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        AiDebugTraceBuffer debugTrace = new();
         List<AiSettingsIssue> issues = [.. _settingsValidator.Validate(settings)];
         IReadOnlyList<AiToolDescriptor> tools =
         [
             .. _toolCatalog.GetTools(settings, activeDocumentHost),
             .. _activeDocumentToolCatalog.GetTools(settings, activeDocumentHost)
         ];
-        IReadOnlyList<AiPromptTopic> topics = BuildPromptTopics(activeDocumentHost);
+        IReadOnlyList<AiPromptTopic> topics = BuildPromptTopics(settings, objective, prompt, activeDocumentHost, debugTrace);
         AiPromptManifest manifest = _promptManifestBuilder.Build(settings, objective, tools, topics);
+        debugTrace.AddSection(
+            "Runtime preparation summary",
+            string.Join(
+                Environment.NewLine,
+                [
+                    $"Provider: {settings.Provider.ProviderKind}",
+                    $"Transport: {settings.Provider.Transport}",
+                    $"Model: {settings.Provider.Model}",
+                    $"System prompt override: {(string.IsNullOrWhiteSpace(settings.SystemPromptPrefix) ? "(blank)" : settings.SystemPromptPrefix.Trim())}",
+                    $"Docs search enabled: {settings.Tools.EnableDocsSearch}",
+                    $"Document patch enabled: {settings.Tools.EnableDocumentPatch}",
+                    $"Registered tools: {string.Join(", ", tools.Select(static tool => tool.Name))}",
+                    $"Selected topics: {string.Join(", ", topics.Select(static topic => $"{topic.Title} ({topic.Source})"))}",
+                    $"Settings issues: {(issues.Count == 0 ? "none" : string.Join(" | ", issues.Select(static issue => $"{issue.Code}: {issue.Message}")))}",
+                ]));
+        debugTrace.AddSection("System prompt handed to agent", manifest.SystemPrompt);
         if (issues.Any(static issue => issue.Severity == AiSettingsIssueSeverity.Error) ||
             !settings.ApiKey.HasUsableValue)
         {
-            return new(manifest, issues, Agent: null);
+            return new(manifest, issues, Agent: null, debugTrace);
         }
 
-        AITool[] runtimeTools = BuildRuntimeTools(settings, activeDocumentHost);
+        AITool[] runtimeTools = BuildRuntimeTools(settings, activeDocumentHost, debugTrace);
         AIAgent agent = settings.Provider.ProviderKind switch
         {
             AiProviderKind.AzureOpenAI => CreateAzureAgent(settings, manifest.SystemPrompt, runtimeTools),
             _ => CreateOpenAiAgent(settings, manifest.SystemPrompt, runtimeTools),
         };
 
-        return new(manifest, issues, agent);
+        debugTrace.AddLine($"Prepared agent: {agent.Name ?? AgentName}");
+        return new(manifest, issues, agent, debugTrace);
     }
 
-    private IReadOnlyList<AiPromptTopic> BuildPromptTopics(IAiActiveDocumentHost? activeDocumentHost)
+    private IReadOnlyList<AiPromptTopic> BuildPromptTopics(
+        AiSettings settings,
+        string objective,
+        string? prompt,
+        IAiActiveDocumentHost? activeDocumentHost,
+        AiDebugTraceBuffer debugTrace)
     {
-        List<AiPromptTopic> topics = [.. _knowledgeCatalog.GetTopics()];
+        ArgumentNullException.ThrowIfNull(settings);
+
         AiActiveDocumentSnapshot? activeDocument = activeDocumentHost?.GetActiveDocument();
+        List<AiPromptTopic> topics = settings.Tools.EnableDocsSearch
+            ? [.. SelectEmbeddedPromptTopics(_knowledgeCatalog.GetTopics())]
+            : [.. _knowledgeCatalog.GetTopics()];
+        debugTrace.AddLine($"Base prompt topics: {string.Join(", ", topics.Select(static topic => $"{topic.Title} ({topic.Source})"))}");
+
+        IReadOnlyList<AiPromptTopic> preflightTopics = BuildPreflightPromptTopics(settings, objective, prompt, activeDocument, debugTrace);
+        if (preflightTopics.Count > 0)
+        {
+            topics.InsertRange(Math.Min(1, topics.Count), preflightTopics);
+        }
+
         if (activeDocument is null)
         {
+            debugTrace.AddLine("Active document snapshot: none");
             return topics;
         }
 
@@ -117,8 +169,337 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                 "The current request document plus its latest compiler diagnostics and runtime context. Use this instead of asking the user to paste the script or error list again.",
                 "active-document",
                 content));
+        debugTrace.AddSection(
+            "Active document snapshot",
+            string.Join(
+                Environment.NewLine,
+                [
+                    $"DocumentId: {activeDocument.DocumentId}",
+                    $"Title: {activeDocument.Title}",
+                    $"Language: {activeDocument.Language}",
+                    $"Diagnostics: {activeDocument.Diagnostics.Count}",
+                    $"Runtime status: {activeDocument.RuntimeContext?.Status ?? "(none)"}",
+                    "Source:",
+                    activeDocument.SourceText,
+                ]));
 
         return topics;
+    }
+
+    private static IEnumerable<AiPromptTopic> SelectEmbeddedPromptTopics(IEnumerable<AiPromptTopic> topics)
+    {
+        ArgumentNullException.ThrowIfNull(topics);
+
+        List<AiPromptTopic> selected = topics
+            .Where(static topic => string.Equals(topic.Title, PromptContextTopicTitle, StringComparison.Ordinal))
+            .Take(1)
+            .ToList();
+        if (selected.Count > 0)
+        {
+            return selected;
+        }
+
+        return topics.Take(1);
+    }
+
+    private IReadOnlyList<AiPromptTopic> BuildPreflightPromptTopics(
+        AiSettings settings,
+        string objective,
+        string? prompt,
+        AiActiveDocumentSnapshot? activeDocument,
+        AiDebugTraceBuffer debugTrace)
+    {
+        if (!settings.Tools.EnableDocsSearch || !IsComplexEditPrompt(objective, prompt))
+        {
+            debugTrace.AddLine("Preflight docs: skipped because docs search is disabled or the prompt is not a complex edit.");
+            return [];
+        }
+
+        List<(string Query, AiKnowledgeSearchHit Hit)> selectedDocs = [];
+        HashSet<string> seenDocumentIds = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string query in BuildTargetedDocQueries(objective, prompt, activeDocument))
+        {
+            IReadOnlyList<AiKnowledgeSearchHit> hits = _documentationSearchService.Search(query, maxResults: 1);
+            if (hits.Count == 0 || AiDocumentationSearchService.ShouldFallbackToFullDocs(query, hits))
+            {
+                debugTrace.AddLine($"Preflight docs query '{query}': no strong local hit.");
+                continue;
+            }
+
+            AiKnowledgeSearchHit hit = hits[0];
+            if (!seenDocumentIds.Add(hit.Document.Id))
+            {
+                debugTrace.AddLine($"Preflight docs query '{query}': skipped duplicate topic '{hit.Document.Title}'.");
+                continue;
+            }
+
+            selectedDocs.Add((query, hit));
+            debugTrace.AddLine($"Preflight docs query '{query}': selected '{hit.Document.Title}' ({hit.Document.Id}).");
+            if (selectedDocs.Count >= MaxPreflightPromptTopics)
+            {
+                break;
+            }
+        }
+
+        return selectedDocs
+            .Select(BuildPreflightPromptTopic)
+            .ToArray();
+    }
+
+    private static bool IsComplexEditPrompt(string objective, string? prompt)
+    {
+        string candidate = string.IsNullOrWhiteSpace(prompt) ? objective : prompt;
+        if (!AiPromptIntentClassifier.IsLikelyEditPrompt(candidate))
+        {
+            return false;
+        }
+
+        string normalized = NormalizePromptText(candidate);
+        string[] tokens = TokenizePrompt(normalized);
+        int methodCount = CountDistinctHttpMethods(tokens);
+        int urlCount = UrlRegex.Matches(candidate).Count;
+        bool apiSurfacePrompt =
+            ContainsAny(normalized, "api surface", "crud", "fully test", "full api surface", "test the api", "test this api") ||
+            methodCount >= 3;
+        bool batchPrompt =
+            ContainsAny(normalized, "iterate", "enumerate", "batch", "foreach", "loop", "max_send_iterations", "max send iterations") &&
+            ContainsAny(normalized, "stash", "request.url", "request.send", "send()");
+        bool docHeavyPrompt =
+            ContainsAny(normalized, "response body example", "request body example", "request url example", "parameters", "description") &&
+            (methodCount >= 2 || urlCount >= 2);
+        bool multiMutationPrompt =
+            ContainsAny(normalized, "request.send", "request.method", "request.url", "request.body", "request.content_type", "request.headers", "expect") &&
+            (methodCount >= 2 || urlCount >= 2);
+
+        return apiSurfacePrompt || batchPrompt || docHeavyPrompt || multiMutationPrompt;
+    }
+
+    private static IReadOnlyList<string> BuildTargetedDocQueries(
+        string objective,
+        string? prompt,
+        AiActiveDocumentSnapshot? activeDocument)
+    {
+        string promptText = string.IsNullOrWhiteSpace(prompt) ? objective : prompt;
+        string signalText = string.Join(
+            Environment.NewLine,
+            [
+                promptText,
+                activeDocument?.SourceText ?? string.Empty,
+                .. (activeDocument?.Diagnostics ?? []).Select(static diagnostic => diagnostic.Message)
+            ]);
+        string normalized = NormalizePromptText(signalText);
+        string[] tokens = TokenizePrompt(normalized);
+        int methodCount = CountDistinctHttpMethods(tokens);
+        int urlCount = UrlRegex.Matches(signalText).Count;
+
+        bool apiSurfacePrompt =
+            ContainsAny(normalized, "api surface", "crud", "fully test", "full api surface", "test the api", "test this api") ||
+            methodCount >= 3;
+        bool batchPrompt = ContainsAny(
+            normalized,
+            "iterate",
+            "enumerate",
+            "batch",
+            "foreach",
+            "loop",
+            "max_send_iterations",
+            "max send iterations");
+        bool headerPrompt = ContainsAny(
+            normalized,
+            "header",
+            "headers",
+            "content-type",
+            "accept",
+            "x-correlation-id",
+            "x-workspace",
+            "x-environment");
+        bool writePayloadPrompt =
+            CountMatchingHttpMethods(tokens, "post", "put", "patch") > 0 ||
+            ContainsAny(normalized, "request.body", "request.content_type", "body", "payload", "application/json", "content_type");
+        bool urlPrompt =
+            urlCount > 0 ||
+            ContainsAny(normalized, "request.url", "?id=", "endpoint", "/objects/", "filtered list");
+        bool stashPrompt = ContainsAny(normalized, "stash", "capture rows", "stash rows", "capture the important fields");
+        bool expectPrompt =
+            ContainsAny(normalized, "expect", "assert", "verify", "validate", "test") ||
+            apiSurfacePrompt ||
+            batchPrompt;
+
+        List<string> queries = [];
+        AddQuery(queries, "api-surface-crud", apiSurfacePrompt);
+        AddQuery(queries, "batch-stash-loop", batchPrompt);
+        AddQuery(queries, "request-headers", headerPrompt);
+        AddQuery(queries, "request-content-type", writePayloadPrompt);
+        AddQuery(queries, "request-body", writePayloadPrompt);
+        AddQuery(queries, "request-url", urlPrompt);
+        AddQuery(queries, "request-method", apiSurfacePrompt);
+        AddQuery(queries, "stash", stashPrompt);
+        AddQuery(queries, "expect", expectPrompt);
+        AddQuery(queries, "request-send", !apiSurfacePrompt || batchPrompt || urlPrompt);
+        AddQuery(queries, "max-send-iterations", batchPrompt);
+
+        return queries;
+    }
+
+    private static void AddQuery(ICollection<string> queries, string query, bool include)
+    {
+        if (!include || queries.Any(existing => string.Equals(existing, query, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        queries.Add(query);
+    }
+
+    private static AiPromptTopic BuildPreflightPromptTopic((string Query, AiKnowledgeSearchHit Hit) selection)
+    {
+        AiKnowledgeSearchHit hit = selection.Hit;
+        string key = TryGetCatalogKey(hit.Document) ?? hit.Document.Id;
+        ForRestLanguageHelpEntry? entry = TryGetLanguageEntry(key);
+        string content = entry is null
+            ? BuildGenericPreflightContent(hit)
+            : BuildEntryPreflightContent(entry);
+
+        return new(
+            $"Preflight: {hit.Document.Title}",
+            $"Auto-loaded local example for `{selection.Query}` before the first edit turn.",
+            $"preflight-doc:{key}",
+            content);
+    }
+
+    private static string BuildGenericPreflightContent(AiKnowledgeSearchHit hit)
+    {
+        StringBuilder builder = new();
+        builder.Append("Summary: ").AppendLine(hit.Document.Summary);
+        if (!string.IsNullOrWhiteSpace(hit.Excerpt))
+        {
+            builder.Append("Excerpt: ").AppendLine(hit.Excerpt.Trim());
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string BuildEntryPreflightContent(ForRestLanguageHelpEntry entry)
+    {
+        StringBuilder builder = new();
+        builder.Append("Summary: ").AppendLine(entry.Summary);
+        if (!string.IsNullOrWhiteSpace(entry.Documentation))
+        {
+            builder.Append("Rule: ").AppendLine(entry.Documentation.Trim());
+        }
+
+        string pattern = SelectPreflightPattern(entry);
+        if (!string.IsNullOrWhiteSpace(pattern))
+        {
+            builder.AppendLine("Pattern:");
+            builder.AppendLine(TrimPreflightBlock(pattern));
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string SelectPreflightPattern(ForRestLanguageHelpEntry entry)
+    {
+        string pattern = string.Equals(entry.Key, "api-surface-crud", StringComparison.OrdinalIgnoreCase) &&
+                         !string.IsNullOrWhiteSpace(entry.InsertText)
+            ? entry.InsertText
+            : entry.Example;
+
+        if (string.IsNullOrWhiteSpace(pattern) &&
+            !string.IsNullOrWhiteSpace(entry.InsertText) &&
+            !entry.InsertText.Contains("${", StringComparison.Ordinal))
+        {
+            pattern = entry.InsertText;
+        }
+
+        return NormalizeLineEndings(pattern).Trim();
+    }
+
+    private static string TrimPreflightBlock(string value)
+    {
+        string normalized = NormalizeLineEndings(value).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        string[] lines = normalized.Split('\n');
+        if (lines.Length > MaxPreflightPatternLines)
+        {
+            normalized = string.Join(Environment.NewLine, lines.Take(MaxPreflightPatternLines)) + Environment.NewLine + "...";
+        }
+
+        return normalized.Length <= MaxPreflightPatternLength
+            ? normalized
+            : normalized[..MaxPreflightPatternLength].TrimEnd() + " ...";
+    }
+
+    private static ForRestLanguageHelpEntry? TryGetLanguageEntry(string key)
+    {
+        return ForRestLanguageCatalog
+            .GetEntries()
+            .FirstOrDefault(entry => string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? TryGetCatalogKey(AiKnowledgeDocument document)
+    {
+        if (!string.IsNullOrWhiteSpace(document.SourcePath) &&
+            document.SourcePath.StartsWith("ForRestLanguageCatalog:", StringComparison.OrdinalIgnoreCase))
+        {
+            return document.SourcePath["ForRestLanguageCatalog:".Length..];
+        }
+
+        if (document.Id.StartsWith("catalog:", StringComparison.OrdinalIgnoreCase))
+        {
+            return document.Id["catalog:".Length..];
+        }
+
+        return null;
+    }
+
+    private static string NormalizePromptText(string? value)
+    {
+        return NormalizeLineEndings(value)
+            .Replace('’', '\'')
+            .Replace('‘', '\'')
+            .Replace('“', '"')
+            .Replace('”', '"')
+            .Replace('–', '-')
+            .Replace('—', '-')
+            .ToLowerInvariant();
+    }
+
+    private static string NormalizeLineEndings(string? value)
+    {
+        return (value ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+    }
+
+    private static bool ContainsAny(string value, params string[] markers)
+    {
+        return markers.Any(marker => value.Contains(marker, StringComparison.Ordinal));
+    }
+
+    private static string[] TokenizePrompt(string prompt)
+    {
+        return prompt.Split(
+            [' ', '\t', '\r', '\n', '.', ',', '!', '?', ':', ';', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '-', '`'],
+            StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private static int CountDistinctHttpMethods(IEnumerable<string> tokens)
+    {
+        return tokens
+            .Where(static token => token is "get" or "post" or "put" or "patch" or "delete")
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+    }
+
+    private static int CountMatchingHttpMethods(IEnumerable<string> tokens, params string[] methods)
+    {
+        HashSet<string> methodSet = new(methods, StringComparer.Ordinal);
+        return tokens.Count(methodSet.Contains);
     }
 
     private static string BuildRuntimeContextBlock(AiActiveDocumentRuntimeContext? runtimeContext)
@@ -161,7 +542,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             : normalized[..maxLength].TrimEnd() + " ...";
     }
 
-    private AITool[] BuildRuntimeTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost)
+    private AITool[] BuildRuntimeTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost, AiDebugTraceBuffer debugTrace)
     {
         List<AITool> tools = [];
         if (settings.Tools.EnableDocsSearch)
@@ -188,28 +569,44 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             [Description("The docs query to search for.")] string query,
             [Description("Maximum number of search hits to return.")] int maxResults)
         {
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                return BuildFullDocsCorpus("No docs query was supplied. Returning the full local docs corpus.");
-            }
+            return TraceToolCall(
+                "search_docs",
+                string.Join(
+                    Environment.NewLine,
+                    [
+                        $"query: {query}",
+                        $"maxResults: {maxResults}",
+                    ]),
+                () =>
+                {
+                    if (string.IsNullOrWhiteSpace(query))
+                    {
+                        return BuildFullDocsCorpus("No docs query was supplied. Returning the full local docs corpus.");
+                    }
 
-            int boundedResults = Math.Clamp(maxResults, 1, settings.Tools.MaxSearchResults);
-            IReadOnlyList<AiKnowledgeSearchHit> hits = _documentationSearchService.Search(query, boundedResults);
-            if (AiDocumentationSearchService.ShouldFallbackToFullDocs(query, hits))
-            {
-                string fallbackPreface = hits.Count == 0
-                    ? "No matching ForRest docs were found. Returning the full local docs corpus instead."
-                    : "The targeted docs hits were too weak. Returning the full local docs corpus instead.";
-                return BuildFullDocsCorpus(fallbackPreface);
-            }
+                    int boundedResults = Math.Clamp(maxResults, 1, settings.Tools.MaxSearchResults);
+                    IReadOnlyList<AiKnowledgeSearchHit> hits = _documentationSearchService.Search(query, boundedResults);
+                    if (AiDocumentationSearchService.ShouldFallbackToFullDocs(query, hits))
+                    {
+                        string fallbackPreface = hits.Count == 0
+                            ? "No matching ForRest docs were found. Returning the full local docs corpus instead."
+                            : "The targeted docs hits were too weak. Returning the full local docs corpus instead.";
+                        return BuildFullDocsCorpus(fallbackPreface);
+                    }
 
-            return RenderSearchHits(hits);
+                    return RenderSearchHits(hits);
+                },
+                maxResultLength: 2400);
         }
 
         [Description("Read the entire canonical local ForRest docs corpus in one pass.")]
         string ReadAllDocs()
         {
-            return BuildFullDocsCorpus("Returning the full local docs corpus.");
+            return TraceToolCall(
+                "read_all_docs",
+                "(no arguments)",
+                () => BuildFullDocsCorpus("Returning the full local docs corpus."),
+                maxResultLength: 2400);
         }
 
         [Description("Apply bounded non-overlapping text edits to a document source string.")]
@@ -218,47 +615,102 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             [Description("The current document source text to patch.")] string sourceText,
             [Description("A JSON array of edits with startIndex, length, and replacement fields.")] string editsJson)
         {
-            AiTextEdit[] edits;
-            try
-            {
-                edits = JsonSerializer.Deserialize<AiTextEdit[]>(editsJson) ?? [];
-            }
-            catch (JsonException)
-            {
-                return JsonSerializer.Serialize(new
+            return TraceToolCall(
+                "patch_document",
+                string.Join(
+                    Environment.NewLine,
+                    [
+                        $"documentId: {documentId}",
+                        $"sourceLength: {(sourceText ?? string.Empty).Length}",
+                        "editsJson:",
+                        editsJson,
+                    ]),
+                () =>
                 {
-                    succeeded = false,
-                    errors = new[] { "The editsJson payload must be a JSON array of AiTextEdit objects." },
-                });
-            }
+                    AiTextEdit[] edits;
+                    try
+                    {
+                        edits = JsonSerializer.Deserialize<AiTextEdit[]>(editsJson) ?? [];
+                    }
+                    catch (JsonException)
+                    {
+                        return JsonSerializer.Serialize(new
+                        {
+                            succeeded = false,
+                            errors = new[] { "The editsJson payload must be a JSON array of AiTextEdit objects." },
+                        });
+                    }
 
-            AiDocumentPatchResult result = _documentPatchService.Apply(new(documentId, sourceText, edits));
-            return JsonSerializer.Serialize(new
-            {
-                succeeded = result.Succeeded,
-                patchedText = result.PatchedText,
-                errors = result.Errors,
-            });
+                    AiDocumentPatchResult result = _documentPatchService.Apply(new(documentId, sourceText ?? string.Empty, edits));
+                    return JsonSerializer.Serialize(new
+                    {
+                        succeeded = result.Succeeded,
+                        patchedText = result.PatchedText,
+                        errors = result.Errors,
+                    });
+                });
         }
 
         [Description("Read the current active document and its compiler diagnostics from the host canvas.")] 
         string ReadActiveDocument()
         {
-            return _activeDocumentToolService.ReadActiveDocument(settings, activeDocumentHost);
+            return TraceToolCall(
+                "read_active_document",
+                "(no arguments)",
+                () => _activeDocumentToolService.ReadActiveDocument(settings, activeDocumentHost),
+                maxResultLength: 3200);
         }
 
         [Description("Apply bounded edits to the current active document without supplying raw source text.")]
         string PatchActiveDocument(
             [Description("A JSON array of edits with startIndex, length, and replacement fields.")] string editsJson)
         {
-            return _activeDocumentToolService.PatchActiveDocument(settings, activeDocumentHost, editsJson);
+            return TraceToolCall(
+                "patch_active_document",
+                string.Join(
+                    Environment.NewLine,
+                    [
+                        "editsJson:",
+                        editsJson,
+                    ]),
+                () => _activeDocumentToolService.PatchActiveDocument(settings, activeDocumentHost, editsJson),
+                maxResultLength: 3200);
         }
 
         [Description("Replace the entire active document with new source text when a full rewrite is safer than targeted edits.")]
         string ReplaceActiveDocument(
             [Description("The complete replacement source text for the active document.")] string updatedSourceText)
         {
-            return _activeDocumentToolService.ReplaceActiveDocument(settings, activeDocumentHost, updatedSourceText);
+            return TraceToolCall(
+                "replace_active_document",
+                string.Join(
+                    Environment.NewLine,
+                    [
+                        "updatedSourceText:",
+                        updatedSourceText,
+                    ]),
+                () => _activeDocumentToolService.ReplaceActiveDocument(settings, activeDocumentHost, updatedSourceText),
+                maxResultLength: 3200);
+        }
+
+        string TraceToolCall(string toolName, string arguments, Func<string> action, int maxResultLength = 1600)
+        {
+            debugTrace.AddSection($"Tool call: {toolName}", arguments);
+            try
+            {
+                string result = action();
+                debugTrace.AddSection(
+                    $"Tool result: {toolName}",
+                    string.IsNullOrWhiteSpace(result)
+                        ? "(empty result)"
+                        : AiDebugTraceBuffer.Truncate(result, maxResultLength));
+                return result;
+            }
+            catch (Exception exception)
+            {
+                debugTrace.AddSection($"Tool exception: {toolName}", exception.ToString());
+                throw;
+            }
         }
     }
 

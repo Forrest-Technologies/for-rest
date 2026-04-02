@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using ForRest.Services.AI;
+using ForRest.Scripting;
 
 namespace ForRest.Tests.AI;
 
@@ -368,6 +369,291 @@ public sealed class AiInlineConversationServiceTests
     }
 
     [TestMethod]
+    public async Task TryHandleAsync_compacts_large_api_doc_prompt_before_executor_call()
+    {
+        string[] promptLines =
+        [
+            "use this info to make a script that fully tests this api surface area. you should use stashes and dynamically set stuff to test",
+            "logs are useful too for showing the actual trace of what you did.",
+            "GET",
+            "https://api.restful-api.dev/objects",
+            "List of all objects",
+            "Description",
+            "Retrieves a predefined set of sample objects from the public API.",
+            "Parameters",
+            "id string[] query",
+            "Supports multiple values by repeating the parameter in the query string (e.g., ?id=3&id=5&id=10)",
+            "Response body example",
+            "[",
+            "{",
+            "\"id\": \"1\",",
+            "\"name\": \"Google Pixel 6 Pro\"",
+            "}",
+            "]",
+            "GET",
+            "https://api.restful-api.dev/objects/{id}",
+            "Single object",
+            "POST",
+            "https://api.restful-api.dev/objects",
+            "Add a new object",
+            "Request body example",
+            "{",
+            "\"name\": \"Apple MacBook Pro 16\"",
+            "}",
+            "PUT",
+            "https://api.restful-api.dev/objects/{id}",
+            "Update an object",
+            "no need to ask questions, just implement",
+        ];
+        string rawPrompt = string.Join("\n", promptLines);
+        string? capturedPrompt = null;
+        string? capturedObjective = null;
+        StubTurnExecutor executor = new(
+            (request, _) =>
+            {
+                capturedPrompt = request.Prompt;
+                capturedObjective = request.Objective;
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Done.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+        string source = string.Join(
+            "\n",
+            [
+                "name \"restful-api QA\"",
+                "method GET",
+                "url \"https://jsonplaceholder.typicode.com/posts/1\"",
+                .. promptLines.Select(static line => $"## {line}"),
+            ]);
+        StubActiveDocumentHost host = new(source);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-large-prompt",
+                DocumentTitle: "restful-api QA",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 40,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsNotNull(capturedPrompt);
+        Assert.IsNotNull(capturedObjective);
+        Assert.AreNotEqual(rawPrompt, capturedPrompt);
+        StringAssert.Contains(capturedPrompt, "Rewrite the active request in place. Output runnable ForRest source only.");
+        StringAssert.Contains(capturedPrompt, "GET https://api.restful-api.dev/objects");
+        StringAssert.Contains(capturedPrompt, "POST https://api.restful-api.dev/objects");
+        StringAssert.Contains(capturedPrompt, "PUT https://api.restful-api.dev/objects/{id}");
+        StringAssert.Contains(capturedPrompt, "Use stash rows to capture the important fields from each step.");
+        StringAssert.Contains(capturedPrompt, "Prefer dynamically captured values over hard-coded follow-up ids when possible.");
+        StringAssert.Contains(capturedPrompt, "Do not ask follow-up questions unless a real product decision is missing.");
+        StringAssert.Contains(capturedPrompt, "Replace the current target `https://jsonplaceholder.typicode.com/posts/1`");
+        Assert.IsFalse(capturedPrompt.Contains("Response body example", StringComparison.Ordinal));
+        Assert.IsFalse(capturedPrompt.Contains("List of all objects", StringComparison.Ordinal));
+        StringAssert.Contains(capturedObjective!, "Prefer zero clarification turns when the request is actionable");
+        Assert.IsFalse(capturedObjective.Contains("Prefer dynamic `response.someField` access", StringComparison.Ordinal));
+        StringAssert.Contains(result.DebugText, "Prompt compacted: True");
+        StringAssert.Contains(result.DebugText, "Effective prompt:");
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_applies_deterministic_restful_api_crud_rewrite_without_waiting_for_ai()
+    {
+        string[] promptLines =
+        [
+            "use this info to make a script that fully tests this api surface area. you should use stashes and dynamically set stuff to test",
+            "logs are useful too for showing the actual trace of what you did.",
+            "GET",
+            "https://api.restful-api.dev/objects",
+            "List of all objects",
+            "Description",
+            "Retrieves a predefined set of sample objects from the public API.",
+            "Parameters",
+            "id string[] query",
+            "Supports multiple values by repeating the parameter in the query string (e.g., ?id=3&id=5&id=10)",
+            "Response body example",
+            "POST",
+            "https://api.restful-api.dev/objects",
+            "PUT",
+            "https://api.restful-api.dev/objects/{id}",
+            "PATCH",
+            "https://api.restful-api.dev/objects/{id}",
+            "DELETE",
+            "https://api.restful-api.dev/objects/{id}",
+            "no need to ask questions, just implement",
+        ];
+        string source = string.Join(
+            "\n",
+            [
+                "name \"restful-api QA\"",
+                "method GET",
+                "url \"https://jsonplaceholder.typicode.com/posts/1\"",
+                "timeout 15000",
+                "max_send_iterations 3",
+                "redirects true",
+                "ssl true",
+                "history true",
+                string.Empty,
+                "runtime trace_id = guid()",
+                string.Empty,
+                "header \"Accept\" = \"application/json\"",
+                "header \"X-Workspace\" = \"{{workspace_name}}\"",
+                "header \"X-Environment\" = \"{{environment_name}}\"",
+                "header \"X-Correlation-Id\" = \"{{trace_id}}\"",
+                .. promptLines.Select(static line => $"## {line}"),
+            ]);
+        StubTurnExecutor executor = new("Should not run.");
+        StubActiveDocumentHost host = new(source);
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-deterministic-crud",
+                DocumentTitle: "restful-api QA",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 35,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.IsTrue(result.Handled);
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual("Applied built-in request rewrite.", result.StatusText);
+        StringAssert.Contains(result.DebugText, "Prompt compacted: True");
+        StringAssert.Contains(result.DebugText, "Deterministic rewrite: True");
+        StringAssert.Contains(host.SourceText, "url \"https://api.restful-api.dev/objects\"");
+        StringAssert.Contains(host.SourceText, "request.method = \"POST\"");
+        StringAssert.Contains(host.SourceText, "tests.Equal(3, sent.length(), \"filtered list returns requested ids\")");
+        StringAssert.Contains(host.SourceText, "header \"X-Workspace\" = \"{{workspace_name}}\"");
+        StringAssert.Contains(host.SourceText, "header \"X-Environment\" = \"{{environment_name}}\"");
+        StringAssert.Contains(host.SourceText, "let sample_id_a = convert.ToString(sent[0].id)");
+        Assert.IsFalse(host.SourceText.Contains("jsonplaceholder.typicode.com", StringComparison.OrdinalIgnoreCase));
+
+        ForRestScriptCompiler compiler = new(new ForRestScriptParser());
+        var compilation = compiler.Compile(
+            host.SourceText,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+                DefaultRequestName = "restful-api QA",
+            });
+
+        Assert.IsTrue(
+            compilation.Succeeded,
+            string.Join(Environment.NewLine, compilation.Diagnostics.Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}")));
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_scans_earlier_prompt_blocks_for_deterministic_restful_api_crud_rewrite_candidates()
+    {
+        string[] promptLines =
+        [
+            "use this info to make a script that fully tests this api surface area. you should use stashes and dynamically set stuff to test",
+            "logs are useful too for showing the actual trace of what you did.",
+            "GET",
+            "https://api.restful-api.dev/objects",
+            "List of all objects",
+            "Description",
+            "Retrieves a predefined set of sample objects from the public API.",
+            "Parameters",
+            "id string[] query",
+            "Supports multiple values by repeating the parameter in the query string (e.g., ?id=3&id=5&id=10)",
+            "Response body example",
+            "POST",
+            "https://api.restful-api.dev/objects",
+            "PUT",
+            "https://api.restful-api.dev/objects/{id}",
+            "PATCH",
+            "https://api.restful-api.dev/objects/{id}",
+            "DELETE",
+            "https://api.restful-api.dev/objects/{id}",
+            "no need to ask questions, just implement",
+        ];
+        string source = string.Join(
+            "\n",
+            [
+                "name \"restful-api QA\"",
+                "method GET",
+                "url \"https://jsonplaceholder.typicode.com/posts/1\"",
+                "timeout 15000",
+                "max_send_iterations 3",
+                "redirects true",
+                "ssl true",
+                "history true",
+                string.Empty,
+                "runtime trace_id = guid()",
+                string.Empty,
+                "header \"Accept\" = \"application/json\"",
+                "header \"X-Workspace\" = \"{{workspace_name}}\"",
+                "header \"X-Environment\" = \"{{environment_name}}\"",
+                "header \"X-Correlation-Id\" = \"{{trace_id}}\"",
+                string.Empty,
+                .. promptLines.Select(static line => $"## {line}"),
+                "#> AI request timed out before completion.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "# ForRest is code-first. request.send() updates response and returns the latest snapshot.",
+                "request.headers[\"X-Request-Source\"] = \"maui\"",
+                "let attempts = [0..2]",
+                "let sent = null",
+                string.Empty,
+                "foreach attempt in attempts {",
+                "  sent = request.send()",
+                "  runtime last_attempt = attempt",
+                "  if sent.status == 200 and not (sent.body.length() == 0) {",
+                "    log $\"Attempt {attempt} returned {sent.status}.\"",
+                "    break",
+                "  }",
+                string.Empty,
+                "  warn $\"Attempt {attempt} returned {sent.status}.\"",
+                "}",
+                string.Empty,
+                "expect status == 200 \"returns 200\"",
+            ]);
+        StubTurnExecutor executor = new("Should not run.");
+        StubActiveDocumentHost host = new(source);
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-deterministic-retry-shape",
+                DocumentTitle: "restful-api QA",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: source.Split('\n').Length,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.IsTrue(result.Handled);
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual("Applied built-in request rewrite.", result.StatusText);
+        StringAssert.Contains(result.DebugText, "Deterministic rewrite candidate line:");
+        StringAssert.Contains(result.DebugText, "Attempted request source:");
+        StringAssert.Contains(host.SourceText, "url \"https://api.restful-api.dev/objects\"");
+        StringAssert.Contains(host.SourceText, "request.method = \"POST\"");
+        Assert.IsFalse(host.SourceText.Contains("jsonplaceholder.typicode.com", StringComparison.OrdinalIgnoreCase));
+
+        ForRestScriptCompiler compiler = new(new ForRestScriptParser());
+        var compilation = compiler.Compile(
+            host.SourceText,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+                DefaultRequestName = "restful-api QA",
+            });
+
+        Assert.IsTrue(
+            compilation.Succeeded,
+            string.Join(Environment.NewLine, compilation.Diagnostics.Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}")));
+    }
+
+    [TestMethod]
     public async Task TryHandleAsync_cleans_chat_from_document_after_agent_applies_edits()
     {
         StubActiveDocumentHost host = new("name \"demo\"\n## tighten this request");
@@ -610,6 +896,46 @@ public sealed class AiInlineConversationServiceTests
             },
             result.UpdatedText.Split('\n'));
         Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
+    public async Task TryHandleAsync_does_not_retry_when_executor_already_used_autonomous_edit_recovery_without_document_changes()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## rewrite this request\nmethod GET");
+        StubTurnExecutor executor = new(
+            (_, _) => new AiTurnExecutionResult(
+                Succeeded: false,
+                ResponseText: "I can't safely rewrite this yet without knowing which exact syntax you want.",
+                Issues: [],
+                SessionReset: false,
+                AutonomousEditRecoveryAttempts: 1));
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-1b",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(1, executor.CallCount);
+        Assert.IsFalse(result.Succeeded);
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "name \"demo\"",
+                "## rewrite this request",
+                "#> I can't safely rewrite this yet without knowing which exact syntax you want.",
+                string.Empty,
+                "## ",
+                string.Empty,
+                "method GET",
+            },
+            result.UpdatedText.Split('\n'));
+        Assert.AreEqual(AiInlineConversationUpdateKind.ResponseOnly, result.UpdateKind);
     }
 
     [TestMethod]
@@ -932,6 +1258,70 @@ public sealed class AiInlineConversationServiceTests
     }
 
     [TestMethod]
+    public async Task TryHandleAsync_uses_compacted_prompt_for_autonomous_repair_passes()
+    {
+        string source = string.Join(
+            "\n",
+            [
+                "name \"restful-api QA\"",
+                "method GET",
+                "url \"https://jsonplaceholder.typicode.com/posts/1\"",
+                "## use this info to make a script that fully tests this api surface area. you should use stashes and dynamically set stuff to test",
+                "## logs are useful too for showing the actual trace of what you did.",
+                "## GET",
+                "## https://api.restful-api.dev/objects",
+                "## Description",
+                "## Response body example",
+                "## POST",
+                "## https://api.restful-api.dev/objects",
+                "## PUT",
+                "## https://api.restful-api.dev/objects/{id}",
+                "## PATCH",
+                "## https://api.restful-api.dev/objects/{id}",
+            ]);
+        StubActiveDocumentHost host = new(source);
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: true,
+                        ResponseText: "I can't safely rewrite this yet without knowing which exact syntax you want.",
+                        Issues: [],
+                        SessionReset: false);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"restful-api QA\"\nmethod GET\nurl \"https://api.restful-api.dev/objects\"");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Updated the active request.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-large-repair",
+                DocumentTitle: "restful-api QA",
+                Language: "forrest",
+                SourceText: source,
+                CursorLineNumber: 17,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        Assert.IsFalse(executor.PromptHistory[0].Contains("Response body example", StringComparison.Ordinal));
+        Assert.IsFalse(executor.PromptHistory[1].Contains("Response body example", StringComparison.Ordinal));
+        StringAssert.Contains(executor.PromptHistory[1], "Original user request: Rewrite the active request in place. Output runnable ForRest source only.");
+        StringAssert.Contains(executor.PromptHistory[1], "GET https://api.restful-api.dev/objects");
+        Assert.IsTrue(result.Succeeded);
+    }
+
+    [TestMethod]
     public async Task TryHandleAsync_forces_full_replacement_when_agent_says_in_place_patch_still_is_not_updated()
     {
         StubActiveDocumentHost host = new(
@@ -976,6 +1366,9 @@ public sealed class AiInlineConversationServiceTests
         StringAssert.Contains(executor.PromptHistory[1], "full `replace_active_document` call");
         StringAssert.Contains(executor.PromptHistory[1], "Do not propose a partial logging probe");
         StringAssert.Contains(executor.PromptHistory[1], "replace it now with the corrected request");
+        StringAssert.Contains(executor.PromptHistory[1], "documented `request-send`, `request-method`, `request-url`, `request-headers`, `request-body`, `request-content-type`, `api-surface-crud`, `stash`, and top-level `expect` patterns");
+        StringAssert.Contains(executor.PromptHistory[1], "strip that prose from the final document");
+        StringAssert.Contains(executor.PromptHistory[1], "replace that target instead of leaving the previous URL or method in place");
         Assert.IsTrue(result.Succeeded);
         StringAssert.Contains(result.UpdatedText, "https://api.restful-api.dev/objects");
         Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);

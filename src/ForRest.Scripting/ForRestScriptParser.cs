@@ -224,14 +224,11 @@ public sealed class ForRestScriptParser
                      ("ssl", "ssl"),
                      ("history", "history"),
                      ("content_type", "content_type"),
-                     ("request.method", "method"),
-                     ("request.url", "url"),
                      ("request.timeout", "timeout"),
                      ("request.max_send_iterations", "max_send_iterations"),
                      ("request.redirects", "redirects"),
                      ("request.ssl", "ssl"),
                      ("request.history", "history"),
-                     ("request.content_type", "content_type"),
                  })
         {
             if (TryParseTopLevelDirective(trimmed, lineNumber, sourceLine, mapping.Alias, mapping.Key, request, diagnostics))
@@ -356,7 +353,10 @@ public sealed class ForRestScriptParser
             return true;
         }
 
-        diagnostics.Add(CreateDiagnostic("Could not parse the expectation.", lineNumber, sourceLine));
+        diagnostics.Add(CreateDiagnostic(
+            "Could not parse the expectation. Use forms like 'expect status == 200 \"returns 200\"', 'expect header \"Content-Type\" contains \"json\" \"json response\"', or 'expect json \"$.id\" exists \"has id\"'.",
+            lineNumber,
+            sourceLine));
         return true;
     }
 

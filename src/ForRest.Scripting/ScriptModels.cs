@@ -47,3 +47,10 @@ public sealed record ScriptExecutionResult
 
     public StashTable Stash { get; init; } = new();
 }
+
+public sealed record ScriptValidationResult
+{
+    public string ErrorMessage { get; init; } = string.Empty;
+
+    public bool Succeeded => string.IsNullOrWhiteSpace(ErrorMessage);
+}

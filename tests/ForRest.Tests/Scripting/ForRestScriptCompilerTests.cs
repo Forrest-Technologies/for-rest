@@ -150,6 +150,378 @@ public sealed class ForRestScriptCompilerTests
     }
 
     [TestMethod]
+    public void Compile_treats_dotted_request_members_as_flow_mutations_instead_of_top_level_request_aliases()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Mutation Probe"
+            method GET
+            url "https://api.example.test/objects"
+            content_type "application/json"
+
+            request.method = "POST"
+            request.url = "https://api.example.test/objects/7"
+            request.content_type = "application/merge-patch+json"
+            request.body = "{\"name\":\"patched\"}"
+            let sent = request.send()
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        Assert.AreEqual(HttpMethodKind.Get, result.Payload.Request.Method);
+        Assert.AreEqual("https://api.example.test/objects", result.Payload.Request.UrlTemplate);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Method = \"POST\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Url = \"https://api.example.test/objects/7\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.ContentType = \"application/merge-patch+json\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Body = \"{\\\"name\\\":\\\"patched\\\"}\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
+    }
+
+    [TestMethod]
+    public void Compile_supports_multiline_let_and_request_assignments()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Continuation Probe"
+            method POST
+            url "https://api.example.test/objects"
+            content_type "application/json"
+
+            let prefix =
+              "Alpha"
+
+            let starts_ok =
+              strings.StartsWith(prefix, "A")
+              or strings.StartsWith(prefix, "B")
+              or strings.StartsWith(prefix, "C")
+
+            request.body =
+              "{\"name\":\"patched\"}"
+
+            let sent = request.send()
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic prefix = \"Alpha\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic starts_ok = strings.StartsWith(prefix, \"A\") || strings.StartsWith(prefix, \"B\") || strings.StartsWith(prefix, \"C\");");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Body = \"{\\\"name\\\":\\\"patched\\\"}\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
+    }
+
+    [TestMethod]
+    public void Compile_supports_raw_json_request_body_object_assignments()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Raw JSON Body Probe"
+            method POST
+            url "https://api.example.test/objects"
+            content_type "application/json"
+
+            request.body =
+            {
+              "name": "patched",
+              "data": {
+                "color": "silver",
+                "year": 2026
+              }
+            }
+
+            let sent = request.send()
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Body = \"{");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "\\u0022name\\u0022: \\u0022patched\\u0022");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "\\u0022color\\u0022: \\u0022silver\\u0022");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
+    }
+
+    [TestMethod]
+    public void Compile_supports_dynamic_request_body_object_literal_assignments()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Dynamic JSON Body Probe"
+            method POST
+            url "https://api.example.test/objects"
+            content_type "application/json"
+
+            let created_name = "Validation Widget"
+            request.body =
+            {
+              name = created_name,
+              data = {
+                price = 1849.99,
+                "CPU model" = "Trace CPU",
+                "Hard disk size": "1 TB"
+              }
+            }
+
+            let sent = request.send()
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Body = json.Stringify(new JsonObject");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "[\"name\"] = __flow.J(created_name)");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "[\"price\"] = __flow.J(1849.99)");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "[\"CPU model\"] = __flow.J(\"Trace CPU\")");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
+    }
+
+    [TestMethod]
+    public void Compile_supports_bare_request_directives_inside_flow_blocks()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Directive Flow Probe"
+            method GET
+            url "https://api.example.test/objects"
+
+            foreach attempt in [0..0] {
+              method POST
+              url "https://api.example.test/objects/7"
+              content_type "application/json"
+              header "X-Trace" = "enabled"
+              request.body =
+              {
+                "name": "patched"
+              }
+              let sent = request.send()
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Method = \"POST\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Url = \"https://api.example.test/objects/7\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.ContentType = \"application/json\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Headers[\"X-Trace\"] = \"enabled\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sent = (await request.send());");
+    }
+
+    [TestMethod]
+    public void Compile_reports_misplaced_expect_inside_flow_blocks_with_actionable_diagnostic()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Misplaced Expect Probe"
+            method GET
+            url "https://api.example.test/objects"
+
+            if true {
+              expect status == 200 "returns 200"
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual(1, result.Diagnostics.Count);
+        StringAssert.Contains(result.Diagnostics[0].Message, "top-level assertion");
+        StringAssert.Contains(result.Diagnostics[0].Message, "tests.Assert");
+    }
+
+    [TestMethod]
+    public void Compile_supports_restful_api_surface_qa_script()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "restful-api QA"
+            method GET
+            url "https://api.restful-api.dev/objects"
+            timeout 15000
+            max_send_iterations 8
+            redirects true
+            ssl true
+            history true
+
+            runtime trace_id = guid()
+
+            header "Accept" = "application/json"
+            header "X-Workspace" = "{{workspace_name}}"
+            header "X-Environment" = "{{environment_name}}"
+            header "X-Correlation-Id" = "{{trace_id}}"
+
+            let created_name = $"ForRest Widget {trace_id}"
+            let patched_name = $"ForRest Widget Updated {trace_id}"
+
+            log $"Trace {trace_id}: GET /objects"
+            request.method = "GET"
+            request.url = "https://api.restful-api.dev/objects"
+            let sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "list returns 2xx")
+            tests.Assert(sent.length() >= 3, "list returns at least 3 objects")
+            let sample_id_a = convert.ToString(sent[0].id)
+            let sample_id_b = convert.ToString(sent[1].id)
+            let sample_id_c = convert.ToString(sent[2].id)
+            stash.Step = "list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.SampleIds = $"{sample_id_a},{sample_id_b},{sample_id_c}"
+            stash.Trace = trace_id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects?id=..."
+            request.url = $"https://api.restful-api.dev/objects?id={sample_id_a}&id={sample_id_b}&id={sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "filtered list returns 2xx")
+            tests.Equal(3, sent.length(), "filtered list returns requested ids")
+            stash.Step = "filtered-list"
+            stash.Status = sent.status
+            stash.Count = sent.length()
+            stash.FirstId = sent[0].id
+            stash.Commit()
+
+            log $"Trace {trace_id}: GET /objects/{sample_id_c}"
+            request.url = $"https://api.restful-api.dev/objects/{sample_id_c}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "single object returns 2xx")
+            tests.Equal(sample_id_c, convert.ToString(sent.id), "single object returns requested id")
+            stash.Step = "single"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.Commit()
+
+            log $"Trace {trace_id}: POST /objects"
+            request.method = "POST"
+            request.url = "https://api.restful-api.dev/objects"
+            request.content_type = "application/json"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":1849.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "create returns 2xx")
+            tests.Equal(created_name, convert.ToString(sent.name), "create echoes name")
+            let created_id = sent.id
+            stash.Step = "create"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.Name = sent.name
+            stash.CreatedAt = sent.createdAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PUT /objects/{created_id}"
+            request.method = "PUT"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{created_name}\",\"data\":{{\"year\":2026,\"price\":2049.99,\"CPU model\":\"Trace CPU\",\"Hard disk size\":\"1 TB\",\"color\":\"silver\"}}}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "put returns 2xx")
+            tests.Equal(2049.99, convert.ToDouble(sent.data.price), "put replaces price")
+            tests.Equal("silver", convert.ToString(sent.data.color), "put adds color")
+            stash.Step = "put"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Price = sent.data.price
+            stash.Color = sent.data.color
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: PATCH /objects/{created_id}"
+            request.method = "PATCH"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = $"{{\"name\":\"{patched_name}\"}}"
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "patch returns 2xx")
+            tests.Equal(patched_name, convert.ToString(sent.name), "patch updates name")
+            stash.Step = "patch"
+            stash.Status = sent.status
+            stash.ObjectId = sent.id
+            stash.Name = sent.name
+            stash.UpdatedAt = sent.updatedAt
+            stash.Commit()
+
+            log $"Trace {trace_id}: DELETE /objects/{created_id}"
+            request.method = "DELETE"
+            request.url = $"https://api.restful-api.dev/objects/{created_id}"
+            request.body = ""
+            sent = request.send()
+            tests.Assert(sent.status >= 200 and sent.status < 300, "delete returns 2xx")
+            tests.Assert(strings.Contains(convert.ToString(sent.message), convert.ToString(created_id)), "delete message includes id")
+            stash.Step = "delete"
+            stash.Status = sent.status
+            stash.ObjectId = created_id
+            stash.DeleteMessage = sent.message
+            stash.Commit()
+
+            expect status == 200 "final delete returns 200"
+            expect header "Content-Type" contains "json" "json response"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        Assert.AreEqual("restful-api QA", result.Payload.Request.Name);
+        Assert.AreEqual(HttpMethodKind.Get, result.Payload.Request.Method);
+        Assert.AreEqual("https://api.restful-api.dev/objects", result.Payload.Request.UrlTemplate);
+        Assert.AreEqual(15_000, result.Payload.Request.TimeoutMilliseconds);
+        Assert.AreEqual(8, result.Payload.Request.MaxSendIterations);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "tests.Assert(sent.status >= 200 && sent.status < 300, \"list returns 2xx\");");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic sample_id_a = convert.ToString(sent[0].id);");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "tests.Equal(3, __flow.Count(sent), \"filtered list returns requested ids\");");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "dynamic created_id = sent.id;");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Method = \"DELETE\";");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "stash.DeleteMessage = sent.message;");
+        StringAssert.Contains(result.Payload.Request.TestsScript, "response.Status == 200");
+        StringAssert.Contains(result.Payload.Request.TestsScript, "Content-Type");
+    }
+
+    [TestMethod]
     public void Compile_preserves_convert_and_strings_helpers_in_flow()
     {
         var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
@@ -744,5 +1116,32 @@ public sealed class ForRestScriptCompilerTests
         StringAssert.Contains(
             string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)),
             "not a valid ForRest identifier");
+    }
+
+    [TestMethod]
+    public void Compile_reports_actionable_guidance_for_malformed_expectations()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Bad Expect"
+            method GET
+            url "https://api.example.test/items"
+
+            expect header "Content-Type" "json response"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsFalse(result.Succeeded);
+        string messages = string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message));
+        StringAssert.Contains(messages, "Could not parse the expectation.");
+        StringAssert.Contains(messages, "expect status == 200");
+        StringAssert.Contains(messages, "expect header \"Content-Type\" contains \"json\"");
     }
 }

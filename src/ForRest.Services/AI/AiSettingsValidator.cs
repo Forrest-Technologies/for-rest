@@ -80,6 +80,11 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
             issues.Add(new(AiSettingsIssueSeverity.Error, "ai.conversation.clarification-turns.out-of-range", "Max clarification turns must be zero or greater."));
         }
 
+        if (settings.Conversation.ExecutionTimeoutSeconds is < 1 or > 300)
+        {
+            issues.Add(new(AiSettingsIssueSeverity.Error, "ai.conversation.execution-timeout.out-of-range", "AI request timeout must be between 1 and 300 seconds."));
+        }
+
         return issues;
     }
 

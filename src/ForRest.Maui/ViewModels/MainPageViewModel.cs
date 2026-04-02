@@ -28,6 +28,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private const double MinRightPanePixels = 248d;
 	private const double MinCenterPanePixels = 620d;
 	private const double SplitterPixels = 14d;
+	private const double CollapsedPaneRailPixels = 72d;
 	private const double CompactLayoutBreakpoint = 980d;
 	private const double CompactPaneMinWidth = 300d;
 	private const double CompactPaneMaxWidth = 440d;
@@ -835,7 +836,11 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public string CompactRightPaneButtonText => IsInspectorOverlayVisible ? "Close Inspect" : "Inspect";
 
+	public GridLength LeftRestoreRailWidth => new(ShowLeftPaneRestoreButton ? CollapsedPaneRailPixels : 0d, GridUnitType.Absolute);
+
 	public GridLength LeftPaneWidth => new(IsLeftPaneVisible ? _leftPanePixels : 0d, GridUnitType.Absolute);
+
+	public GridLength RightRestoreRailWidth => new(ShowRightPaneRestoreButton ? CollapsedPaneRailPixels : 0d, GridUnitType.Absolute);
 
 	public GridLength RightPaneWidth => new(IsRightPaneVisible ? _rightPanePixels : 0d, GridUnitType.Absolute);
 
@@ -1265,7 +1270,7 @@ public sealed class MainPageViewModel : ObservableObject
 			_leftPaneCollapsed = true;
 		}
 
-		NotifyPaneLayoutChanged();
+		ConstrainPaneLayout(_workbenchWidth);
 	}
 
 	public void ToggleRightPane()
@@ -1290,7 +1295,7 @@ public sealed class MainPageViewModel : ObservableObject
 			_rightPaneCollapsed = true;
 		}
 
-		NotifyPaneLayoutChanged();
+		ConstrainPaneLayout(_workbenchWidth);
 	}
 
 	public void DismissOverlays()
@@ -3177,6 +3182,7 @@ public sealed class MainPageViewModel : ObservableObject
 			_activeEditorLineNumber);
 		CancellationTokenSource? workingAnimationSource = null;
 		Task? workingAnimationTask = null;
+		CancellationTokenSource? aiRequestTimeoutSource = null;
 		AiInlineConversationRequest request = new(
 			DocumentId: RequestLocation,
 			DocumentTitle: RequestName,
@@ -3195,7 +3201,9 @@ public sealed class MainPageViewModel : ObservableObject
 		IsSending = true;
 		try
 		{
-			AiInlineConversationResult result = await _aiInlineConversationService.TryHandleAsync(request);
+			int aiTimeoutSeconds = Math.Max(1, aiSettings.Conversation.ExecutionTimeoutSeconds);
+			aiRequestTimeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(aiTimeoutSeconds));
+			AiInlineConversationResult result = await _aiInlineConversationService.TryHandleAsync(request, aiRequestTimeoutSource.Token);
 			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
 			workingAnimationSource = null;
 			workingAnimationTask = null;
@@ -3226,6 +3234,7 @@ public sealed class MainPageViewModel : ObservableObject
 			await PersistCurrentRequestAsync();
 			ExecutionStatus = result.StatusText;
 			DebugOutputText = result.DebugText;
+			WriteInlineAiDebugTrace(DebugOutputText);
 			TraceEntries.Clear();
 			TraceEntries.Add(new TraceEntryViewModel("ai", result.StatusText, DateTime.Now.ToString("T"), result.Succeeded ? _successColor : _warningColor));
 			OnPropertyChanged(nameof(CanCopyTrace));
@@ -3237,6 +3246,27 @@ public sealed class MainPageViewModel : ObservableObject
 
 			return true;
 		}
+		catch (OperationCanceledException) when (aiRequestTimeoutSource?.IsCancellationRequested == true)
+		{
+			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
+			workingAnimationSource = null;
+			workingAnimationTask = null;
+			RestoreTransientAiConversationText(originalSource);
+			ExecutionStatus = "AI request timed out.";
+			DebugOutputText = BuildInlineAiTimeoutDebugOutput(originalSource, prompt, aiSettings);
+			WriteInlineAiDebugTrace(DebugOutputText);
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("ai", "AI request timed out.", DateTime.Now.ToString("T"), _dangerColor));
+			if (prompt is not null)
+			{
+				TraceEntries.Add(new TraceEntryViewModel("prompt", $"line {prompt.LineNumber}: {BuildInlineAiTraceSummary(prompt.PromptText)}", DateTime.Now.ToString("T"), _warningColor));
+			}
+			TraceEntries.Add(new TraceEntryViewModel("script", "Attempted request source captured in debug output.", DateTime.Now.ToString("T"), _methodNeutral));
+			OnPropertyChanged(nameof(CanCopyTrace));
+			FocusRightPaneTab("debug");
+			RevealInspectorOnCompactLayout();
+			return true;
+		}
 		catch (Exception exception)
 		{
 			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
@@ -3245,6 +3275,7 @@ public sealed class MainPageViewModel : ObservableObject
 			RestoreTransientAiConversationText(originalSource);
 			ExecutionStatus = "AI request failed";
 			DebugOutputText = exception.ToString();
+			WriteInlineAiDebugTrace(DebugOutputText);
 			TraceEntries.Clear();
 			TraceEntries.Add(new TraceEntryViewModel("ai", exception.Message, DateTime.Now.ToString("T"), _dangerColor));
 			OnPropertyChanged(nameof(CanCopyTrace));
@@ -3254,6 +3285,7 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 		finally
 		{
+			aiRequestTimeoutSource?.Dispose();
 			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
 			IsSending = false;
 		}
@@ -3317,6 +3349,62 @@ public sealed class MainPageViewModel : ObservableObject
 			.ThenBy(prompt => Math.Abs(prompt.LineNumber - preferredAfterLineNumber))
 			.FirstOrDefault();
 		return prompt?.LineNumber;
+	}
+
+	private static string BuildInlineAiTimeoutDebugOutput(
+		string originalSource,
+		AiInlineConversationPrompt? prompt,
+		AiSettings aiSettings)
+	{
+		List<string> lines =
+		[
+			$"The AI request exceeded the configured {Math.Max(1, aiSettings.Conversation.ExecutionTimeoutSeconds)}-second timeout."
+		];
+
+		if (prompt is not null)
+		{
+			lines.Add($"Resolved inline AI prompt line: {prompt.LineNumber}");
+			lines.Add("Resolved inline AI prompt:");
+			lines.Add(prompt.PromptText);
+		}
+		else
+		{
+			lines.Add("Resolved inline AI prompt: none");
+		}
+
+		string attemptedSource = BuildConversationFreeRequestSource(originalSource).TrimEnd();
+		if (!string.IsNullOrWhiteSpace(attemptedSource))
+		{
+			lines.Add("Attempted request source:");
+			lines.Add(attemptedSource);
+		}
+
+		return string.Join(Environment.NewLine, lines);
+	}
+
+	private static string BuildInlineAiTraceSummary(string? promptText)
+	{
+		string normalized = NormalizeLineEndings(promptText ?? string.Empty)
+			.Replace('\n', ' ')
+			.Trim();
+		if (string.IsNullOrWhiteSpace(normalized))
+		{
+			return "(blank prompt)";
+		}
+
+		return normalized.Length <= 72
+			? normalized
+			: normalized[..72].TrimEnd() + "...";
+	}
+
+	private static void WriteInlineAiDebugTrace(string? debugText)
+	{
+		if (string.IsNullOrWhiteSpace(debugText))
+		{
+			return;
+		}
+
+		System.Diagnostics.Debug.WriteLine($"[InlineAI]{Environment.NewLine}{debugText}");
 	}
 
 	private async Task RunInlineAiWorkingAnimationAsync(string sourceText, int promptLineNumber, CancellationToken cancellationToken)
@@ -3780,234 +3868,22 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private bool TryValidateCompiledRequestScripts(ForRestExecutionPayload payload, out string detail)
 	{
-		PreparedRequest preparedRequest = BuildValidationPreparedRequest(payload.Request);
-		WorkspaceDefinition workspace = new()
+		ScriptValidationResult flowValidation = _scriptEngine.Validate(payload.Request.PreRequestScript);
+		if (!flowValidation.Succeeded)
 		{
-			Id = _selectedWorkspaceId,
-			Name = SelectedWorkspace,
-		};
-		List<string> failures = [];
-
-		foreach (ResponseSnapshot validationResponse in BuildValidationResponses())
-		{
-			if (TryValidateCompiledRequestScriptsAgainstSample(payload, preparedRequest, workspace, validationResponse, out string sampleDetail))
-			{
-				detail = string.Empty;
-				return true;
-			}
-
-			if (!string.IsNullOrWhiteSpace(sampleDetail))
-			{
-				failures.Add(sampleDetail);
-			}
+			detail = $"The generated flow script does not compile. {NormalizeScriptValidationError(flowValidation.ErrorMessage)}";
+			return false;
 		}
 
-		detail = failures.Count == 0
-			? "The generated script would not run."
-			: string.Join("  ", failures.Distinct(StringComparer.Ordinal).Take(4));
-		return false;
-	}
-
-	private bool TryValidateCompiledRequestScriptsAgainstSample(
-		ForRestExecutionPayload payload,
-		PreparedRequest preparedRequest,
-		WorkspaceDefinition workspace,
-		ResponseSnapshot validationResponse,
-		out string detail)
-	{
-		try
+		ScriptValidationResult testsValidation = _scriptEngine.Validate(payload.Request.TestsScript);
+		if (!testsValidation.Succeeded)
 		{
-			Task<ResponseSnapshot?> sendAsync(PreparedRequest _)
-			{
-				return Task.FromResult<ResponseSnapshot?>(validationResponse);
-			}
-
-			Task<ScriptExecutionResult> executeWorkspaceRequestAsync(string _, IReadOnlyList<VariableDefinition> callerRuntimeVariables)
-			{
-				return Task.FromResult(new ScriptExecutionResult
-				{
-					Response = validationResponse,
-					SentResponse = validationResponse,
-					RuntimeVariables = [.. callerRuntimeVariables],
-				});
-			}
-
-			ScriptExecutionResult preRequestResult = _scriptEngine.Run(
-				new()
-				{
-					Script = payload.Request.PreRequestScript,
-					PreparedRequest = preparedRequest,
-					Response = validationResponse,
-					Workspace = workspace,
-					RequestVariables = [.. payload.Request.Variables],
-					RuntimeVariables = [],
-					SendAsync = sendAsync,
-					ExecuteWorkspaceRequestAsync = executeWorkspaceRequestAsync,
-					MaxSendIterations = payload.Request.MaxSendIterations,
-				}).GetAwaiter().GetResult();
-			if (!string.IsNullOrWhiteSpace(preRequestResult.ErrorMessage))
-			{
-				detail = NormalizeScriptValidationError(preRequestResult.ErrorMessage);
-				return false;
-			}
-
-			ScriptExecutionResult testsResult = _scriptEngine.Run(
-				new()
-				{
-					Script = payload.Request.TestsScript,
-					PreparedRequest = preRequestResult.PreparedRequest,
-					Response = preRequestResult.SentResponse ?? preRequestResult.Response ?? validationResponse,
-					Workspace = workspace,
-					RequestVariables = [.. payload.Request.Variables],
-					RuntimeVariables = [.. preRequestResult.RuntimeVariables],
-					SendAsync = sendAsync,
-					ExecuteWorkspaceRequestAsync = executeWorkspaceRequestAsync,
-					MaxSendIterations = payload.Request.MaxSendIterations,
-				}).GetAwaiter().GetResult();
-			if (!string.IsNullOrWhiteSpace(testsResult.ErrorMessage))
-			{
-				detail = NormalizeScriptValidationError(testsResult.ErrorMessage);
-				return false;
-			}
-		}
-		catch (Exception exception)
-		{
-			detail = exception.Message;
+			detail = $"The generated tests script does not compile. {NormalizeScriptValidationError(testsValidation.ErrorMessage)}";
 			return false;
 		}
 
 		detail = string.Empty;
 		return true;
-	}
-
-	private static PreparedRequest BuildValidationPreparedRequest(RequestDefinition request)
-	{
-		Uri uri = Uri.TryCreate(request.UrlTemplate, UriKind.Absolute, out Uri? parsedUri)
-			? parsedUri
-			: new Uri("https://localhost");
-
-		return new()
-		{
-			Method = request.Method,
-			Uri = uri,
-			Headers = [.. request.Headers],
-			Body = request.Body,
-			Auth = request.Auth,
-			TimeoutMilliseconds = request.TimeoutMilliseconds,
-			FollowRedirects = request.FollowRedirects,
-			ValidateSsl = request.ValidateSsl,
-			RawRequest = $"{request.Method.ToString().ToUpperInvariant()} {uri}",
-		};
-	}
-
-	private static IReadOnlyList<ResponseSnapshot> BuildValidationResponses()
-	{
-		return
-		[
-			BuildValidationResponse(
-				"""
-				{
-				  "ok": true,
-				  "id": "7",
-				  "name": "Apple MacBook Pro 16",
-				  "title": "Alpha object",
-				  "completed": true,
-				  "userId": 1,
-				  "user": {
-				    "name": "Ada Lovelace"
-				  },
-				  "data": {
-				    "year": 2019,
-				    "price": 1849.99,
-				    "CPU model": "Intel Core i9",
-				    "Hard disk size": "1 TB"
-				  },
-				  "items": [
-				    {
-				      "id": "7",
-				      "name": "Apple MacBook Pro 16",
-				      "title": "Alpha object",
-				      "completed": true,
-				      "userId": 1,
-				      "data": {
-				        "price": 1849.99
-				      }
-				    },
-				    {
-				      "id": "8",
-				      "name": "Banana Phone",
-				      "title": "Beta object",
-				      "completed": false,
-				      "userId": 2,
-				      "data": {
-				        "price": 399.99
-				      }
-				    }
-				  ],
-				  "results": [
-				    {
-				      "id": "7",
-				      "name": "Apple MacBook Pro 16",
-				      "data": {
-				        "price": 1849.99
-				      }
-				    }
-				  ]
-				}
-				"""),
-			BuildValidationResponse(
-				"""
-				[
-				  {
-				    "id": "7",
-				    "name": "Apple MacBook Pro 16",
-				    "title": "Alpha object",
-				    "completed": true,
-				    "userId": 1,
-				    "data": {
-				      "year": 2019,
-				      "price": 1849.99,
-				      "CPU model": "Intel Core i9",
-				      "Hard disk size": "1 TB"
-				    }
-				  },
-				  {
-				    "id": "8",
-				    "name": "Banana Phone",
-				    "title": "Beta object",
-				    "completed": false,
-				    "userId": 2,
-				    "data": {
-				      "year": 2020,
-				      "price": 399.99,
-				      "CPU model": "Intel Core i7",
-				      "Hard disk size": "512 GB"
-				    }
-				  }
-				]
-				"""),
-		];
-	}
-
-	private static ResponseSnapshot BuildValidationResponse(string body)
-	{
-		return new()
-		{
-			StatusCode = 200,
-			ReasonPhrase = "OK",
-			ContentType = "application/json",
-			SizeBytes = body.Length,
-			Body = body,
-			RawResponse = "HTTP/1.1 200 OK",
-			Headers =
-			[
-				new KeyValueDefinition
-				{
-					Key = "Content-Type",
-					Value = "application/json",
-				},
-			],
-		};
 	}
 
 	private static string NormalizeScriptValidationError(string errorMessage)
@@ -4024,21 +3900,30 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private static IReadOnlyList<AiActiveDocumentDiagnostic> ParseScriptValidationDiagnostics(string detail)
 	{
-		List<AiActiveDocumentDiagnostic> diagnostics = [];
 		string[] entries = (detail ?? string.Empty)
 			.Split(["\r\n", "\n", "  "], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		List<AiActiveDocumentDiagnostic> roslynDiagnostics = [];
 
 		foreach (string entry in entries)
 		{
-			Match match = Regex.Match(entry, @"^\((?<line>\d+),(?<column>\d+)\):\s*error\s+\w+\s*:\s*(?<message>.+)$");
+			Match match = Regex.Match(entry, @"\((?<line>\d+),(?<column>\d+)\):\s*error\s+\w+\s*:\s*(?<message>.+)$");
 			if (match.Success &&
 			    int.TryParse(match.Groups["line"].Value, out int lineNumber) &&
 			    int.TryParse(match.Groups["column"].Value, out int columnNumber))
 			{
-				diagnostics.Add(new AiActiveDocumentDiagnostic("error", match.Groups["message"].Value.Trim(), lineNumber, columnNumber));
-				continue;
+				roslynDiagnostics.Add(new AiActiveDocumentDiagnostic("error", match.Groups["message"].Value.Trim(), lineNumber, columnNumber));
 			}
+		}
 
+		if (roslynDiagnostics.Count > 0)
+		{
+			return roslynDiagnostics;
+		}
+
+		List<AiActiveDocumentDiagnostic> diagnostics = [];
+
+		foreach (string entry in entries)
+		{
 			diagnostics.Add(new AiActiveDocumentDiagnostic("error", entry.Trim(), 1, 1));
 		}
 
@@ -4453,7 +4338,8 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		double right = _rightPaneCollapsed ? 0d : _rightPanePixels;
 		double splitters = (_leftPaneCollapsed ? 0d : SplitterPixels) + (_rightPaneCollapsed ? 0d : SplitterPixels);
-		double max = Math.Max(MinLeftPanePixels, totalWidth - right - splitters - MinCenterPanePixels);
+		double restoreRails = GetCollapsedRestoreRailPixels();
+		double max = Math.Max(MinLeftPanePixels, totalWidth - right - splitters - restoreRails - MinCenterPanePixels);
 		return Math.Clamp(requestedWidth, MinLeftPanePixels, max);
 	}
 
@@ -4461,14 +4347,29 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		double left = _leftPaneCollapsed ? 0d : _leftPanePixels;
 		double splitters = (_leftPaneCollapsed ? 0d : SplitterPixels) + (_rightPaneCollapsed ? 0d : SplitterPixels);
-		double max = Math.Max(MinRightPanePixels, totalWidth - left - splitters - MinCenterPanePixels);
+		double restoreRails = GetCollapsedRestoreRailPixels();
+		double max = Math.Max(MinRightPanePixels, totalWidth - left - splitters - restoreRails - MinCenterPanePixels);
 		return Math.Clamp(requestedWidth, MinRightPanePixels, max);
+	}
+
+	private double GetCollapsedRestoreRailPixels()
+	{
+		if (_isCompactLayout)
+		{
+			return 0d;
+		}
+
+		double leftRail = _leftPaneCollapsed ? CollapsedPaneRailPixels : 0d;
+		double rightRail = _rightPaneCollapsed ? CollapsedPaneRailPixels : 0d;
+		return leftRail + rightRail;
 	}
 
 	private void NotifyPaneLayoutChanged()
 	{
 		OnPropertyChanged(nameof(IsLeftPaneVisible));
 		OnPropertyChanged(nameof(IsRightPaneVisible));
+		OnPropertyChanged(nameof(LeftRestoreRailWidth));
+		OnPropertyChanged(nameof(RightRestoreRailWidth));
 		OnPropertyChanged(nameof(LeftPaneWidth));
 		OnPropertyChanged(nameof(RightPaneWidth));
 		OnPropertyChanged(nameof(LeftSplitterWidth));
@@ -5352,6 +5253,13 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		private readonly MainPageViewModel _owner;
 		private string _sourceText;
+		private DiagnosticsCacheEntry? _diagnosticsCache;
+
+		private sealed record DiagnosticsCacheEntry(
+			string SourceText,
+			Guid WorkspaceId,
+			string RequestName,
+			IReadOnlyList<AiActiveDocumentDiagnostic> Diagnostics);
 
 		public ActiveRequestDocumentHost(MainPageViewModel owner, string sourceText)
 		{
@@ -5371,31 +5279,49 @@ public sealed class MainPageViewModel : ObservableObject
 				Title: _owner.RequestName,
 				Language: _owner.ActiveEditorLanguage,
 				SourceText: _sourceText,
-				Diagnostics: BuildDiagnostics(_sourceText),
+				Diagnostics: GetDiagnostics(_sourceText),
 				RuntimeContext: _owner.BuildLatestRuntimeContext());
 		}
 
 		public AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText)
 		{
+			WriteUpdateDebug(
+				"Requested replacement source",
+				string.Join(
+					Environment.NewLine,
+					[
+						$"DocumentId: {document.DocumentId}",
+						$"Title: {document.Title}",
+						"Source:",
+						updatedText ?? string.Empty,
+					]));
 			if (!_owner.IsActiveRequestEditor)
 			{
+				WriteUpdateDebug("Rejected replacement", "The active editor is not a request document.");
 				return AiActiveDocumentUpdateResult.Failure("The active editor is not a request document.");
 			}
 
 			if (!string.Equals(_owner.RequestLocation, document.DocumentId, StringComparison.OrdinalIgnoreCase))
 			{
+				WriteUpdateDebug("Rejected replacement", "The active request changed before the AI patch could be applied.");
 				return AiActiveDocumentUpdateResult.Failure("The active request changed before the AI patch could be applied.");
 			}
 
 			string normalizedText = NormalizeLineEndings(
 				RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(
-					MainPageViewModel.BuildConversationFreeRequestSource(updatedText),
+					MainPageViewModel.BuildConversationFreeRequestSource(updatedText ?? string.Empty),
 					preRequestScript: string.Empty,
 					string.IsNullOrWhiteSpace(_owner.RequestName) ? "Untitled Request" : _owner.RequestName));
+			if (!string.Equals(updatedText ?? string.Empty, normalizedText, StringComparison.Ordinal))
+			{
+				WriteUpdateDebug("Normalized replacement source", normalizedText);
+			}
+
 			ForRestScriptCompilationResult compilation = _owner._scriptExecutionService.Compile(
 				normalizedText,
 				_owner._selectedWorkspaceId,
 				_owner.RequestName);
+			IReadOnlyList<AiActiveDocumentDiagnostic>? diagnostics = null;
 			if (!compilation.Succeeded || compilation.Payload is null)
 			{
 				string detail = compilation.Diagnostics.Count == 0
@@ -5403,19 +5329,26 @@ public sealed class MainPageViewModel : ObservableObject
 					: string.Join(
 						"  ",
 						compilation.Diagnostics.Take(3).Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}"));
+				WriteUpdateDebug("Rejected replacement during compile", detail);
+				diagnostics = BuildDiagnosticsFromCompilation(compilation, scriptValidationDetail: null);
 				return AiActiveDocumentUpdateResult.Failure(
 					$"The AI edit was rejected because it left the request invalid. {detail} Read the active document again and use the current diagnostics to repair it.",
 					normalizedText,
-					BuildDiagnostics(normalizedText),
+					diagnostics,
 					retryWithReplace: true);
 			}
 
 			if (!_owner.TryValidateCompiledRequestScripts(compilation.Payload, out string scriptValidationDetail))
 			{
+				WriteUpdateDebug("Rejected replacement during script validation", scriptValidationDetail);
+				string repairHint = scriptValidationDetail.Contains("expect", StringComparison.OrdinalIgnoreCase)
+					? "Read the active document again and use the exact `expect` syntax from the local docs."
+					: "Read the active document again and use the current diagnostics plus local docs to repair the flow script.";
+				diagnostics = BuildDiagnosticsFromCompilation(compilation, scriptValidationDetail);
 				return AiActiveDocumentUpdateResult.Failure(
-					$"The AI edit was rejected because its generated script would not run. {scriptValidationDetail} Read the active document again and keep `expect` statements top-level.",
+					$"The AI edit was rejected because its generated scripts do not compile. {scriptValidationDetail} {repairHint}",
 					normalizedText,
-					BuildDiagnostics(normalizedText),
+					diagnostics,
 					retryWithReplace: true);
 			}
 
@@ -5437,22 +5370,54 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 			catch (Exception exception)
 			{
+				WriteUpdateDebug("Rejected replacement during apply", exception.ToString());
 				return AiActiveDocumentUpdateResult.Failure(exception.Message, normalizedText);
 			}
 
 			_sourceText = normalizedText;
+			CacheDiagnostics(
+				_sourceText,
+				_owner._selectedWorkspaceId,
+				_owner.RequestName,
+				BuildDiagnosticsFromCompilation(compilation, string.Empty));
+			WriteUpdateDebug("Applied replacement source", normalizedText);
 			return AiActiveDocumentUpdateResult.Success(normalizedText);
 		}
 
-		private IReadOnlyList<AiActiveDocumentDiagnostic> BuildDiagnostics(string sourceText)
+		private static void WriteUpdateDebug(string title, string detail)
+		{
+			System.Diagnostics.Debug.WriteLine(
+				string.IsNullOrWhiteSpace(detail)
+					? $"[InlineAI.Update]{Environment.NewLine}{title}"
+					: $"[InlineAI.Update]{Environment.NewLine}{title}{Environment.NewLine}{detail}");
+		}
+
+		private IReadOnlyList<AiActiveDocumentDiagnostic> GetDiagnostics(string sourceText)
+		{
+			Guid workspaceId = _owner._selectedWorkspaceId;
+			string requestName = _owner.RequestName;
+			if (TryGetCachedDiagnostics(sourceText, workspaceId, requestName, out IReadOnlyList<AiActiveDocumentDiagnostic>? diagnostics))
+			{
+				return diagnostics;
+			}
+
+			ForRestScriptCompilationResult compilation = _owner._scriptExecutionService.Compile(
+				sourceText,
+				workspaceId,
+				requestName);
+			return CacheDiagnostics(
+				sourceText,
+				workspaceId,
+				requestName,
+				BuildDiagnosticsFromCompilation(compilation, scriptValidationDetail: null));
+		}
+
+		private IReadOnlyList<AiActiveDocumentDiagnostic> BuildDiagnosticsFromCompilation(
+			ForRestScriptCompilationResult compilation,
+			string? scriptValidationDetail)
 		{
 			try
 			{
-				ForRestScriptCompilationResult compilation = _owner._scriptExecutionService.Compile(
-					sourceText,
-					_owner._selectedWorkspaceId,
-					_owner.RequestName);
-
 				List<AiActiveDocumentDiagnostic> diagnostics =
 				[
 					.. compilation.Diagnostics
@@ -5467,9 +5432,14 @@ public sealed class MainPageViewModel : ObservableObject
 								Math.Max(1, diagnostic.Column)))
 				];
 
-				if (compilation.Succeeded &&
+				if (scriptValidationDetail is null &&
+				    compilation.Succeeded &&
 				    compilation.Payload is not null &&
-				    !_owner.TryValidateCompiledRequestScripts(compilation.Payload, out string scriptValidationDetail))
+				    !_owner.TryValidateCompiledRequestScripts(compilation.Payload, out string computedScriptValidationDetail))
+				{
+					diagnostics.AddRange(ParseScriptValidationDiagnostics(computedScriptValidationDetail));
+				}
+				else if (!string.IsNullOrWhiteSpace(scriptValidationDetail))
 				{
 					diagnostics.AddRange(ParseScriptValidationDiagnostics(scriptValidationDetail));
 				}
@@ -5494,6 +5464,35 @@ public sealed class MainPageViewModel : ObservableObject
 						1)
 				];
 			}
+		}
+
+		private IReadOnlyList<AiActiveDocumentDiagnostic> CacheDiagnostics(
+			string sourceText,
+			Guid workspaceId,
+			string requestName,
+			IReadOnlyList<AiActiveDocumentDiagnostic> diagnostics)
+		{
+			_diagnosticsCache = new(sourceText, workspaceId, requestName, diagnostics);
+			return diagnostics;
+		}
+
+		private bool TryGetCachedDiagnostics(
+			string sourceText,
+			Guid workspaceId,
+			string requestName,
+			out IReadOnlyList<AiActiveDocumentDiagnostic> diagnostics)
+		{
+			if (_diagnosticsCache is not null &&
+			    _diagnosticsCache.WorkspaceId == workspaceId &&
+			    string.Equals(_diagnosticsCache.SourceText, sourceText, StringComparison.Ordinal) &&
+			    string.Equals(_diagnosticsCache.RequestName, requestName, StringComparison.Ordinal))
+			{
+				diagnostics = _diagnosticsCache.Diagnostics;
+				return true;
+			}
+
+			diagnostics = Array.Empty<AiActiveDocumentDiagnostic>();
+			return false;
 		}
 	}
 }

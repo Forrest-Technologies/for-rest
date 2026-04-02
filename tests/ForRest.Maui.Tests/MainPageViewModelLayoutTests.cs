@@ -7,6 +7,7 @@ using ForRest.Services;
 using ForRest.Services.AI;
 using ForRest.Services.Licensing;
 using ForRest.Scripting;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ForRest.Maui.Tests;
 
@@ -43,6 +44,23 @@ public sealed class MainPageViewModelLayoutTests
 		viewModel.SelectExplorerItem(requestItem);
 
 		Assert.IsFalse(viewModel.IsExplorerOverlayVisible);
+	}
+
+	[TestMethod]
+	public void TogglePane_desktop_collapsed_state_exposes_restore_rails()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+
+		viewModel.ToggleLeftPane();
+		viewModel.ToggleRightPane();
+
+		Assert.IsTrue(viewModel.ShowLeftPaneRestoreButton);
+		Assert.IsTrue(viewModel.ShowRightPaneRestoreButton);
+		Assert.AreEqual(72d, viewModel.LeftRestoreRailWidth.Value, 0.001d);
+		Assert.AreEqual(72d, viewModel.RightRestoreRailWidth.Value, 0.001d);
+		Assert.AreEqual(0d, viewModel.LeftPaneWidth.Value, 0.001d);
+		Assert.AreEqual(0d, viewModel.RightPaneWidth.Value, 0.001d);
 	}
 
 	[TestMethod]
@@ -463,6 +481,58 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task TryHandleInlineAiAsync_timeout_debug_output_includes_prompt_and_attempted_request_source()
+	{
+		using TestHarness harness = new();
+		FakeAiInlineConversationService aiService = new(
+			AiInlineConversationResult.NotHandled(string.Empty),
+			tryHandleAsync: async (_, cancellationToken) =>
+			{
+				await Task.Delay(Timeout.Infinite, cancellationToken);
+				return AiInlineConversationResult.NotHandled(string.Empty);
+			});
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
+		MethodInfo method = typeof(MainPageViewModel).GetMethod(
+			"TryHandleInlineAiAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+		viewModel.ActiveEditorText =
+			"""
+			name "demo"
+			method GET
+			url "https://example.test"
+
+			## fix this request
+			""";
+		viewModel.UpdateActiveEditorCursor(5, 4);
+
+		Task<bool> task = (Task<bool>)method.Invoke(
+			viewModel,
+			[
+				new AiSettings
+				{
+					Enabled = true,
+					Conversation = new AiConversationSettings
+					{
+						ExecutionTimeoutSeconds = 1,
+					},
+				},
+			])!;
+
+		bool handled = await task;
+
+		Assert.IsTrue(handled);
+		Assert.AreEqual("AI request timed out.", viewModel.ExecutionStatus);
+		StringAssert.Contains(viewModel.DebugOutputText, "The AI request exceeded the configured 1-second timeout.");
+		StringAssert.Contains(viewModel.DebugOutputText, "Resolved inline AI prompt line: 5");
+		StringAssert.Contains(viewModel.DebugOutputText, "Resolved inline AI prompt:");
+		StringAssert.Contains(viewModel.DebugOutputText, "fix this request");
+		StringAssert.Contains(viewModel.DebugOutputText, "Attempted request source:");
+		StringAssert.Contains(viewModel.DebugOutputText, "name \"demo\"");
+		StringAssert.Contains(viewModel.DebugOutputText, "url \"https://example.test\"");
+	}
+
+	[TestMethod]
 	public async Task SendAsync_handles_reset_inline_ai_command_without_invoking_turn_executor()
 	{
 		using TestHarness harness = new();
@@ -502,31 +572,31 @@ public sealed class MainPageViewModelLayoutTests
 		using TestHarness harness = new();
 		IAiInlineConversationService aiService = new AiInlineConversationService(new ThrowingTurnExecutor());
 		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(), aiService);
-		string originalText =
+		string originalText = NormalizeLineEndings(
 			"""
 			name "demo"
 			## first task
 			#> first answer
 			method GET
 			## reset
-			""";
+			""");
 
 		viewModel.ActiveEditorText = originalText;
 		viewModel.UpdateActiveEditorCursor(5, 4);
 
 		await viewModel.SendAsync();
 
-		string resetText = viewModel.ActiveEditorText;
+		string resetText = NormalizeLineEndings(viewModel.ActiveEditorText);
 		Assert.IsTrue(viewModel.CanUndo);
 
 		viewModel.Undo();
 
-		Assert.AreEqual(originalText, viewModel.ActiveEditorText);
+		Assert.AreEqual(originalText, NormalizeLineEndings(viewModel.ActiveEditorText));
 		Assert.IsTrue(viewModel.CanRedo);
 
 		viewModel.Redo();
 
-		Assert.AreEqual(resetText, viewModel.ActiveEditorText);
+		Assert.AreEqual(resetText, NormalizeLineEndings(viewModel.ActiveEditorText));
 	}
 
 	[TestMethod]
@@ -908,6 +978,51 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public void ActiveRequestDocumentHost_reuses_cached_diagnostics_for_repeated_reads()
+	{
+		using TestHarness harness = new();
+		ValidationAwareExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: executionService,
+			scriptEngine: new FakeScriptEngine());
+		viewModel.ActiveEditorText = "name \"demo\"\nmethod GET\nurl \"https://example.test\"\n\n## fix this";
+
+		IAiActiveDocumentHost host = CreateActiveRequestDocumentHost(viewModel, viewModel.ActiveEditorText);
+		int baselineCompileCount = executionService.CompileCallCount;
+
+		AiActiveDocumentSnapshot? first = host.GetActiveDocument();
+		AiActiveDocumentSnapshot? second = host.GetActiveDocument();
+
+		Assert.IsNotNull(first);
+		Assert.IsNotNull(second);
+		Assert.AreEqual(baselineCompileCount + 1, executionService.CompileCallCount);
+	}
+
+	[TestMethod]
+	public void ActiveRequestDocumentHost_reuses_compilation_results_for_rejected_script_validation_updates()
+	{
+		using TestHarness harness = new();
+		ValidationAwareExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: executionService,
+			scriptEngine: new FailingScriptEngine("(35,20): error CS1002: ; expected"));
+		viewModel.ActiveEditorText = "name \"demo\"\nmethod GET\nurl \"https://example.test\"\n\n## fix this";
+
+		IAiActiveDocumentHost host = CreateActiveRequestDocumentHost(viewModel, viewModel.ActiveEditorText);
+		AiActiveDocumentSnapshot document = host.GetActiveDocument()!;
+		int baselineCompileCount = executionService.CompileCallCount;
+
+		AiActiveDocumentUpdateResult result = host.UpdateActiveDocument(
+			document,
+			"name \"demo\"\nmethod GET\nurl \"https://example.test\"\n");
+
+		Assert.IsFalse(result.Succeeded);
+		Assert.AreEqual(baselineCompileCount + 1, executionService.CompileCallCount);
+		Assert.IsTrue(result.Diagnostics.Any(static diagnostic => diagnostic.Line == 35 && diagnostic.Message.Contains("; expected", StringComparison.Ordinal)));
+		StringAssert.Contains(result.Message, "generated scripts do not compile");
+	}
+
+	[TestMethod]
 	public async Task SendAsync_exposes_latest_runtime_failure_to_inline_ai()
 	{
 		using TestHarness harness = new();
@@ -962,7 +1077,7 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
-	public void TryValidateCompiledRequestScripts_accepts_array_root_validation_samples_when_object_root_fails()
+	public void TryValidateCompiledRequestScripts_uses_compile_only_validation_without_executing_scripts()
 	{
 		using TestHarness harness = new();
 		ArrayRootValidationExecutionService executionService = new();
@@ -970,7 +1085,6 @@ public sealed class MainPageViewModelLayoutTests
 		MainPageViewModel viewModel = harness.CreateViewModel(
 			executionService: executionService,
 			scriptEngine: scriptEngine);
-		scriptEngine.ResponseRootKinds.Clear();
 
 		ForRestScriptCompilationResult compilation = executionService.Compile(
 			"""
@@ -991,12 +1105,204 @@ public sealed class MainPageViewModelLayoutTests
 
 		Assert.IsTrue(succeeded);
 		Assert.AreEqual(string.Empty, arguments[1] as string);
-		CollectionAssert.AreEqual(new[] { '{', '[' }, scriptEngine.ResponseRootKinds.ToArray());
+		Assert.AreEqual(0, scriptEngine.RunCallCount);
+	}
+
+	[TestMethod]
+	public void TryValidateCompiledRequestScripts_accepts_restful_api_crud_flows_with_request_mutations()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			scriptEngine: new RoslynScriptEngine(NullLogger<RoslynScriptEngine>.Instance));
+		ForRestScriptCompiler compiler = new(new ForRestScriptParser());
+
+		ForRestScriptCompilationResult compilation = compiler.Compile(
+			"""
+			name "restful-api QA"
+			method GET
+			url "https://api.restful-api.dev/objects"
+			timeout 15000
+			max_send_iterations 5
+			redirects true
+			ssl true
+			history true
+
+			runtime trace_id = guid()
+			header "Accept" = "application/json"
+			header "X-Correlation-Id" = "{{trace_id}}"
+
+			let sent = request.send()
+			stash.Step = "list"
+			stash.Status = sent.status
+			stash.Count = sent.length()
+			stash.Commit()
+
+			request.method = "POST"
+			request.url = "https://api.restful-api.dev/objects"
+			request.content_type = "application/json"
+			request.body = "{\"name\":\"Validation Widget\",\"data\":{\"price\":1849.99}}"
+			sent = request.send()
+			stash.Step = "create"
+			stash.ObjectId = sent.id
+			stash.CreatedAt = sent.createdAt
+			stash.Commit()
+
+			request.method = "PUT"
+			request.url = "https://api.restful-api.dev/objects/7"
+			request.body = "{\"name\":\"Validation Widget\",\"data\":{\"price\":2049.99,\"color\":\"silver\"}}"
+			sent = request.send()
+			stash.Step = "replace"
+			stash.UpdatedAt = sent.updatedAt
+			stash.Commit()
+
+			request.method = "PATCH"
+			request.body = "{\"name\":\"Validation Widget Updated\"}"
+			sent = request.send()
+			stash.Step = "patch"
+			stash.Name = sent.name
+			stash.Commit()
+
+			request.method = "DELETE"
+			request.body = ""
+			sent = request.send()
+			stash.Step = "delete"
+			stash.DeleteMessage = sent.message
+			stash.Commit()
+
+			expect header "Content-Type" contains "json" "json response"
+			""",
+			new()
+			{
+				WorkspaceId = Guid.NewGuid(),
+				DefaultRequestName = "restful-api QA",
+			});
+		Assert.IsNotNull(
+			compilation.Payload,
+			string.Join(Environment.NewLine, compilation.Diagnostics.Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}")));
+
+		MethodInfo method = typeof(MainPageViewModel).GetMethod(
+			"TryValidateCompiledRequestScripts",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+		object?[] arguments = [compilation.Payload, null];
+
+		bool succeeded = (bool)method.Invoke(viewModel, arguments)!;
+
+		Assert.IsTrue(succeeded, arguments[1] as string);
+		Assert.AreEqual(string.Empty, arguments[1] as string);
+	}
+
+	[TestMethod]
+	public void TryValidateCompiledRequestScripts_accepts_restful_api_filtered_queries_with_documented_sample_ids()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			scriptEngine: new RoslynScriptEngine(NullLogger<RoslynScriptEngine>.Instance));
+		ForRestScriptCompiler compiler = new(new ForRestScriptParser());
+
+		ForRestScriptCompilationResult compilation = compiler.Compile(
+			"""
+			name "restful-api QA"
+			method GET
+			url "https://api.restful-api.dev/objects"
+			timeout 15000
+			max_send_iterations 4
+			redirects true
+			ssl true
+			history true
+
+			header "Accept" = "application/json"
+
+			let sent = request.send()
+			tests.Assert(sent.status >= 200 and sent.status < 300, "list returns 2xx")
+
+			request.url = "https://api.restful-api.dev/objects?id=3&id=5&id=10"
+			sent = request.send()
+			tests.Assert(sent.status >= 200 and sent.status < 300, "filtered list returns 2xx")
+			tests.Equal(3, sent.length(), "filtered list returns requested ids")
+			stash.Step = "filtered-list"
+			stash.Count = sent.length()
+			stash.FirstId = sent[0].id
+			stash.Commit()
+
+			expect header "Content-Type" contains "json" "json response"
+			""",
+			new()
+			{
+				WorkspaceId = Guid.NewGuid(),
+				DefaultRequestName = "restful-api QA",
+			});
+		Assert.IsNotNull(
+			compilation.Payload,
+			string.Join(Environment.NewLine, compilation.Diagnostics.Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}")));
+
+		MethodInfo method = typeof(MainPageViewModel).GetMethod(
+			"TryValidateCompiledRequestScripts",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+		object?[] arguments = [compilation.Payload, null];
+
+		bool succeeded = (bool)method.Invoke(viewModel, arguments)!;
+
+		Assert.IsTrue(succeeded, arguments[1] as string);
+		Assert.AreEqual(string.Empty, arguments[1] as string);
+	}
+
+	[TestMethod]
+	public void Deterministic_restful_api_crud_rewrite_remains_valid_after_request_document_normalization()
+	{
+		using TestHarness harness = new();
+		CompilerOnlyExecutionService executionService = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: executionService,
+			scriptEngine: new RoslynScriptEngine(NullLogger<RoslynScriptEngine>.Instance));
+		string source =
+			"""
+			name "restful-api QA"
+			method GET
+			url "https://jsonplaceholder.typicode.com/posts/1"
+			""";
+		string rewrittenSource = BuildDeterministicCrudRewriteSource(source, "restful-api QA");
+		string normalized = RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(rewrittenSource, string.Empty, "restful-api QA");
+		ForRestScriptCompilationResult compilation = executionService.Compile(normalized, Guid.NewGuid(), "restful-api QA");
+
+		Assert.IsTrue(
+			compilation.Succeeded,
+			string.Join(Environment.NewLine, compilation.Diagnostics.Select(static diagnostic => $"L{diagnostic.Line}: {diagnostic.Message}")));
+		Assert.IsNotNull(compilation.Payload);
+		StringAssert.Contains(normalized, "tests.Assert(sent.status >= 200 and sent.status < 300, \"list returns 2xx\")");
+		StringAssert.Contains(normalized, "tests.Assert(sent.status >= 200 and sent.status < 300, \"delete returns 2xx\")");
+
+		MethodInfo method = typeof(MainPageViewModel).GetMethod(
+			"TryValidateCompiledRequestScripts",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+		object?[] arguments = [compilation.Payload, null];
+		bool succeeded = (bool)method.Invoke(viewModel, arguments)!;
+
+		Assert.IsTrue(succeeded, arguments[1] as string);
+		Assert.AreEqual(string.Empty, arguments[1] as string);
 	}
 
 	private static string NormalizeLineEndings(string value)
 	{
 		return (value ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+	}
+
+	private static string BuildDeterministicCrudRewriteSource(string sourceText, string documentTitle)
+	{
+		MethodInfo method = typeof(AiInlineConversationService).GetMethod(
+			"BuildDeterministicRestfulCrudRewriteSource",
+			BindingFlags.Static | BindingFlags.NonPublic)!;
+		return (string)method.Invoke(null, [sourceText, documentTitle])!;
+	}
+
+	private static IAiActiveDocumentHost CreateActiveRequestDocumentHost(MainPageViewModel viewModel, string sourceText)
+	{
+		Type hostType = typeof(MainPageViewModel).GetNestedType("ActiveRequestDocumentHost", BindingFlags.NonPublic)!;
+		return (IAiActiveDocumentHost)Activator.CreateInstance(
+			hostType,
+			BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
+			binder: null,
+			args: [viewModel, sourceText],
+			culture: null)!;
 	}
 
 	private sealed class TestHarness : IDisposable
@@ -1301,6 +1607,11 @@ public sealed class MainPageViewModelLayoutTests
 
 	private sealed class FakeScriptEngine : IScriptEngine
 	{
+		public ScriptValidationResult Validate(string script)
+		{
+			return new();
+		}
+
 		public Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
 		{
 			return Task.FromResult(new ScriptExecutionResult
@@ -1315,6 +1626,14 @@ public sealed class MainPageViewModelLayoutTests
 
 	private sealed class FailingScriptEngine(string errorMessage) : IScriptEngine
 	{
+		public ScriptValidationResult Validate(string script)
+		{
+			return new()
+			{
+				ErrorMessage = string.IsNullOrWhiteSpace(script) ? string.Empty : errorMessage,
+			};
+		}
+
 		public Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
 		{
 			return Task.FromResult(new ScriptExecutionResult
@@ -1330,8 +1649,11 @@ public sealed class MainPageViewModelLayoutTests
 
 	private sealed class ValidationAwareExecutionService : IForRestScriptExecutionService
 	{
+		public int CompileCallCount { get; private set; }
+
 		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
 		{
+			CompileCallCount++;
 			return new(
 				null,
 				new ForRestExecutionPayload
@@ -1515,34 +1837,17 @@ public sealed class MainPageViewModelLayoutTests
 
 	private sealed class ArrayRootValidationScriptEngine : IScriptEngine
 	{
-		public List<char> ResponseRootKinds { get; } = [];
+		public int RunCallCount { get; private set; }
+
+		public ScriptValidationResult Validate(string script)
+		{
+			return new();
+		}
 
 		public Task<ScriptExecutionResult> Run(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
 		{
-			string body = request.Response?.Body?.TrimStart() ?? string.Empty;
-			if (!string.IsNullOrWhiteSpace(request.Script) &&
-			    !string.IsNullOrWhiteSpace(body))
-			{
-				ResponseRootKinds.Add(body[0]);
-			}
-
-			ScriptExecutionResult result = new()
-			{
-				PreparedRequest = request.PreparedRequest,
-				Response = request.Response,
-				SentResponse = request.Response,
-				RuntimeVariables = [.. request.RuntimeVariables],
-				ErrorMessage = !string.IsNullOrWhiteSpace(request.Script) && body.StartsWith("{", StringComparison.Ordinal)
-					? "RuntimeBinderException: 'System.Text.Json.Nodes.JsonObject' does not contain a definition for 'objects'"
-					: null,
-			};
-
-			if (string.IsNullOrWhiteSpace(request.Script))
-			{
-				return Task.FromResult(result);
-			}
-
-			return Task.FromResult(result);
+			RunCallCount++;
+			throw new AssertFailedException("Validation should not execute scripts.");
 		}
 	}
 
@@ -1560,5 +1865,33 @@ public sealed class MainPageViewModelLayoutTests
 	private sealed class TestBuildMetadataProvider(DateTimeOffset buildDateUtc) : IBuildMetadataProvider
 	{
 		public DateTimeOffset GetBuildDateUtc() => buildDateUtc;
+	}
+
+	private sealed class CompilerOnlyExecutionService : IForRestScriptExecutionService
+	{
+		private readonly ForRestScriptCompiler _compiler = new(new ForRestScriptParser());
+
+		public ForRestScriptCompilationResult Compile(string source, Guid workspaceId, string? defaultRequestName = null)
+		{
+			return _compiler.Compile(
+				source,
+				new()
+				{
+					WorkspaceId = workspaceId,
+					DefaultRequestName = defaultRequestName ?? "Untitled Request",
+				});
+		}
+
+		public Task<ForRestScriptExecutionOutcome> Execute(
+			AppProfile profile,
+			WorkspaceSnapshot workspace,
+			string source,
+			EnvironmentDefinition? environment,
+			string? defaultRequestName = null,
+			string? preRequestScriptOverride = null,
+			CancellationToken cancellationToken = default)
+		{
+			throw new NotSupportedException("Execution is not used in this document-update test.");
+		}
 	}
 }

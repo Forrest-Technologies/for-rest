@@ -44,6 +44,10 @@ public sealed class AiTurnExecutorTests
         Assert.AreEqual(1, agent.Calls[0].MessageCount);
         Assert.AreEqual(0, agent.Calls[1].MessageCount);
         Assert.IsNotNull(agent.Calls[1].ContinuationToken);
+        StringAssert.Contains(result.DebugTrace, "Executor request");
+        StringAssert.Contains(result.DebugTrace, "Agent prompt [initial]");
+        StringAssert.Contains(result.DebugTrace, "Agent continuation [1]");
+        StringAssert.Contains(result.DebugTrace, "Agent response continuation [1]");
     }
 
     [TestMethod]
@@ -69,6 +73,23 @@ public sealed class AiTurnExecutorTests
         Assert.IsFalse(result.Succeeded);
         StringAssert.Contains(result.ResponseText, "ended before completion");
         Assert.AreEqual(5, agent.Calls.Count);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_passes_prompt_text_to_runtime_factory_prepare()
+    {
+        StubAgent agent = new(CreateResponse("Done.", ResponseStatus.Completed, ChatFinishReason.Stop));
+        StubRuntimeFactory runtimeFactory = new(agent);
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(runtimeFactory);
+
+        await executor.ExecuteAsync(
+            new(
+                ConversationId: "conversation-2",
+                Objective: "Update the active request.",
+                Prompt: "Use stash rows and fully test the API surface.",
+                Settings: CreateSettings()));
+
+        Assert.AreEqual("Use stash rows and fully test the API surface.", runtimeFactory.LastPrompt);
     }
 
     private static AiSettings CreateSettings()
@@ -115,9 +136,16 @@ public sealed class AiTurnExecutorTests
 
     private sealed class StubRuntimeFactory(StubAgent agent) : IAiRuntimeFactory
     {
-        public AiPreparedRuntime Prepare(AiSettings settings, string objective, IAiActiveDocumentHost? activeDocumentHost = null)
+        public string? LastPrompt { get; private set; }
+
+        public AiPreparedRuntime Prepare(
+            AiSettings settings,
+            string objective,
+            IAiActiveDocumentHost? activeDocumentHost = null,
+            string? prompt = null)
         {
-            return new(new AiPromptManifest("test", [], []), [], agent);
+            LastPrompt = prompt;
+            return new(new AiPromptManifest("test", [], []), [], agent, new AiDebugTraceBuffer());
         }
     }
 
