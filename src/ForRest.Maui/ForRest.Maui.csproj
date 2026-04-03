@@ -23,7 +23,11 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
 		<RuntimeIdentifiers Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == ''">$(ForRestAndroidRuntimeIdentifiers)</RuntimeIdentifiers>
 		<AndroidPackageFormats Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidPackageFormats)' == ''">apk;aab</AndroidPackageFormats>
-		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">false</PublishTrimmed>
+		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Debug' and '$(PublishTrimmed)' == ''">false</PublishTrimmed>
+		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release' and '$(PublishTrimmed)' == ''">true</PublishTrimmed>
+		<AndroidLinkMode Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Debug' and '$(AndroidLinkMode)' == ''">None</AndroidLinkMode>
+		<AndroidLinkMode Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release' and '$(AndroidLinkMode)' == ''">SdkOnly</AndroidLinkMode>
+		<TrimMode Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release' and '$(TrimMode)' == ''">partial</TrimMode>
 		<RunAOTCompilation Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">false</RunAOTCompilation>
 		<ForRestAndroidDevKeystorePath Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(ForRestAndroidDevKeystorePath)' == ''">$(MSBuildProjectDirectory)\..\..\build\android\for-rest-dev.keystore</ForRestAndroidDevKeystorePath>
 		<ForRestAndroidSigningKeyAlias Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(ForRestAndroidSigningKeyAlias)' == ''">for-rest-dev</ForRestAndroidSigningKeyAlias>
@@ -56,6 +60,33 @@
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<!-- Keep the runtime scripting stack intact while still allowing Android Release to trim the rest of the app. -->
+		<TrimmerRootAssembly Include="ForRest.Models" RootMode="All" />
+		<TrimmerRootAssembly Include="ForRest.Scripting" RootMode="All" />
+		<TrimmerRootAssembly Include="Microsoft.CSharp" RootMode="All" />
+		<TrimmerRootAssembly Include="Microsoft.CodeAnalysis" RootMode="All" />
+		<TrimmerRootAssembly Include="Microsoft.CodeAnalysis.CSharp" RootMode="All" />
+		<TrimmerRootAssembly Include="Microsoft.CodeAnalysis.CSharp.Scripting" RootMode="All" />
+		<TrimmerRootAssembly Include="Microsoft.CodeAnalysis.Scripting" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Collections.Immutable" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Linq" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Linq.Expressions" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Memory" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Private.Uri" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Reflection.Emit" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Reflection.Emit.ILGeneration" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Reflection.Emit.Lightweight" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Reflection.Metadata" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Runtime.Loader" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Security.Cryptography" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Security.Cryptography.Algorithms" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Security.Cryptography.Primitives" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Text.Json" RootMode="All" />
+		<TrimmerRootAssembly Include="System.Text.RegularExpressions" RootMode="All" />
+		<LinkDescription Include="Linker\ForRest.Android.Scripting.linker.xml" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
@@ -70,6 +101,12 @@
 
 	<Target Name="ValidateMonacoAssets" BeforeTargets="PrepareForBuild">
 		<Error Condition="!Exists('$(MSBuildProjectDirectory)\Resources\Raw\monaco\vs\loader.js')" Text="Packaged Monaco assets are missing from Resources\Raw\monaco. Run scripts\Update-Monaco.ps1 to restore the local editor bundle." />
+	</Target>
+
+	<Target Name="ValidateAndroidScriptingBuildSettings" BeforeTargets="PrepareForBuild" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<Error Condition="'$(PublishAot)' == 'true' or '$(_AndroidRuntime)' == 'NativeAOT'" Text="ForRest uses Roslyn runtime scripting on Android. PublishAot/NativeAOT builds are not supported because runtime script compilation and execution require a JIT/interpreter-capable runtime." />
+		<Error Condition="'$(PublishTrimmed)' == 'true' and ('$(AndroidLinkMode)' == 'Full' or '$(TrimMode)' == 'full')" Text="ForRest Android scripting builds only support SdkOnly/partial trimming. Full trimming can strip APIs that runtime scripts need even when the app itself does not reference them directly." />
+		<Error Condition="'$(Configuration)' == 'Release' and '$(EmbedAssembliesIntoApk)' != 'true'" Text="ForRest Android release builds with runtime scripting must embed managed assemblies into the package so Roslyn can stage metadata references on device." />
 	</Target>
 
 </Project>

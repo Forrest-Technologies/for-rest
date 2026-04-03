@@ -9,9 +9,11 @@ public static class RoslynRuntimeDirectoryBootstrapper
 
 #if ANDROID
 	private const string AssetFolderName = "roslyn-runtime";
+	private const string BrotliCompressedAssemblySuffix = ".dll.br";
 	private const string StampFileName = ".stamp";
 	private const string DotnetLibraryPrefix = "lib_";
 	private const string DotnetLibrarySuffix = ".dll.so";
+	private const string FastDevOverrideDirectoryName = ".__override__";
 #endif
 
 	public static void Initialize()
@@ -58,8 +60,10 @@ public static class RoslynRuntimeDirectoryBootstrapper
 		string stagingDirectory = Path.Combine(runtimeDirectory, ".staging");
 		RecreateDirectory(stagingDirectory);
 
-		bool extractedAny = TryExtractAssembliesFromInstalledPackages(stagingDirectory) ||
-		                    TryExtractAssembliesFromPackagedAssets(stagingDirectory);
+		bool extractedAny = false;
+		extractedAny |= TryExtractAssembliesFromFastDevOverrideDirectory(stagingDirectory);
+		extractedAny |= TryExtractAssembliesFromInstalledPackages(stagingDirectory);
+		extractedAny |= TryExtractAssembliesFromPackagedAssets(stagingDirectory);
 		if (!extractedAny)
 		{
 			return;
@@ -77,6 +81,30 @@ public static class RoslynRuntimeDirectoryBootstrapper
 		}
 	}
 
+	private static bool TryExtractAssembliesFromFastDevOverrideDirectory(string runtimeDirectory)
+	{
+		string overrideRoot = Path.Combine(FileSystem.AppDataDirectory, FastDevOverrideDirectoryName);
+		if (!Directory.Exists(overrideRoot))
+		{
+			return false;
+		}
+
+		bool extractedAny = false;
+		foreach (string sourcePath in Directory.EnumerateFiles(overrideRoot, "*.dll", SearchOption.AllDirectories))
+		{
+			if (sourcePath.EndsWith(".resources.dll", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string destinationPath = Path.Combine(runtimeDirectory, Path.GetFileName(sourcePath));
+			File.Copy(sourcePath, destinationPath, overwrite: true);
+			extractedAny = true;
+		}
+
+		return extractedAny;
+	}
+
 	private static bool TryExtractAssembliesFromPackagedAssets(string runtimeDirectory)
 	{
 		Android.Content.Context context = Android.App.Application.Context
@@ -89,17 +117,32 @@ public static class RoslynRuntimeDirectoryBootstrapper
 		}
 
 		bool extractedAny = false;
-		foreach (string assetName in assetNames)
+		HashSet<string> extractedAssemblyNames = new(StringComparer.OrdinalIgnoreCase);
+		foreach (string assetName in assetNames
+			.OrderByDescending(static name => name.EndsWith(BrotliCompressedAssemblySuffix, StringComparison.OrdinalIgnoreCase)))
 		{
-			if (!assetName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+			bool isCompressedAssembly = assetName.EndsWith(BrotliCompressedAssemblySuffix, StringComparison.OrdinalIgnoreCase);
+			bool isRawAssembly = assetName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+			if (!isCompressedAssembly && !isRawAssembly)
 			{
 				continue;
 			}
 
-			string destinationPath = Path.Combine(runtimeDirectory, assetName);
+			string destinationFileName = isCompressedAssembly
+				? assetName[..^3]
+				: assetName;
+			if (!extractedAssemblyNames.Add(destinationFileName))
+			{
+				continue;
+			}
+
+			string destinationPath = Path.Combine(runtimeDirectory, destinationFileName);
 			using Stream input = assetManager.Open($"{AssetFolderName}/{assetName}");
+			using Stream assemblyStream = isCompressedAssembly
+				? new BrotliStream(input, CompressionMode.Decompress, leaveOpen: false)
+				: input;
 			using FileStream output = File.Create(destinationPath);
-			input.CopyTo(output);
+			assemblyStream.CopyTo(output);
 			extractedAny = true;
 		}
 

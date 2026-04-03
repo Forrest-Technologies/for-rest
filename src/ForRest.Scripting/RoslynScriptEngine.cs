@@ -360,6 +360,101 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         return string.IsNullOrWhiteSpace(runtimeDirectory) ? null : runtimeDirectory;
     }
 
+    private static string? TryGetRuntimeDirectory()
+    {
+        try
+        {
+            var runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory();
+            return string.IsNullOrWhiteSpace(runtimeDirectory) ? null : runtimeDirectory;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static IReadOnlyList<string> BuildReferenceProbeDirectories(
+        string? appBaseDirectory,
+        string? roslynRuntimeDirectory,
+        string? runtimeDirectory,
+        string? assemblyLocation)
+    {
+        var directories = new List<string>();
+
+        AddDirectory(roslynRuntimeDirectory);
+        AddDirectory(appBaseDirectory);
+
+        foreach (var overrideDirectory in EnumerateFastDevOverrideDirectories(appBaseDirectory))
+        {
+            AddDirectory(overrideDirectory);
+        }
+
+        AddDirectory(runtimeDirectory);
+        AddDirectory(string.IsNullOrWhiteSpace(assemblyLocation) ? null : Path.GetDirectoryName(assemblyLocation));
+
+        return directories;
+
+        void AddDirectory(string? directory)
+        {
+            if (string.IsNullOrWhiteSpace(directory) ||
+                directories.Contains(directory, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            directories.Add(directory);
+        }
+    }
+
+    internal static string? ResolveReferenceFilePath(
+        string? assemblyName,
+        string? appBaseDirectory,
+        string? roslynRuntimeDirectory,
+        string? runtimeDirectory,
+        string? assemblyLocation)
+    {
+        if (string.IsNullOrWhiteSpace(assemblyName))
+        {
+            return null;
+        }
+
+        foreach (var directory in BuildReferenceProbeDirectories(
+                     appBaseDirectory,
+                     roslynRuntimeDirectory,
+                     runtimeDirectory,
+                     assemblyLocation))
+        {
+            var candidatePath = Path.Combine(directory, $"{assemblyName}.dll");
+            if (File.Exists(candidatePath))
+            {
+                return candidatePath;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateFastDevOverrideDirectories(string? appBaseDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(appBaseDirectory))
+        {
+            yield break;
+        }
+
+        var overrideRoot = Path.Combine(appBaseDirectory, ".__override__");
+        yield return overrideRoot;
+
+        if (!Directory.Exists(overrideRoot))
+        {
+            yield break;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(overrideRoot, "*", SearchOption.AllDirectories))
+        {
+            yield return directory;
+        }
+    }
+
     private static string? TryGetAssemblyFilePath(Assembly assembly)
     {
         var location = GetAssemblyLocation(assembly);
@@ -368,20 +463,18 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             return location;
         }
 
-        var runtimeDirectory = GetRoslynRuntimeDirectory();
-        if (string.IsNullOrWhiteSpace(runtimeDirectory))
-        {
-            return null;
-        }
-
         var assemblyName = assembly.GetName().Name;
         if (string.IsNullOrWhiteSpace(assemblyName))
         {
             return null;
         }
 
-        var candidatePath = Path.Combine(runtimeDirectory, $"{assemblyName}.dll");
-        return File.Exists(candidatePath) ? candidatePath : null;
+        return ResolveReferenceFilePath(
+            assemblyName,
+            AppContext.BaseDirectory,
+            GetRoslynRuntimeDirectory(),
+            TryGetRuntimeDirectory(),
+            location);
     }
 
     private static IEnumerable<Assembly> GetReferenceAssemblyRoots() =>
@@ -530,23 +623,16 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             return false;
         }
 
-        var probeDirectories = new[]
-        {
-            GetRoslynRuntimeDirectory(),
+        string? candidatePath = ResolveReferenceFilePath(
+            assemblyName,
             AppContext.BaseDirectory,
-            Path.Combine(AppContext.BaseDirectory, ".__override__"),
-            RuntimeEnvironment.GetRuntimeDirectory(),
-            GetAssemblyLocation(assembly) is { } assemblyLocation ? Path.GetDirectoryName(assemblyLocation) : null,
-        };
-
-        foreach (string directory in probeDirectories.OfType<string>().Where(static path => !string.IsNullOrWhiteSpace(path)))
+            GetRoslynRuntimeDirectory(),
+            TryGetRuntimeDirectory(),
+            GetAssemblyLocation(assembly));
+        if (!string.IsNullOrWhiteSpace(candidatePath))
         {
-            var candidatePath = Path.Combine(directory, $"{assemblyName}.dll");
-            if (File.Exists(candidatePath))
-            {
-                reference = MetadataReference.CreateFromFile(candidatePath);
-                return true;
-            }
+            reference = MetadataReference.CreateFromFile(candidatePath);
+            return true;
         }
 
         reference = null!;
@@ -624,18 +710,11 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         var builder = new StringBuilder();
         builder.AppendLine("Roslyn reference diagnostics:");
 
-        string runtimeDirectory;
-        try
-        {
-            runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory();
-        }
-        catch (Exception exception)
-        {
-            runtimeDirectory = $"<unavailable: {exception.GetType().Name}>";
-        }
+        string? runtimeDirectory = TryGetRuntimeDirectory();
+        string runtimeDirectoryDisplay = runtimeDirectory ?? "<unavailable>";
 
         builder.AppendLine($"  AppContext.BaseDirectory: {AppContext.BaseDirectory}");
-        builder.AppendLine($"  RuntimeDirectory: {runtimeDirectory}");
+        builder.AppendLine($"  RuntimeDirectory: {runtimeDirectoryDisplay}");
         string? roslynRuntimeDirectory = GetRoslynRuntimeDirectory();
         builder.AppendLine($"  RoslynRuntimeDirectory: {roslynRuntimeDirectory ?? "<unset>"}");
 
@@ -647,26 +726,20 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             string name = assembly.GetName().Name ?? assembly.FullName ?? "<unknown>";
             string? location = GetAssemblyLocation(assembly);
             string? resolvedFilePath = TryGetAssemblyFilePath(assembly);
-            string appBaseCandidate = Path.Combine(AppContext.BaseDirectory, $"{name}.dll");
-            string runtimeCandidate = string.IsNullOrWhiteSpace(runtimeDirectory) || runtimeDirectory.StartsWith('<')
-                ? string.Empty
-                : Path.Combine(runtimeDirectory!, $"{name}.dll");
-            string roslynRuntimeCandidate = string.IsNullOrWhiteSpace(roslynRuntimeDirectory)
-                ? string.Empty
-                : Path.Combine(roslynRuntimeDirectory, $"{name}.dll");
 
             builder.AppendLine($"  {name}:");
             builder.AppendLine($"    Assembly.Location: {location ?? "<null>"}");
             builder.AppendLine($"    Location exists: {!string.IsNullOrWhiteSpace(location) && File.Exists(location)}");
             builder.AppendLine($"    Resolved reference path: {resolvedFilePath ?? "<none>"}");
-            builder.AppendLine($"    App base candidate: {appBaseCandidate} (exists: {File.Exists(appBaseCandidate)})");
-            if (!string.IsNullOrWhiteSpace(runtimeCandidate))
+
+            foreach (string directory in BuildReferenceProbeDirectories(
+                         AppContext.BaseDirectory,
+                         roslynRuntimeDirectory,
+                         runtimeDirectory,
+                         location))
             {
-                builder.AppendLine($"    Runtime candidate: {runtimeCandidate} (exists: {File.Exists(runtimeCandidate)})");
-            }
-            if (!string.IsNullOrWhiteSpace(roslynRuntimeCandidate))
-            {
-                builder.AppendLine($"    Roslyn runtime candidate: {roslynRuntimeCandidate} (exists: {File.Exists(roslynRuntimeCandidate)})");
+                string candidatePath = Path.Combine(directory, $"{name}.dll");
+                builder.AppendLine($"    Probe candidate: {candidatePath} (exists: {File.Exists(candidatePath)})");
             }
         }
 

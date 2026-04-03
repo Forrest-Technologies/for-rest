@@ -89,6 +89,7 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- Dotted members like `request.method`, `request.url`, `request.body`, `request.content_type`, and `request.headers[...]` belong inside flow code before `request.send()`.");
         prompt.AppendLine("- Use only `#` comments on their own lines. Do not use `//` comments and do not append trailing inline comments after code.");
         prompt.AppendLine("- `expect` statements are top-level assertions. Do not put `expect` inside `if`, `else`, `foreach`, or `while` blocks.");
+        prompt.AppendLine("- When adding smoke-test assertions, prefer exact forms like `expect status == 200 \"returns 200\"` and `expect header \"Content-Type\" contains \"json\" \"json response\"`; do not invent forms like `expect sent.status == 200`.");
         prompt.AppendLine("- If diagnostics mention parse errors around expectations, comments, headers, URLs, or bodies, consult the matching local docs (`expect`, `comments`, `request-headers`, `request-url`, `body`) before retrying.");
         prompt.AppendLine("- Do not ask the user to paste working syntax, grammar examples, or line numbers if the active document diagnostics or local docs can answer it.");
         prompt.AppendLine("- Do not ask the user whether ForRest supports a syntax or helper that the local docs or active document can confirm.");

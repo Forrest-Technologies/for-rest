@@ -469,6 +469,7 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             "Prefer response.someField or response[\"Some Field\"] for JSON object members." + Environment.NewLine +
             "When the response body root is an array, iterate response directly or use response[index]." + Environment.NewLine +
             "response.json() returns a raw JsonNode; use it only with explicit indexers or AsArray(), not dot-member access." + Environment.NewLine +
+            "For top-level smoke-test assertions, use exact forms like `expect status == 200 \"returns 200\"` and `expect header \"Content-Type\" contains \"json\" \"json response\"`; do not emit `expect sent.status == 200`." + Environment.NewLine +
             replacementDirective +
             "If patch_active_document fails or the structure is brittle, use replace_active_document with the full corrected request." + Environment.NewLine +
             "If replace_active_document is rejected, repair the full source and try replace_active_document again." + Environment.NewLine +

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <!-- Preserve the small set of core library types that user scripts commonly hit directly.
+       The rest of the Android release build can still use SdkOnly/partial trimming. -->
+  <assembly fullname="System.Private.CoreLib">
+    <type fullname="System.Collections.Generic.Dictionary`2" preserve="all" />
+    <type fullname="System.Collections.Generic.HashSet`1" preserve="all" />
+    <type fullname="System.Collections.Generic.List`1" preserve="all" />
+    <type fullname="System.Convert" preserve="all" />
+    <type fullname="System.DateTime" preserve="all" />
+    <type fullname="System.DateTimeOffset" preserve="all" />
+    <type fullname="System.Globalization.CultureInfo" preserve="all" />
+    <type fullname="System.Guid" preserve="all" />
+    <type fullname="System.Math" preserve="all" />
+    <type fullname="System.Random" preserve="all" />
+    <type fullname="System.String" preserve="all" />
+    <type fullname="System.Text.Encoding" preserve="all" />
+    <type fullname="System.Text.StringBuilder" preserve="all" />
+    <type fullname="System.TimeSpan" preserve="all" />
+  </assembly>
+  <assembly fullname="System.Private.Uri">
+    <type fullname="System.Uri" preserve="all" />
+  </assembly>
+</linker>

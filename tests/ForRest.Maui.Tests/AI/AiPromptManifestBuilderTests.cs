@@ -60,6 +60,9 @@ public sealed class AiPromptManifestBuilderTests
         StringAssert.Contains(manifest.SystemPrompt, "request-headers");
         StringAssert.Contains(manifest.SystemPrompt, "body");
         StringAssert.Contains(manifest.SystemPrompt, "expect");
+        StringAssert.Contains(manifest.SystemPrompt, "expect status == 200 \"returns 200\"");
+        StringAssert.Contains(manifest.SystemPrompt, "expect header \"Content-Type\" contains \"json\" \"json response\"");
+        StringAssert.Contains(manifest.SystemPrompt, "do not invent forms like `expect sent.status == 200`");
         StringAssert.Contains(manifest.SystemPrompt, "Math.*");
         StringAssert.Contains(manifest.SystemPrompt, ".Substring(...)");
         StringAssert.Contains(manifest.SystemPrompt, "closest valid field");

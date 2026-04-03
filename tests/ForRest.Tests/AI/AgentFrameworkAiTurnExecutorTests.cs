@@ -218,6 +218,8 @@ public sealed class AgentFrameworkAiTurnExecutorTests
         StringAssert.Contains(agent.Calls[1].MessageText, "full replace_active_document call");
         StringAssert.Contains(agent.Calls[1].MessageText, "The previous turn did not modify the active document");
         StringAssert.Contains(agent.Calls[1].MessageText, "request-send/request.method/request.url/request.headers/request.body/request.content_type/api-surface-crud/stash/top-level expect patterns");
+        StringAssert.Contains(agent.Calls[1].MessageText, "expect status == 200 \"returns 200\"");
+        StringAssert.Contains(agent.Calls[1].MessageText, "do not emit `expect sent.status == 200`");
         StringAssert.Contains(agent.Calls[1].MessageText, "leave only runnable ForRest source");
         StringAssert.Contains(agent.Calls[1].MessageText, "replace that target instead of leaving the previous URL or method in place");
     }
