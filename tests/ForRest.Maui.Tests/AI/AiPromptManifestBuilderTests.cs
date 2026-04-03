@@ -50,6 +50,8 @@ public sealed class AiPromptManifestBuilderTests
         StringAssert.Contains(manifest.SystemPrompt, "replace the old endpoint");
         StringAssert.Contains(manifest.SystemPrompt, "batch-stash-loop");
         StringAssert.Contains(manifest.SystemPrompt, "request-url");
+        StringAssert.Contains(manifest.SystemPrompt, "3 times");
+        StringAssert.Contains(manifest.SystemPrompt, "repeat N times");
         StringAssert.Contains(manifest.SystemPrompt, "request-send");
         StringAssert.Contains(manifest.SystemPrompt, "request-method");
         StringAssert.Contains(manifest.SystemPrompt, "request-body");
@@ -58,6 +60,8 @@ public sealed class AiPromptManifestBuilderTests
         StringAssert.Contains(manifest.SystemPrompt, "request-headers");
         StringAssert.Contains(manifest.SystemPrompt, "body");
         StringAssert.Contains(manifest.SystemPrompt, "expect");
+        StringAssert.Contains(manifest.SystemPrompt, "Math.*");
+        StringAssert.Contains(manifest.SystemPrompt, ".Substring(...)");
         StringAssert.Contains(manifest.SystemPrompt, "closest valid field");
         StringAssert.Contains(manifest.SystemPrompt, "retryWithRead");
         StringAssert.Contains(manifest.SystemPrompt, "retryWithReplace");

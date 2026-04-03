@@ -8,6 +8,7 @@ using ForRest.Services.AI;
 using ForRest.Services.Licensing;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Maui.Graphics;
 
 namespace ForRest.Maui.Tests;
 
@@ -27,6 +28,16 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.IsTrue(viewModel.ShowCompactActionBar);
 		Assert.IsTrue(viewModel.ShowCompactStatusBar);
 		Assert.IsFalse(viewModel.ShowDesktopStatusBar);
+	}
+
+	[TestMethod]
+	public void Desktop_layout_starts_with_roomier_inspector_pane_width()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+
+		Assert.AreEqual(420d, viewModel.RightPaneWidth.Value, 0.001d);
+		Assert.IsTrue(viewModel.RightPaneWidth.Value > 316d);
 	}
 
 	[TestMethod]
@@ -140,6 +151,163 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_exposes_prior_response_snapshots_for_review()
+	{
+		using TestHarness harness = new();
+		ResponseSnapshot first = CreateResponseSnapshot(
+			200,
+			"OK",
+			"""{"step":"one"}""",
+			"HTTP/1.1 200 OK",
+			12,
+			64,
+			[new() { Key = "X-Step", Value = "alpha" }]);
+		ResponseSnapshot second = CreateResponseSnapshot(
+			201,
+			"Created",
+			"""{"step":"two"}""",
+			"HTTP/1.1 201 Created",
+			18,
+			72,
+			[new() { Key = "X-Step", Value = "beta" }]);
+		ResponseSnapshot third = CreateResponseSnapshot(
+			202,
+			"Accepted",
+			"""{"step":"three"}""",
+			"HTTP/1.1 202 Accepted",
+			26,
+			96,
+			[new() { Key = "X-Step", Value = "gamma" }]);
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			new FakeExecutionService(responses: [first, second, third]));
+
+		await viewModel.SendAsync();
+
+		Assert.IsTrue(viewModel.ShowResponseSnapshotSelector);
+		Assert.AreEqual(3, viewModel.ResponseSnapshotEntries.Count);
+		CollectionAssert.AreEqual(new[] { 3, 2, 1 }, viewModel.ResponseSnapshotEntries.Select(static item => item.Position).ToArray());
+		Assert.AreEqual(3, viewModel.SelectedResponseSnapshotEntry?.Position);
+		Assert.AreEqual("202 Accepted", viewModel.ResponseState);
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotSummaryText, "Send 3 of 3");
+		StringAssert.Contains(viewModel.ResponseBodyText, "three");
+
+		viewModel.SelectedResponseSnapshotEntry = viewModel.ResponseSnapshotEntries[^1];
+
+		Assert.AreEqual(1, viewModel.SelectedResponseSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotSummaryText, "Send 1 of 3");
+		StringAssert.Contains(viewModel.ResponseBodyText, "one");
+		Assert.AreEqual("alpha", viewModel.ResponseHeaderRows.Single(row => row.Name == "X-Step").Value);
+	}
+
+	[TestMethod]
+	public async Task Response_snapshot_navigation_buttons_move_between_prior_responses()
+	{
+		using TestHarness harness = new();
+		ResponseSnapshot first = CreateResponseSnapshot(
+			200,
+			"OK",
+			"""{"step":"one"}""",
+			"HTTP/1.1 200 OK",
+			12,
+			64,
+			[new() { Key = "X-Step", Value = "alpha" }]);
+		ResponseSnapshot second = CreateResponseSnapshot(
+			201,
+			"Created",
+			"""{"step":"two"}""",
+			"HTTP/1.1 201 Created",
+			18,
+			72,
+			[new() { Key = "X-Step", Value = "beta" }]);
+		ResponseSnapshot third = CreateResponseSnapshot(
+			202,
+			"Accepted",
+			"""{"step":"three"}""",
+			"HTTP/1.1 202 Accepted",
+			26,
+			96,
+			[new() { Key = "X-Step", Value = "gamma" }]);
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			new FakeExecutionService(responses: [first, second, third]));
+
+		await viewModel.SendAsync();
+
+		Assert.IsFalse(viewModel.CanSelectPreviousResponseSnapshot);
+		Assert.IsTrue(viewModel.CanSelectNextResponseSnapshot);
+		Assert.IsFalse(viewModel.SelectPreviousResponseSnapshot());
+		Assert.IsTrue(viewModel.SelectNextResponseSnapshot());
+		Assert.AreEqual(2, viewModel.SelectedResponseSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.ResponseBodyText, "two");
+		Assert.IsTrue(viewModel.CanSelectPreviousResponseSnapshot);
+		Assert.IsTrue(viewModel.CanSelectNextResponseSnapshot);
+		Assert.IsTrue(viewModel.SelectNextResponseSnapshot());
+		Assert.AreEqual(1, viewModel.SelectedResponseSnapshotEntry?.Position);
+		Assert.IsTrue(viewModel.CanSelectPreviousResponseSnapshot);
+		Assert.IsFalse(viewModel.CanSelectNextResponseSnapshot);
+		Assert.IsTrue(viewModel.SelectPreviousResponseSnapshot());
+		Assert.AreEqual(2, viewModel.SelectedResponseSnapshotEntry?.Position);
+		Assert.IsTrue(viewModel.SelectPreviousResponseSnapshot());
+		Assert.AreEqual(3, viewModel.SelectedResponseSnapshotEntry?.Position);
+		Assert.IsFalse(viewModel.SelectPreviousResponseSnapshot());
+	}
+
+	[TestMethod]
+	public void SelectHistoryEntry_exposes_prior_response_snapshots_for_review()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		ResponseSnapshot first = CreateResponseSnapshot(
+			200,
+			"OK",
+			"""{"step":"one"}""",
+			"HTTP/1.1 200 OK",
+			11,
+			60,
+			[new() { Key = "X-Step", Value = "alpha" }]);
+		ResponseSnapshot second = CreateResponseSnapshot(
+			204,
+			"No Content",
+			"""{"step":"two"}""",
+			"HTTP/1.1 204 No Content",
+			19,
+			44,
+			[new() { Key = "X-Step", Value = "beta" }]);
+		ExecutionRun run = new()
+		{
+			WorkspaceId = Guid.NewGuid(),
+			RequestId = Guid.NewGuid(),
+			RequestName = "History Demo",
+			State = ExecutionState.Completed,
+			StartedUtc = DateTimeOffset.Parse("2026-04-02T14:15:00Z"),
+			CompletedUtc = DateTimeOffset.Parse("2026-04-02T14:15:05Z"),
+			TargetUri = "https://example.test/history",
+			RawRequest = "GET https://example.test/history",
+			Response = second,
+			Responses = [first, second],
+		};
+		HistoryEntryViewModel entry = new(
+			run,
+			"GET",
+			"History Demo",
+			"Shows prior sends",
+			"10:15 AM",
+			Color.FromArgb("#167C65"));
+
+		viewModel.SelectHistoryEntry(entry);
+
+		Assert.IsTrue(viewModel.ShowResponseSnapshotSelector);
+		Assert.AreEqual(2, viewModel.ResponseSnapshotEntries.Count);
+		CollectionAssert.AreEqual(new[] { 2, 1 }, viewModel.ResponseSnapshotEntries.Select(static item => item.Position).ToArray());
+		Assert.AreEqual(2, viewModel.SelectedResponseSnapshotEntry?.Position);
+
+		viewModel.SelectedResponseSnapshotEntry = viewModel.ResponseSnapshotEntries[^1];
+
+		Assert.AreEqual(1, viewModel.SelectedResponseSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.ResponseBodyText, "one");
+		Assert.AreEqual("alpha", viewModel.ResponseHeaderRows.Single(row => row.Name == "X-Step").Value);
+	}
+
+	[TestMethod]
 	public async Task InitializeAsync_recovers_when_request_compile_throws_during_startup()
 	{
 		using TestHarness harness = new();
@@ -154,6 +322,41 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual("Request document unavailable.", viewModel.ExecutionStatus);
 		StringAssert.Contains(viewModel.DebugOutputText, "compile boom");
 		Assert.AreEqual("Metadata recovery", viewModel.EditorDebugStateText);
+	}
+
+	[TestMethod]
+	public void SelectDocument_refreshes_stale_compile_banner_for_the_selected_request()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService());
+		viewModel.AddRequest();
+		RequestDocumentViewModel firstDocument = viewModel.OpenDocuments[0];
+
+		ApplyStaleCompileErrorSnapshot(viewModel);
+		Assert.AreEqual("Compile error", viewModel.EditorDebugStateText);
+
+		viewModel.SelectDocument(firstDocument);
+
+		Assert.AreEqual("Ready", viewModel.EditorDebugStateText);
+		Assert.AreEqual("[]", viewModel.ActiveEditorDiagnosticsJson);
+		Assert.AreEqual(firstDocument.Title, viewModel.RequestName);
+	}
+
+	[TestMethod]
+	public async Task SendAsync_clears_stale_compile_banner_after_successful_run()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService());
+
+		ApplyStaleCompileErrorSnapshot(viewModel);
+		Assert.AreEqual("Compile error", viewModel.EditorDebugStateText);
+
+		await viewModel.SendAsync();
+
+		Assert.AreEqual("Ready", viewModel.EditorDebugStateText);
+		Assert.AreEqual("[]", viewModel.ActiveEditorDiagnosticsJson);
+		Assert.AreEqual("Ran request script", viewModel.ExecutionStatus);
+		StringAssert.Contains(viewModel.DebugOutputText, "Execution state: Completed");
 	}
 
 	[TestMethod]
@@ -274,6 +477,23 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual(13d, viewModel.ResultPaneTabFontSize, 0.001d);
 		StringAssert.Contains(viewModel.ActiveEditorText, "editor_font_size = 16.5");
 		StringAssert.Contains(viewModel.ActiveEditorText, "result_pane_tab_font_size = 13");
+	}
+
+	[TestMethod]
+	public void ActiveEditorText_allows_clearing_settings_document()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		viewModel.ActiveEditorText = string.Empty;
+
+		Assert.AreEqual(string.Empty, viewModel.ActiveEditorText);
+		Assert.AreEqual("[]", viewModel.ActiveEditorEditableRangesJson);
+		Assert.IsTrue(viewModel.CanUndo);
 	}
 
 	[TestMethod]
@@ -748,6 +968,41 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.IsFalse(viewModel.TryConsumePendingEditorCursorRequest(out _, out _));
 		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorLineNumber);
 		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorColumn);
+	}
+
+	[TestMethod]
+	public void ApplyAiConversationText_raises_active_editor_text_once_and_keeps_cursor_request_in_sync()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService());
+		MethodInfo method = typeof(MainPageViewModel).GetMethod(
+			"ApplyAiConversationText",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+		viewModel.ActiveEditorText = "name \"demo\"\nmethod GET";
+
+		int activeEditorTextChangeCount = 0;
+		viewModel.PropertyChanged += (_, e) =>
+		{
+			if (string.Equals(e.PropertyName, nameof(MainPageViewModel.ActiveEditorText), StringComparison.Ordinal))
+			{
+				activeEditorTextChangeCount++;
+			}
+		};
+
+		method.Invoke(
+			viewModel,
+			[
+				"name \"demo\"\n## tighten this request\nmethod GET",
+				3,
+				4,
+				"name \"demo\"\nmethod GET"
+			]);
+
+		Assert.AreEqual(1, activeEditorTextChangeCount);
+		Assert.AreEqual(3, viewModel.ActiveEditorRequestedCursorLineNumber);
+		Assert.AreEqual(4, viewModel.ActiveEditorRequestedCursorColumn);
+		Assert.AreEqual(1, viewModel.ActiveEditorRequestedCursorVersion);
 	}
 
 	[TestMethod]
@@ -1305,6 +1560,49 @@ public sealed class MainPageViewModelLayoutTests
 			culture: null)!;
 	}
 
+	private static void ApplyStaleCompileErrorSnapshot(MainPageViewModel viewModel)
+	{
+		MethodInfo method = typeof(MainPageViewModel).GetMethod(
+			"ApplyEditorDebugSnapshot",
+			BindingFlags.Instance | BindingFlags.NonPublic,
+			binder: null,
+			types: [typeof(ForRestEditorDebugSnapshot)],
+			modifiers: null)!;
+		method.Invoke(
+			viewModel,
+			[
+				new ForRestEditorDebugSnapshot(
+					ForRestEditorDebugState.Error,
+					"Compile error",
+					"The 'request' section requires 'method = IDENTIFIER'.",
+					"4 diagnostic(s)  first at L1:C1",
+					"""[{"severity":"Error","message":"The 'request' section requires 'method = IDENTIFIER'.","startLineNumber":1,"startColumn":1,"endLineNumber":1,"endColumn":2}]""",
+					"stale compile output")
+			]);
+	}
+
+	private static ResponseSnapshot CreateResponseSnapshot(
+		int statusCode,
+		string reasonPhrase,
+		string body,
+		string rawResponse,
+		long durationMilliseconds,
+		long sizeBytes,
+		IEnumerable<KeyValueDefinition>? headers = null)
+	{
+		return new()
+		{
+			StatusCode = statusCode,
+			ReasonPhrase = reasonPhrase,
+			ContentType = "application/json",
+			Body = body,
+			RawResponse = rawResponse,
+			DurationMilliseconds = durationMilliseconds,
+			SizeBytes = sizeBytes,
+			Headers = headers is null ? [] : [.. headers],
+		};
+	}
+
 	private sealed class TestHarness : IDisposable
 	{
 		private readonly string _previousConfigFile;
@@ -1405,11 +1703,18 @@ public sealed class MainPageViewModelLayoutTests
 	private sealed class FakeExecutionService : IForRestScriptExecutionService
 	{
 		private readonly StashTable _stash;
+		private readonly IReadOnlyList<ResponseSnapshot> _responses;
 		private readonly bool _throwOnCompile;
 
-		public FakeExecutionService(StashTable? stash = null, bool throwOnCompile = false)
+		public FakeExecutionService(
+			StashTable? stash = null,
+			IReadOnlyList<ResponseSnapshot>? responses = null,
+			bool throwOnCompile = false)
 		{
 			_stash = stash ?? new();
+			_responses = responses is { Count: > 0 }
+				? [.. responses]
+				: [CreateResponseSnapshot(200, "OK", """{"ok":true}""", "HTTP/1.1 200 OK", 42, 128)];
 			_throwOnCompile = throwOnCompile;
 		}
 
@@ -1451,16 +1756,7 @@ public sealed class MainPageViewModelLayoutTests
 		{
 			ExecuteCallCount++;
 			LastExecutedSource = source;
-			ResponseSnapshot response = new()
-			{
-				StatusCode = 200,
-				ReasonPhrase = "OK",
-				ContentType = "application/json",
-				SizeBytes = 128,
-				DurationMilliseconds = 42,
-				Body = "{ \"ok\": true }",
-				RawResponse = "HTTP/1.1 200 OK"
-			};
+			ResponseSnapshot response = _responses[^1];
 
 			RequestDefinition request = BuildRequestDefinition(workspace.Workspace.Id, defaultRequestName);
 			ExecutionRun run = new()
@@ -1471,6 +1767,7 @@ public sealed class MainPageViewModelLayoutTests
 				TargetUri = request.UrlTemplate,
 				RawRequest = "GET https://example.test/mobile",
 				Response = response,
+				Responses = [.. _responses],
 				Stash = _stash,
 			};
 

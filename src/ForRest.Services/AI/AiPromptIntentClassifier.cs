@@ -27,6 +27,8 @@ internal static class AiPromptIntentClassifier
         "capture",
         "collect",
         "store",
+        "repeat",
+        "rerun",
         "expand",
         "transform",
         "make",

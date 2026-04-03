@@ -273,6 +273,38 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
         Assert.AreEqual(1, runtime.PromptManifest.Topics.Count);
     }
 
+    [TestMethod]
+    public void Prepare_embeds_loop_and_runtime_preflight_docs_for_repeated_patch_requests_with_randomized_values()
+    {
+        IAiRuntimeFactory factory = CreateFactory();
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.OpenAI,
+                Transport = AiConversationTransport.ChatCompletions,
+                Model = "gpt-4.1-mini",
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "test-key",
+                IsConfigured = true,
+            },
+        };
+
+        AiPreparedRuntime runtime = factory.Prepare(
+            settings,
+            "Update the active request.",
+            prompt: "Perform the patch at least 3 times with at least 1 randomized value.");
+
+        Assert.IsNotNull(runtime.Agent);
+        Assert.IsTrue(runtime.PromptManifest.Topics.Any(static topic => topic.Source == "preflight-doc:batch-stash-loop"));
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Preflight: loop + stash pattern");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "runtime trace_id = guid()");
+        StringAssert.Contains(runtime.DebugTrace.Snapshot(), "Preflight docs query 'batch-stash-loop': selected");
+    }
+
     private static IAiRuntimeFactory CreateFactory()
     {
         IAiKnowledgeCatalog knowledgeCatalog = new ForRestAiKnowledgeCatalog();

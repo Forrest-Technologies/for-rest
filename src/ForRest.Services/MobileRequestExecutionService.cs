@@ -119,6 +119,7 @@ public sealed class MobileRequestExecutionService(
 				TargetUri = preparedRequest.Uri.ToString(),
 				RawRequest = preparedRequest.RawRequest,
 				Response = responseSnapshot,
+				Responses = responseSnapshot is null ? [] : [responseSnapshot],
 				ConsoleEntries = [.. iterationConsoleEntries],
 				RuntimeVariables = [.. runtimeVariables],
 			};

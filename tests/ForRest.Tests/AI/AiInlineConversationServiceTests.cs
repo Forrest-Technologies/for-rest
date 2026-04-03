@@ -1209,6 +1209,52 @@ public sealed class AiInlineConversationServiceTests
     }
 
     [TestMethod]
+    public async Task TryHandleAsync_retries_after_timeout_for_repeated_patch_requests_that_left_the_document_unchanged()
+    {
+        StubActiveDocumentHost host = new("name \"demo\"\n## perform the patch at least 3 times with at least 1 randomized value\nmethod PATCH\nurl \"https://api.restful-api.dev/objects/1\"");
+        StubTurnExecutor executor = new(
+            (request, callCount) =>
+            {
+                if (callCount == 1)
+                {
+                    return new AiTurnExecutionResult(
+                        Succeeded: false,
+                        ResponseText: "AI request timed out before completion.",
+                        Issues: [],
+                        SessionReset: true);
+                }
+
+                request.ActiveDocumentHost?.UpdateActiveDocument(
+                    request.ActiveDocumentHost.GetActiveDocument()!,
+                    "name \"demo\"\nmethod PATCH\nurl \"https://api.restful-api.dev/objects/1\"\nmax_send_iterations 3\n\nruntime trace_id = guid()\n\nforeach attempt in [1..3] {\n  request.method = \"PATCH\"\n  request.url = \"https://api.restful-api.dev/objects/1\"\n  request.content_type = \"application/json\"\n  request.body = $\"{{\\\"name\\\":\\\"Patch {attempt} {trace_id}\\\"}}\"\n  let sent = request.send()\n}");
+                return new AiTurnExecutionResult(
+                    Succeeded: true,
+                    ResponseText: "Updated the request to loop three patch attempts with a unique value.",
+                    Issues: [],
+                    SessionReset: false);
+            });
+        IAiInlineConversationService service = new AiInlineConversationService(executor);
+
+        AiInlineConversationResult result = await service.TryHandleAsync(
+            new(
+                DocumentId: "doc-4c",
+                DocumentTitle: "Demo",
+                Language: "forrest",
+                SourceText: host.SourceText,
+                CursorLineNumber: 2,
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.AreEqual(2, executor.CallCount);
+        StringAssert.Contains(executor.PromptHistory[1], "autonomous repair pass");
+        StringAssert.Contains(executor.PromptHistory[1], "repeat N times");
+        StringAssert.Contains(executor.PromptHistory[1], "Do not invent `Math.*`");
+        Assert.IsTrue(result.Succeeded);
+        StringAssert.Contains(result.UpdatedText, "foreach attempt in [1..3]");
+        Assert.AreEqual(AiInlineConversationUpdateKind.DocumentChanged, result.UpdateKind);
+    }
+
+    [TestMethod]
     public async Task TryHandleAsync_retries_user_style_edit_prompts_that_start_with_what_i_want_you_to_do()
     {
         StubActiveDocumentHost host = new(

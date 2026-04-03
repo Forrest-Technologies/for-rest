@@ -84,6 +84,8 @@ public sealed record ExecutionRun
 
     public ResponseSnapshot? Response { get; init; }
 
+    public List<ResponseSnapshot> Responses { get; init; } = [];
+
     public List<TestResult> Tests { get; init; } = [];
 
     public List<ConsoleEntry> ConsoleEntries { get; init; } = [];

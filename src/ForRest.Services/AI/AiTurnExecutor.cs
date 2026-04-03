@@ -460,10 +460,12 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             "Read the active document again, inspect any returned diagnostics or tool errors, consult local docs if needed, and apply a working change now." + Environment.NewLine +
             "Modify the current active request in place. Do not ask whether to create a second request unless the user explicitly asked for an additional request." + Environment.NewLine +
             "If the user asked to iterate, enumerate, batch, or stash values, use the documented foreach/request.send/request.url/max_send_iterations pattern instead of asking how to structure it." + Environment.NewLine +
+            "Phrases like '3 times', 'repeat N times', or 'at least N times' are loop requests. Prefer documented foreach/range/max_send_iterations flow over manually duplicating similar request blocks." + Environment.NewLine +
             "If the user asked to test an API surface or multiple methods, use the documented request-send/request.method/request.url/request.headers/request.body/request.content_type/api-surface-crud/stash/top-level expect patterns." + Environment.NewLine +
             "If the user pasted API docs or prose into chat, treat that text as requirements only and leave only runnable ForRest source in the final document." + Environment.NewLine +
             "If the current request still points at the old endpoint, replace that target instead of leaving the previous URL or method in place." + Environment.NewLine +
             "If a requested field name looks misspelled but the nearest valid field is obvious, choose the closest valid field and mention that assumption only after the edit succeeds." + Environment.NewLine +
+            "If the user needs randomized or unique values, use only documented ForRest helpers from local docs such as guid() runtime values plus documented strings/convert/time helpers. Do not invent Math.*, instance methods like .Substring(...), or arbitrary C# APIs." + Environment.NewLine +
             "Prefer response.someField or response[\"Some Field\"] for JSON object members." + Environment.NewLine +
             "When the response body root is an array, iterate response directly or use response[index]." + Environment.NewLine +
             "response.json() returns a raw JsonNode; use it only with explicit indexers or AsArray(), not dot-member access." + Environment.NewLine +

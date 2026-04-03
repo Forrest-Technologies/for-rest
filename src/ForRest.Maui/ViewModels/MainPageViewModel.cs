@@ -23,9 +23,9 @@ namespace ForRest.Maui.ViewModels;
 public sealed class MainPageViewModel : ObservableObject
 {
 	private const double DefaultLeftPanePixels = 260d;
-	private const double DefaultRightPanePixels = 316d;
+	private const double DefaultRightPanePixels = 420d;
 	private const double MinLeftPanePixels = 220d;
-	private const double MinRightPanePixels = 248d;
+	private const double MinRightPanePixels = 320d;
 	private const double MinCenterPanePixels = 620d;
 	private const double SplitterPixels = 14d;
 	private const double CollapsedPaneRailPixels = 72d;
@@ -88,6 +88,8 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _responseTimeStatus;
 	private string _responseSizeStatus;
 	private ResponseSnapshot? _latestResponseSnapshot;
+	private ResponseSnapshot? _selectedInspectorResponseSnapshot;
+	private ResponseSnapshotEntryViewModel? _selectedResponseSnapshotEntry;
 	private string _latestRuntimeStateText = string.Empty;
 	private string _latestRuntimeErrorText = string.Empty;
 	private string _latestRuntimeDebugText = string.Empty;
@@ -267,6 +269,9 @@ public sealed class MainPageViewModel : ObservableObject
 		HistoryItems =
 		[];
 
+		ResponseSnapshotEntries =
+		[];
+
 		ResponseHeaderRows =
 		[];
 
@@ -329,6 +334,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public ObservableCollection<NavigationSectionViewModel> ExplorerSections { get; }
 
 	public ObservableCollection<HistoryEntryViewModel> HistoryItems { get; }
+
+	public ObservableCollection<ResponseSnapshotEntryViewModel> ResponseSnapshotEntries { get; }
 
 	public ObservableCollection<NameValueRowViewModel> ResponseHeaderRows { get; }
 
@@ -579,14 +586,6 @@ public sealed class MainPageViewModel : ObservableObject
 		{
 			string previousValue = _activeEditorText;
 
-			if (IsActiveSettingsEditor &&
-			    string.IsNullOrWhiteSpace(value) &&
-			    !string.IsNullOrWhiteSpace(_themeConfigText))
-			{
-				OnPropertyChanged(nameof(ActiveEditorText));
-				return;
-			}
-
 			if (!SetProperty(ref _activeEditorText, value))
 			{
 				return;
@@ -798,6 +797,28 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public ResponseSnapshotEntryViewModel? SelectedResponseSnapshotEntry
+	{
+		get => _selectedResponseSnapshotEntry;
+		set
+		{
+			if (!SetProperty(ref _selectedResponseSnapshotEntry, value))
+			{
+				return;
+			}
+
+			foreach (ResponseSnapshotEntryViewModel entry in ResponseSnapshotEntries)
+			{
+				entry.IsSelected = ReferenceEquals(entry, value);
+			}
+
+			ApplySelectedResponseSnapshot(value?.Snapshot);
+			OnPropertyChanged(nameof(SelectedResponseSnapshotSummaryText));
+			OnPropertyChanged(nameof(CanSelectPreviousResponseSnapshot));
+			OnPropertyChanged(nameof(CanSelectNextResponseSnapshot));
+		}
+	}
+
 	public bool IsCompactLayout => _isCompactLayout;
 
 	public bool IsDesktopLayout => !_isCompactLayout;
@@ -947,6 +968,14 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool HasStashData => StashColumns.Count > 0 && StashRows.Count > 0;
 
+	public bool ShowResponseSnapshotSelector => ResponseSnapshotEntries.Count > 1;
+
+	public bool CanSelectPreviousResponseSnapshot =>
+		GetSelectedResponseSnapshotEntryIndex() > 0;
+
+	public bool CanSelectNextResponseSnapshot =>
+		GetSelectedResponseSnapshotEntryIndex() is int index && index >= 0 && index < ResponseSnapshotEntries.Count - 1;
+
 	public bool ShowStashEmptyState => !HasStashData;
 
 	public bool CanCopyResponseBody => !string.IsNullOrWhiteSpace(ResponseBodyText);
@@ -964,6 +993,22 @@ public sealed class MainPageViewModel : ObservableObject
 	public bool CanExportStashCsv => HasStashData;
 
 	public string StashEmptyStateText => "No stash rows were captured for the current run. Flow code must execute stash writes before the run ends; lines skipped by break, continue, or return do not contribute rows.";
+
+	public string SelectedResponseSnapshotSummaryText
+	{
+		get
+		{
+			if (SelectedResponseSnapshotEntry is null)
+			{
+				return "No response captured for this run yet.";
+			}
+
+			string summary = $"{SelectedResponseSnapshotEntry.StatusText}  {SelectedResponseSnapshotEntry.DetailText}".Trim();
+			return ResponseSnapshotEntries.Count > 1
+				? $"Send {SelectedResponseSnapshotEntry.Position} of {ResponseSnapshotEntries.Count}  {summary}"
+				: summary;
+		}
+	}
 
 	public Color SelectedMethodColor => SelectedMethod switch
 	{
@@ -1133,6 +1178,9 @@ public sealed class MainPageViewModel : ObservableObject
 
 			if (!outcome.Compilation.Succeeded || outcome.Compilation.Payload is null)
 			{
+				ApplyEditorDebugSnapshot(
+					CreateRequestEditorDebugSnapshot(outcome.Compilation, executionSource),
+					updateDebugOutput: false);
 				ApplyCompilationFailure(outcome.Compilation.Diagnostics);
 				return;
 			}
@@ -1147,7 +1195,6 @@ public sealed class MainPageViewModel : ObservableObject
 				? $"{response.StatusCode} {response.ReasonPhrase}".Trim()
 				: outcome.Execution?.State.ToString() ?? "Compiled";
 			_latestResponseSnapshot = outcome.Execution?.LatestResponse;
-			RefreshResponsePresentation();
 			_responseTimeStatus = outcome.Execution?.LatestResponse is { } latestResponse
 				? $"{latestResponse.DurationMilliseconds} ms"
 				: "--";
@@ -1172,12 +1219,7 @@ public sealed class MainPageViewModel : ObservableObject
 				ClearLatestRuntimeContext();
 			}
 
-			ResponseHeaderRows.Clear();
-			foreach (KeyValueDefinition header in outcome.Execution?.LatestResponse?.Headers ?? [])
-			{
-				ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
-			}
-			OnPropertyChanged(nameof(CanCopyHeaders));
+			ApplyResponseSnapshotEntries(BuildCapturedResponses(latestRun, outcome.Execution?.LatestResponse));
 
 			ApplyStashTable(latestRun?.Stash ?? outcome.Execution?.Stash ?? new());
 
@@ -1204,6 +1246,9 @@ public sealed class MainPageViewModel : ObservableObject
 			OutputMetrics.Add(new OutputMetricViewModel("Type", outcome.Execution?.LatestResponse?.ContentType ?? "n/a", SelectedMethodColor));
 			OnPropertyChanged(nameof(ResponseTimeStatus));
 			OnPropertyChanged(nameof(ResponseSizeStatus));
+			ApplyEditorDebugSnapshot(
+				CreateRequestEditorDebugSnapshot(outcome.Compilation, executionSource),
+				updateDebugOutput: false);
 
 			if (_isCompactLayout)
 			{
@@ -1222,12 +1267,9 @@ public sealed class MainPageViewModel : ObservableObject
 			_responseTimeStatus = "--";
 			_responseSizeStatus = "--";
 			_latestResponseSnapshot = null;
-			ResponseBodyText = string.Empty;
-			ResponseRawText = string.Empty;
+			ApplyResponseSnapshotEntries([]);
 			DebugOutputText = exception.ToString();
 			RecordLatestRuntimeContext("Failed", exception.Message, DebugOutputText);
-			ResponseHeaderRows.Clear();
-			OnPropertyChanged(nameof(CanCopyHeaders));
 			ClearStashTable();
 			OutputMetrics.Clear();
 			OutputMetrics.Add(new OutputMetricViewModel("Status", "Failed", _dangerColor));
@@ -1665,8 +1707,8 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		ApplyRequestSelection(document.Title, document.Method, document.Summary, document.Location);
+		UpdateRequestMetadataFromSource();
 		SelectExplorerItemByContext(document.Location);
-		ActivateRequestEditor();
 		CloseExplorerOverlayOnCompactLayout();
 	}
 
@@ -1709,6 +1751,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		string method = item.Method ?? SelectedMethod;
 		ApplyRequestSelection(item.Title, method, item.Detail, item.Context);
+		UpdateRequestMetadataFromSource();
 		SelectDocumentByLocation(item.Context);
 		CloseExplorerOverlayOnCompactLayout();
 	}
@@ -2620,10 +2663,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_responseTimeStatus = "--";
 		_responseSizeStatus = "--";
 		_latestResponseSnapshot = null;
-		ResponseBodyText = string.Empty;
-		ResponseRawText = string.Empty;
-		ResponseHeaderRows.Clear();
-		OnPropertyChanged(nameof(CanCopyHeaders));
+		ApplyResponseSnapshotEntries([]);
 		ClearStashTable();
 		OutputMetrics.Clear();
 		OutputMetrics.Add(new OutputMetricViewModel("Status", "Blocked", _dangerColor));
@@ -2846,7 +2886,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
 		ActiveEditorDiagnosticsJson = "[]";
 		SetActiveEditorTextInternal(_themeConfigText);
-		ForceActiveEditorRefresh();
+		ForceActiveEditorRefresh(includeText: false);
 		RefreshUndoRedoState();
 		OnPropertyChanged(nameof(ShowEditorDebugStrip));
 		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
@@ -2873,7 +2913,7 @@ public sealed class MainPageViewModel : ObservableObject
 		ActiveEditorEditableRangesJson = "[]";
 		ActiveEditorDiagnosticsJson = _requestEditorDiagnosticsJson;
 		SetActiveEditorTextInternal(RequestEditorText);
-		ForceActiveEditorRefresh();
+		ForceActiveEditorRefresh(includeText: false);
 		OnPropertyChanged(nameof(ShowEditorDebugStrip));
 		OnPropertyChanged(nameof(IsLanguageHelpAvailable));
 		OnPropertyChanged(nameof(ShowLanguageHelpToggle));
@@ -3226,10 +3266,6 @@ public sealed class MainPageViewModel : ObservableObject
 				repairedSuggestedCursorLineNumber,
 				repairedSuggestedCursorColumn,
 				originalSource);
-			if (repairedSuggestedCursorLineNumber is int suggestedCursorLineNumber)
-			{
-				RequestActiveEditorCursorMove(suggestedCursorLineNumber, repairedSuggestedCursorColumn);
-			}
 
 			await PersistCurrentRequestAsync();
 			ExecutionStatus = result.StatusText;
@@ -3674,7 +3710,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		if (forceActiveEditorRefresh && IsActiveRequestEditor)
 		{
-			ForceActiveEditorRefresh();
+			ForceActiveEditorRefresh(includeText: !activeEditorTextChanged);
 		}
 
 		if (!requestTextChanged)
@@ -3715,6 +3751,11 @@ public sealed class MainPageViewModel : ObservableObject
 			reconcileIdentity: true,
 			scheduleAutosave: false,
 			historyBaselineText: historyBaselineText);
+
+		if (IsActiveRequestEditor && suggestedCursorLineNumber is int lineNumber)
+		{
+			RequestActiveEditorCursorMove(lineNumber, suggestedCursorColumn ?? 1);
+		}
 	}
 
 	private void ReconcileRequestIdentityAfterAiEdit(
@@ -3956,16 +3997,13 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		ResponseState = "Compile failed";
 		_latestResponseSnapshot = null;
-		ResponseBodyText = string.Empty;
-		ResponseRawText = string.Empty;
+		ApplyResponseSnapshotEntries([]);
 		DebugOutputText = string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => $"Line {diagnostic.Line}, Col {diagnostic.Column}: {diagnostic.Message}"));
 		_responseTimeStatus = "--";
 		_responseSizeStatus = "--";
 		ExecutionStatus = diagnostics.Count == 0
 			? "Request document failed to compile"
 			: diagnostics[0].Message;
-		ResponseHeaderRows.Clear();
-		OnPropertyChanged(nameof(CanCopyHeaders));
 		TraceEntries.Clear();
 		TraceEntries.Add(new TraceEntryViewModel("compile", ExecutionStatus, DateTime.Now.ToString("T"), _dangerColor));
 		OnPropertyChanged(nameof(CanCopyTrace));
@@ -4201,11 +4239,14 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(ActiveEditorText));
 	}
 
-	private void ForceActiveEditorRefresh()
+	private void ForceActiveEditorRefresh(bool includeText = true)
 	{
 		OnPropertyChanged(nameof(ActiveEditorLanguage));
 		OnPropertyChanged(nameof(ActiveEditorEditableRangesJson));
-		OnPropertyChanged(nameof(ActiveEditorText));
+		if (includeText)
+		{
+			OnPropertyChanged(nameof(ActiveEditorText));
+		}
 	}
 
 	private void RequestActiveEditorCursorMove(int lineNumber, int column)
@@ -4416,11 +4457,126 @@ public sealed class MainPageViewModel : ObservableObject
 
 	private void RefreshResponsePresentation()
 	{
-		ResponseBodyText = ResponsePresentationFormatter.FormatBody(_latestResponseSnapshot?.Body, IsResponsePrettyPrintEnabled);
-		ResponseRawText = ResponsePresentationFormatter.NormalizeDisplayText(_latestResponseSnapshot?.RawResponse);
+		ResponseBodyText = ResponsePresentationFormatter.FormatBody(_selectedInspectorResponseSnapshot?.Body, IsResponsePrettyPrintEnabled);
+		ResponseRawText = ResponsePresentationFormatter.NormalizeDisplayText(_selectedInspectorResponseSnapshot?.RawResponse);
+	}
+
+	private void ApplySelectedResponseSnapshot(ResponseSnapshot? response)
+	{
+		_selectedInspectorResponseSnapshot = response;
+		RefreshResponsePresentation();
+		ResponseHeaderRows.Clear();
+		foreach (KeyValueDefinition header in response?.Headers ?? [])
+		{
+			ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
+		}
+
+		OnPropertyChanged(nameof(CanCopyHeaders));
+	}
+
+	private void ApplyResponseSnapshotEntries(IReadOnlyList<ResponseSnapshot> responses)
+	{
+		SelectedResponseSnapshotEntry = null;
+		ResponseSnapshotEntries.Clear();
+
+		for (int index = responses.Count - 1; index >= 0; index--)
+		{
+			ResponseSnapshot response = responses[index];
+			ResponseSnapshotEntries.Add(
+				new ResponseSnapshotEntryViewModel(
+					response,
+					index + 1,
+					$"{response.StatusCode} {response.ReasonPhrase}".Trim(),
+					$"{response.DurationMilliseconds} ms  {FormatResponseSize(response.SizeBytes)}",
+					ResolveResponseSnapshotAccent(response)));
+		}
+
+		OnPropertyChanged(nameof(ShowResponseSnapshotSelector));
+		OnPropertyChanged(nameof(CanSelectPreviousResponseSnapshot));
+		OnPropertyChanged(nameof(CanSelectNextResponseSnapshot));
+		if (ResponseSnapshotEntries.Count == 0)
+		{
+			OnPropertyChanged(nameof(SelectedResponseSnapshotSummaryText));
+			return;
+		}
+
+		SelectedResponseSnapshotEntry = ResponseSnapshotEntries[0];
+	}
+
+	public bool SelectPreviousResponseSnapshot()
+	{
+		int selectedIndex = GetSelectedResponseSnapshotEntryIndex();
+		if (selectedIndex <= 0)
+		{
+			return false;
+		}
+
+		SelectedResponseSnapshotEntry = ResponseSnapshotEntries[selectedIndex - 1];
+		return true;
+	}
+
+	public bool SelectNextResponseSnapshot()
+	{
+		int selectedIndex = GetSelectedResponseSnapshotEntryIndex();
+		if (selectedIndex < 0 || selectedIndex >= ResponseSnapshotEntries.Count - 1)
+		{
+			return false;
+		}
+
+		SelectedResponseSnapshotEntry = ResponseSnapshotEntries[selectedIndex + 1];
+		return true;
+	}
+
+	private int GetSelectedResponseSnapshotEntryIndex()
+	{
+		return SelectedResponseSnapshotEntry is null
+			? -1
+			: ResponseSnapshotEntries.IndexOf(SelectedResponseSnapshotEntry);
+	}
+
+	private Color ResolveResponseSnapshotAccent(ResponseSnapshot response)
+	{
+		return response.StatusCode switch
+		{
+			>= 200 and < 300 => _successColor,
+			>= 300 and < 400 => _warningColor,
+			>= 400 => _dangerColor,
+			_ => _methodNeutral,
+		};
+	}
+
+	private static List<ResponseSnapshot> BuildCapturedResponses(ExecutionRun? run, ResponseSnapshot? fallbackResponse = null)
+	{
+		if (run?.Responses is { Count: > 0 } capturedResponses)
+		{
+			return [.. capturedResponses];
+		}
+
+		if (run?.Response is { } runResponse)
+		{
+			return [runResponse];
+		}
+
+		return fallbackResponse is null ? [] : [fallbackResponse];
+	}
+
+	private ForRestEditorDebugSnapshot CreateRequestEditorDebugSnapshot(ForRestScriptCompilationResult compilation, string source)
+	{
+		return ForRestEditorDebugSnapshotFactory.Create(
+			source,
+			compilation,
+			SelectedWorkspace,
+			SelectedEnvironment,
+			string.IsNullOrWhiteSpace(RequestName) ? "Untitled Request" : RequestName,
+			BuildDefaultRequestUrl(RequestLocation));
 	}
 
 	private void ApplyEditorDebugSnapshot(ForRestEditorDebugSnapshot snapshot)
+	{
+		ApplyEditorDebugSnapshot(snapshot, updateDebugOutput: true);
+	}
+
+	private void ApplyEditorDebugSnapshot(ForRestEditorDebugSnapshot snapshot, bool updateDebugOutput)
 	{
 		_requestEditorDiagnosticsJson = snapshot.DiagnosticsJson;
 		if (IsActiveRequestEditor)
@@ -4442,7 +4598,10 @@ public sealed class MainPageViewModel : ObservableObject
 		EditorDebugSummaryText = snapshot.SummaryText;
 		EditorDebugDetailText = snapshot.DetailText;
 		EditorDebugAccentColor = ResolveEditorDebugAccentColor(snapshot.State);
-		DebugOutputText = snapshot.DebugOutputText;
+		if (updateDebugOutput)
+		{
+			DebugOutputText = snapshot.DebugOutputText;
+		}
 	}
 
 	private async Task ReloadHistoryAsync(Guid? selectedRunId = null)
@@ -4510,18 +4669,11 @@ public sealed class MainPageViewModel : ObservableObject
 			: run.State.ToString();
 		ExecutionStatus = $"Loaded history run: {run.RequestName}";
 		_latestResponseSnapshot = response;
-		RefreshResponsePresentation();
 		_responseTimeStatus = response is not null ? $"{response.DurationMilliseconds} ms" : "--";
 		_responseSizeStatus = response is not null ? FormatResponseSize(response.SizeBytes) : "--";
+		ApplyResponseSnapshotEntries(BuildCapturedResponses(run, response));
 		DebugOutputText = BuildDebugOutput(run, SelectedWorkspace, SelectedEnvironment, method);
 		RecordLatestRuntimeContext(run.State.ToString(), run.ErrorMessage, DebugOutputText);
-
-		ResponseHeaderRows.Clear();
-		foreach (KeyValueDefinition header in response?.Headers ?? [])
-		{
-			ResponseHeaderRows.Add(new NameValueRowViewModel(header.Key, header.Value, "response"));
-		}
-		OnPropertyChanged(nameof(CanCopyHeaders));
 		ApplyStashTable(run.Stash);
 
 		TraceEntries.Clear();

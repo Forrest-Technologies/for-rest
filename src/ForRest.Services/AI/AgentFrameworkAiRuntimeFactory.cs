@@ -38,6 +38,9 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
     private const int MaxPreflightPatternLines = 18;
     private const int MaxPreflightPatternLength = 900;
     private static readonly Regex UrlRegex = new(@"https?://\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex RepeatedExecutionRegex = new(
+        @"\b(?:repeat|repeatedly|rerun|multiple\s+times)\b|\b(?:at\s+least\s+|up\s+to\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+times\b|\b(?:once|twice|thrice)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private readonly IAiSettingsValidator _settingsValidator;
     private readonly IAiToolCatalog _toolCatalog;
     private readonly IAiActiveDocumentToolCatalog _activeDocumentToolCatalog;
@@ -209,7 +212,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         AiActiveDocumentSnapshot? activeDocument,
         AiDebugTraceBuffer debugTrace)
     {
-        if (!settings.Tools.EnableDocsSearch || !IsComplexEditPrompt(objective, prompt))
+        if (!settings.Tools.EnableDocsSearch || !IsComplexEditPrompt(objective, prompt, activeDocument))
         {
             debugTrace.AddLine("Preflight docs: skipped because docs search is disabled or the prompt is not a complex edit.");
             return [];
@@ -246,7 +249,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             .ToArray();
     }
 
-    private static bool IsComplexEditPrompt(string objective, string? prompt)
+    private static bool IsComplexEditPrompt(string objective, string? prompt, AiActiveDocumentSnapshot? activeDocument)
     {
         string candidate = string.IsNullOrWhiteSpace(prompt) ? objective : prompt;
         if (!AiPromptIntentClassifier.IsLikelyEditPrompt(candidate))
@@ -258,12 +261,19 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         string[] tokens = TokenizePrompt(normalized);
         int methodCount = CountDistinctHttpMethods(tokens);
         int urlCount = UrlRegex.Matches(candidate).Count;
+        bool explicitLoopPrompt = ContainsAny(normalized, "iterate", "enumerate", "batch", "foreach", "loop", "max_send_iterations", "max send iterations");
+        bool repeatedExecutionPrompt = LooksLikeRepeatedExecutionPrompt(normalized);
+        bool requestMutationPrompt =
+            methodCount > 0 ||
+            ContainsAny(normalized, "stash", "request.url", "request.send", "send()", "request.method", "request.body", "request.content_type", "request.headers");
+        bool loopCapableActiveDocument = repeatedExecutionPrompt && HasLoopCapableFlow(activeDocument?.SourceText);
         bool apiSurfacePrompt =
             ContainsAny(normalized, "api surface", "crud", "fully test", "full api surface", "test the api", "test this api") ||
             methodCount >= 3;
         bool batchPrompt =
-            ContainsAny(normalized, "iterate", "enumerate", "batch", "foreach", "loop", "max_send_iterations", "max send iterations") &&
-            ContainsAny(normalized, "stash", "request.url", "request.send", "send()");
+            (explicitLoopPrompt &&
+             (ContainsAny(normalized, "stash", "request.url", "request.send", "send()") || requestMutationPrompt || loopCapableActiveDocument)) ||
+            (repeatedExecutionPrompt && (requestMutationPrompt || loopCapableActiveDocument));
         bool docHeavyPrompt =
             ContainsAny(normalized, "response body example", "request body example", "request url example", "parameters", "description") &&
             (methodCount >= 2 || urlCount >= 2);
@@ -280,6 +290,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         AiActiveDocumentSnapshot? activeDocument)
     {
         string promptText = string.IsNullOrWhiteSpace(prompt) ? objective : prompt;
+        string normalizedPrompt = NormalizePromptText(promptText);
         string signalText = string.Join(
             Environment.NewLine,
             [
@@ -291,12 +302,8 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         string[] tokens = TokenizePrompt(normalized);
         int methodCount = CountDistinctHttpMethods(tokens);
         int urlCount = UrlRegex.Matches(signalText).Count;
-
-        bool apiSurfacePrompt =
-            ContainsAny(normalized, "api surface", "crud", "fully test", "full api surface", "test the api", "test this api") ||
-            methodCount >= 3;
-        bool batchPrompt = ContainsAny(
-            normalized,
+        bool explicitLoopPrompt = ContainsAny(
+            normalizedPrompt,
             "iterate",
             "enumerate",
             "batch",
@@ -304,6 +311,19 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             "loop",
             "max_send_iterations",
             "max send iterations");
+        bool repeatedExecutionPrompt = LooksLikeRepeatedExecutionPrompt(normalizedPrompt);
+        bool requestMutationPrompt =
+            methodCount > 0 ||
+            ContainsAny(normalized, "request.send", "request.url", "request.method", "request.body", "request.content_type", "request.headers", "stash");
+        bool loopCapableActiveDocument = repeatedExecutionPrompt && HasLoopCapableFlow(activeDocument?.SourceText);
+
+        bool apiSurfacePrompt =
+            ContainsAny(normalized, "api surface", "crud", "fully test", "full api surface", "test the api", "test this api") ||
+            methodCount >= 3;
+        bool batchPrompt =
+            explicitLoopPrompt ||
+            (repeatedExecutionPrompt && (requestMutationPrompt || loopCapableActiveDocument));
+        bool randomizationPrompt = ContainsAny(normalizedPrompt, "random", "randomized", "unique");
         bool headerPrompt = ContainsAny(
             normalized,
             "header",
@@ -328,6 +348,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         List<string> queries = [];
         AddQuery(queries, "api-surface-crud", apiSurfacePrompt);
         AddQuery(queries, "batch-stash-loop", batchPrompt);
+        AddQuery(queries, "runtime", randomizationPrompt);
         AddQuery(queries, "request-headers", headerPrompt);
         AddQuery(queries, "request-content-type", writePayloadPrompt);
         AddQuery(queries, "request-body", writePayloadPrompt);
@@ -479,6 +500,26 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
     private static bool ContainsAny(string value, params string[] markers)
     {
         return markers.Any(marker => value.Contains(marker, StringComparison.Ordinal));
+    }
+
+    private static bool LooksLikeRepeatedExecutionPrompt(string normalizedPrompt)
+    {
+        return !string.IsNullOrWhiteSpace(normalizedPrompt) &&
+               RepeatedExecutionRegex.IsMatch(normalizedPrompt);
+    }
+
+    private static bool HasLoopCapableFlow(string? sourceText)
+    {
+        string normalizedSource = NormalizePromptText(sourceText);
+        return ContainsAny(
+            normalizedSource,
+            "request.send",
+            "request.url",
+            "request.method",
+            "max_send_iterations",
+            "foreach",
+            "stash.commit",
+            "stash.");
     }
 
     private static string[] TokenizePrompt(string prompt)

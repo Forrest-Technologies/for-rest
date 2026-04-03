@@ -52,6 +52,8 @@ public sealed class ScriptRequestApi
 
     private ResponseSnapshot? lastSentResponse;
 
+    private readonly List<ResponseSnapshot> sentResponses = [];
+
     public string Method { get; set; }
 
     public string Url { get; set; }
@@ -69,6 +71,17 @@ public sealed class ScriptRequestApi
     public int SendCount => Volatile.Read(ref sendCount);
 
     public ResponseSnapshot? LastSentResponse => lastSentResponse;
+
+    public IReadOnlyList<ResponseSnapshot> SentResponses
+    {
+        get
+        {
+            lock (sentResponses)
+            {
+                return [.. sentResponses];
+            }
+        }
+    }
 
     #endregion
 
@@ -110,6 +123,14 @@ public sealed class ScriptRequestApi
 
         ResponseSnapshot? response = await sendAsync(preparedRequest);
         lastSentResponse = response;
+        if (response is not null)
+        {
+            lock (sentResponses)
+            {
+                sentResponses.Add(response);
+            }
+        }
+
         responseApi.Update(response);
         return new ScriptResponseApi(response);
     }

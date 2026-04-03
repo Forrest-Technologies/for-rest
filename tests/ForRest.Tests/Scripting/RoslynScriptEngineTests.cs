@@ -403,6 +403,8 @@ public sealed class RoslynScriptEngineTests
         Assert.AreEqual(1, callbackCount);
         Assert.AreEqual(string.Empty, result.ErrorMessage);
         Assert.AreEqual(201, result.Response?.StatusCode);
+        Assert.HasCount(1, result.SentResponses);
+        Assert.AreEqual(201, result.SentResponses.Single().StatusCode);
         Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
     }
 
@@ -748,6 +750,7 @@ public sealed class RoslynScriptEngineTests
 
         Assert.AreEqual(string.Empty, preRequestResult.ErrorMessage, compilation.Payload.Request.PreRequestScript);
         Assert.AreEqual(7, preRequestResult.SendCount);
+        Assert.HasCount(7, preRequestResult.SentResponses);
         Assert.HasCount(7, preRequestResult.Stash.Rows);
 
         ScriptExecutionResult testsResult = await scriptEngine.Run(
@@ -859,6 +862,9 @@ public sealed class RoslynScriptEngineTests
         Assert.AreEqual(2, callbackCount);
         Assert.AreEqual(string.Empty, result.ErrorMessage);
         Assert.AreEqual(202, result.Response?.StatusCode);
+        Assert.HasCount(2, result.SentResponses);
+        Assert.AreEqual(201, result.SentResponses[0].StatusCode);
+        Assert.AreEqual(202, result.SentResponses[1].StatusCode);
         Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
     }
 

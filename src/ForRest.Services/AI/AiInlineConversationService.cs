@@ -869,6 +869,8 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         string latestSource,
         AiTurnExecutionResult turn)
     {
+        bool likelyEditPrompt = AiPromptIntentClassifier.IsLikelyEditPrompt(promptText);
+        bool documentChanged = HasDocumentChanged(originalSource, latestSource);
         if (turn.ResponseText.StartsWith("AI request failed:", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -877,11 +879,10 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         if (turn.ResponseText.StartsWith("AI request timed out", StringComparison.OrdinalIgnoreCase) ||
             turn.ResponseText.StartsWith("AI request canceled", StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            return likelyEditPrompt &&
+                   !documentChanged &&
+                   turn.AutonomousEditRecoveryAttempts == 0;
         }
-
-        bool likelyEditPrompt = AiPromptIntentClassifier.IsLikelyEditPrompt(promptText);
-        bool documentChanged = HasDocumentChanged(originalSource, latestSource);
         if (likelyEditPrompt &&
             !documentChanged &&
             turn.AutonomousEditRecoveryAttempts > 0)
@@ -1522,11 +1523,13 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
             Do not ask the user for clarification unless a real product decision is still missing.
             Read the active document again, inspect the latest diagnostics, use local docs if needed, and apply a valid edit now.
             If the user asked to iterate, enumerate, batch, or stash values, transform the current request in place instead of asking whether to replace it or create another request.
+            Phrases like `3 times`, `repeat N times`, or `at least N times` are loop requests. Prefer documented `foreach`, range, and `max_send_iterations` flow over manually duplicating similar request blocks.
             If the user asked to test an API surface or multiple methods, use the documented `request-send`, `request-method`, `request-url`, `request-headers`, `request-body`, `request-content-type`, `api-surface-crud`, `stash`, and top-level `expect` patterns.
             If the user pasted API docs or prose into chat, strip that prose from the final document and leave only runnable ForRest source.
             If the current request still points at the old endpoint, replace that target instead of leaving the previous URL or method in place.
             If a requested field name is slightly wrong but the closest valid field is obvious, choose the closest valid field and note the assumption after the edit.
             ForRest syntax guardrails: top-level request config uses bare directives like `method`, `url`, `header`, and `content_type`; dotted members like `request.method`, `request.url`, `request.body`, `request.content_type`, and `request.headers[...]` belong inside flow code before `request.send()`.
+            If the user needs randomized or unique values, use only documented ForRest helpers from local docs such as `guid()` runtime values and documented `strings`, `convert`, or `time` helpers. Do not invent `Math.*`, instance methods like `.Substring(...)`, or arbitrary C# APIs.
             Prefer `response.someField` or `response["Some Field"]` for JSON object members.
             When the response body root is an array, iterate `response` directly or use `response[index]`.
             `response.json()` returns a raw JsonNode; use it only with explicit indexers or `AsArray()`, not dot-member access.

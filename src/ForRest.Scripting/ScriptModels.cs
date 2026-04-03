@@ -35,6 +35,8 @@ public sealed record ScriptExecutionResult
 
     public ResponseSnapshot? SentResponse { get; init; }
 
+    public List<ResponseSnapshot> SentResponses { get; init; } = [];
+
     public int SendCount { get; init; }
 
     public List<VariableDefinition> RuntimeVariables { get; init; } = [];

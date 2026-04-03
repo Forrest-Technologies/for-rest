@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Linq;
 using ForRest.Maui.ViewModels;
 using ForRest.Maui.Services;
+using ForRest.Maui.Theming;
 using Microsoft.Maui.Controls.Shapes;
 
 namespace ForRest.Maui.Controls;
@@ -305,10 +306,10 @@ public partial class WorkbenchCenterPane : ContentView
 		{
 			AutoSize = EditorAutoSizeOption.Disabled,
 			FontFamily = "OpenSansRegular",
-			TextColor = Color.FromArgb("#16202A"),
-			BackgroundColor = Colors.Transparent,
 			Margin = new Thickness(8, 8, 8, 8)
 		};
+		editor.SetDynamicResource(InputView.TextColorProperty, ThemeResourceKeys.TextPrimaryColor);
+		editor.SetDynamicResource(VisualElement.BackgroundColorProperty, ThemeResourceKeys.EditorBackgroundColor);
 		editor.SetBinding(Editor.FontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
 		editor.SetBinding(Editor.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 
@@ -338,10 +339,10 @@ public partial class WorkbenchCenterPane : ContentView
 			IsReadOnly = true,
 			FontFamily = "OpenSansRegular",
 			FontSize = 12,
-			TextColor = Color.FromArgb("#16202A"),
-			BackgroundColor = Colors.Transparent,
 			Margin = new Thickness(8)
 		};
+		editor.SetDynamicResource(InputView.TextColorProperty, ThemeResourceKeys.TextPrimaryColor);
+		editor.SetDynamicResource(VisualElement.BackgroundColorProperty, ThemeResourceKeys.EditorBackgroundColor);
 		editor.SetBinding(Editor.TextProperty, nameof(MainPageViewModel.SelectedLanguageHelpExample));
 		return editor;
 	}

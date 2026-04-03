@@ -1,17 +1,34 @@
 using System.ComponentModel;
 using ForRest.Maui.Services;
 using ForRest.Maui.ViewModels;
+#if WINDOWS
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Input;
+using NativeScrollViewer = Microsoft.UI.Xaml.Controls.ScrollViewer;
+using Windows.System;
+#endif
 
 namespace ForRest.Maui.Controls;
 
 public partial class InspectorPane : ContentView
 {
 	private INotifyPropertyChanged? _viewModelNotifier;
+	private const double ResponseSnapshotCardWidth = 156d;
+	private const double ResponseSnapshotCardSpacing = 8d;
+#if WINDOWS
+	private NativeScrollViewer? _responseSnapshotRailNativeView;
+#endif
 
 	public InspectorPane()
 	{
 		InitializeComponent();
-		Loaded += (_, _) => EnsureResponseBodyViewer();
+		Loaded += (_, _) =>
+		{
+			EnsureResponseBodyViewer();
+			EnsureResponseSnapshotRailInteraction();
+			QueueScrollSelectedResponseSnapshotIntoView(animated: false);
+		};
+		ResponseSnapshotRail.HandlerChanged += (_, _) => EnsureResponseSnapshotRailInteraction();
 	}
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
@@ -33,6 +50,8 @@ public partial class InspectorPane : ContentView
 		}
 
 		EnsureResponseBodyViewer();
+		EnsureResponseSnapshotRailInteraction();
+		QueueScrollSelectedResponseSnapshotIntoView(animated: false);
 	}
 
 	private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -41,6 +60,14 @@ public partial class InspectorPane : ContentView
 		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorResponseVisible), StringComparison.Ordinal))
 		{
 			EnsureResponseBodyViewer();
+		}
+
+		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorResponseVisible), StringComparison.Ordinal) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.ShowResponseSnapshotSelector), StringComparison.Ordinal) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.SelectedResponseSnapshotEntry), StringComparison.Ordinal))
+		{
+			QueueScrollSelectedResponseSnapshotIntoView(animated: false);
 		}
 	}
 
@@ -66,6 +93,34 @@ public partial class InspectorPane : ContentView
 	private async void OnCopyResponseClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyResponseBodyAsync();
+	}
+
+	private void OnPreviousResponseSnapshotClicked(object? sender, EventArgs e)
+	{
+		if (ViewModel.SelectPreviousResponseSnapshot())
+		{
+			FocusResponseSnapshotRail();
+			QueueScrollSelectedResponseSnapshotIntoView(animated: true);
+		}
+	}
+
+	private void OnNextResponseSnapshotClicked(object? sender, EventArgs e)
+	{
+		if (ViewModel.SelectNextResponseSnapshot())
+		{
+			FocusResponseSnapshotRail();
+			QueueScrollSelectedResponseSnapshotIntoView(animated: true);
+		}
+	}
+
+	private void OnResponseSnapshotTapped(object? sender, TappedEventArgs e)
+	{
+		if (sender is Border { BindingContext: ResponseSnapshotEntryViewModel entry })
+		{
+			ViewModel.SelectedResponseSnapshotEntry = entry;
+			FocusResponseSnapshotRail();
+			QueueScrollSelectedResponseSnapshotIntoView(animated: true);
+		}
 	}
 
 	private async void OnCopyRawResponseClicked(object? sender, EventArgs e)
@@ -127,7 +182,82 @@ public partial class InspectorPane : ContentView
 		if (string.Equals(propertyName, nameof(IsVisible), StringComparison.Ordinal) && IsVisible)
 		{
 			EnsureResponseBodyViewer();
+			EnsureResponseSnapshotRailInteraction();
+			QueueScrollSelectedResponseSnapshotIntoView(animated: false);
 		}
+	}
+
+	private void EnsureResponseSnapshotRailInteraction()
+	{
+#if WINDOWS
+		NativeScrollViewer? platformView = ResponseSnapshotRail.Handler?.PlatformView as NativeScrollViewer;
+		if (ReferenceEquals(_responseSnapshotRailNativeView, platformView))
+		{
+			return;
+		}
+
+		if (_responseSnapshotRailNativeView is not null)
+		{
+			_responseSnapshotRailNativeView.PointerWheelChanged -= OnResponseSnapshotRailPointerWheelChanged;
+			_responseSnapshotRailNativeView.KeyDown -= OnResponseSnapshotRailKeyDown;
+		}
+
+		_responseSnapshotRailNativeView = platformView;
+		if (_responseSnapshotRailNativeView is not null)
+		{
+			_responseSnapshotRailNativeView.IsTabStop = true;
+			_responseSnapshotRailNativeView.PointerWheelChanged += OnResponseSnapshotRailPointerWheelChanged;
+			_responseSnapshotRailNativeView.KeyDown += OnResponseSnapshotRailKeyDown;
+		}
+#endif
+	}
+
+	private void FocusResponseSnapshotRail()
+	{
+#if WINDOWS
+		if (_responseSnapshotRailNativeView is not null)
+		{
+			_responseSnapshotRailNativeView.Focus(FocusState.Programmatic);
+			return;
+		}
+#endif
+		ResponseSnapshotRail.Focus();
+	}
+
+	private void QueueScrollSelectedResponseSnapshotIntoView(bool animated)
+	{
+		if (!IsVisible || !ViewModel.ShowResponseSnapshotSelector || ViewModel.SelectedResponseSnapshotEntry is null)
+		{
+			return;
+		}
+
+		if (Dispatcher?.IsDispatchRequired == true)
+		{
+			Dispatcher.Dispatch(() => _ = ScrollSelectedResponseSnapshotIntoViewAsync(animated));
+			return;
+		}
+
+		_ = ScrollSelectedResponseSnapshotIntoViewAsync(animated);
+	}
+
+	private async Task ScrollSelectedResponseSnapshotIntoViewAsync(bool animated)
+	{
+		if (ViewModel.SelectedResponseSnapshotEntry is not { } selectedEntry ||
+		    !ViewModel.ShowResponseSnapshotSelector ||
+		    ResponseSnapshotRail.Width <= 0d)
+		{
+			return;
+		}
+
+		await Task.Yield();
+		int selectedIndex = ViewModel.ResponseSnapshotEntries.IndexOf(selectedEntry);
+		if (selectedIndex < 0)
+		{
+			return;
+		}
+
+		double targetOffset = Math.Max(0d, (selectedIndex * (ResponseSnapshotCardWidth + ResponseSnapshotCardSpacing)) - ResponseSnapshotCardSpacing);
+		await ResponseSnapshotRail.ScrollToAsync(targetOffset, 0d, animated);
 	}
 
 	private View BuildMonacoResponseViewer()
@@ -156,4 +286,58 @@ public partial class InspectorPane : ContentView
 		viewer.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.ResponseBodyText));
 		return viewer;
 	}
+
+#if WINDOWS
+	private void OnResponseSnapshotRailKeyDown(object sender, KeyRoutedEventArgs e)
+	{
+		if (!ViewModel.ShowResponseSnapshotSelector)
+		{
+			return;
+		}
+
+		bool handled = e.Key switch
+		{
+			VirtualKey.Left => ViewModel.SelectPreviousResponseSnapshot(),
+			VirtualKey.Right => ViewModel.SelectNextResponseSnapshot(),
+			_ => false,
+		};
+
+		if (!handled)
+		{
+			return;
+		}
+
+		QueueScrollSelectedResponseSnapshotIntoView(animated: true);
+		e.Handled = true;
+	}
+
+	private void OnResponseSnapshotRailPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+	{
+		if (sender is not NativeScrollViewer platformView ||
+		    !ViewModel.ShowResponseSnapshotSelector ||
+		    platformView.ScrollableWidth <= 0d)
+		{
+			return;
+		}
+
+		int wheelDelta = e.GetCurrentPoint(platformView).Properties.MouseWheelDelta;
+		if (wheelDelta == 0)
+		{
+			return;
+		}
+
+		double step = Math.Max(ResponseSnapshotCardWidth + ResponseSnapshotCardSpacing, platformView.ViewportWidth * 0.72d);
+		double targetOffset = Math.Clamp(
+			platformView.HorizontalOffset - (Math.Sign(wheelDelta) * step),
+			0d,
+			platformView.ScrollableWidth);
+		if (Math.Abs(targetOffset - platformView.HorizontalOffset) < 0.5d)
+		{
+			return;
+		}
+
+		platformView.ChangeView(targetOffset, null, null, true);
+		e.Handled = true;
+	}
+#endif
 }

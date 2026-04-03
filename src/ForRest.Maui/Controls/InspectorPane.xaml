@@ -46,30 +46,106 @@
             <Grid Grid.Row="2"
                   Padding="10,0,10,10"
                   RowDefinitions="Auto,*">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto"
-                      IsVisible="{Binding IsInspectorResponseVisible}"
-                      Padding="0,0,0,8">
-                    <Label Text="Response body"
-                           Style="{StaticResource SectionTitleStyle}" />
-                    <Button Grid.Column="1"
-                            Text="Copy Body"
-                            Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnCopyResponseClicked"
-                            IsEnabled="{Binding CanCopyResponseBody}" />
-                    <Button Grid.Column="2"
-                            Text="Copy Raw"
-                            Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnCopyRawResponseClicked"
-                            IsEnabled="{Binding CanCopyRawResponse}" />
-                    <Button Grid.Column="3"
-                            Text="{Binding ResponsePrettyPrintButtonText}"
-                            Style="{StaticResource DenseTabButtonStyle}"
-                            Clicked="OnTogglePrettyPrintClicked" />
-                </Grid>
+                <Grid Grid.RowSpan="2"
+                      RowDefinitions="Auto,Auto,Auto,*"
+                      IsVisible="{Binding IsInspectorResponseVisible}">
+                    <VerticalStackLayout Spacing="2">
+                        <Label Text="Response body"
+                               LineBreakMode="TailTruncation"
+                               MaxLines="1"
+                               Style="{StaticResource SectionTitleStyle}" />
+                        <Label Text="{Binding SelectedResponseSnapshotSummaryText}"
+                               LineBreakMode="WordWrap"
+                               MaxLines="2"
+                               Style="{StaticResource PaneMetaStyle}" />
+                    </VerticalStackLayout>
 
-                <ContentView x:Name="ResponseBodyViewerHost"
-                             Grid.Row="1"
-                             IsVisible="{Binding IsInspectorResponseVisible}" />
+                    <FlexLayout Grid.Row="1"
+                                Margin="0,8,0,8"
+                                Direction="Row"
+                                Wrap="Wrap"
+                                AlignItems="Center"
+                                JustifyContent="Start">
+                        <Button Margin="0,0,8,8"
+                                Text="Prev"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnPreviousResponseSnapshotClicked"
+                                IsVisible="{Binding ShowResponseSnapshotSelector}"
+                                IsEnabled="{Binding CanSelectPreviousResponseSnapshot}" />
+                        <Button Margin="0,0,8,8"
+                                Text="Next"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnNextResponseSnapshotClicked"
+                                IsVisible="{Binding ShowResponseSnapshotSelector}"
+                                IsEnabled="{Binding CanSelectNextResponseSnapshot}" />
+                        <Button Margin="0,0,8,8"
+                                Text="Copy Body"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopyResponseClicked"
+                                IsEnabled="{Binding CanCopyResponseBody}" />
+                        <Button Margin="0,0,8,8"
+                                Text="Copy Raw"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopyRawResponseClicked"
+                                IsEnabled="{Binding CanCopyRawResponse}" />
+                        <Button Margin="0,0,8,8"
+                                Text="{Binding ResponsePrettyPrintButtonText}"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnTogglePrettyPrintClicked" />
+                    </FlexLayout>
+
+                    <ScrollView x:Name="ResponseSnapshotRail"
+                                Grid.Row="2"
+                                Margin="0,0,0,8"
+                                HeightRequest="92"
+                                Orientation="Horizontal"
+                                IsVisible="{Binding ShowResponseSnapshotSelector}"
+                                HorizontalScrollBarVisibility="Always">
+                        <HorizontalStackLayout Spacing="8"
+                                               BindableLayout.ItemsSource="{Binding ResponseSnapshotEntries}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <Border WidthRequest="156"
+                                            Padding="10,8"
+                                            BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                                            Stroke="{DynamicResource ThemeDividerColor}"
+                                            StrokeThickness="1"
+                                            StrokeShape="RoundRectangle 8">
+                                        <Border.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnResponseSnapshotTapped" />
+                                        </Border.GestureRecognizers>
+                                        <Border.Triggers>
+                                            <DataTrigger TargetType="Border"
+                                                         Binding="{Binding IsSelected}"
+                                                         Value="True">
+                                                <Setter Property="BackgroundColor"
+                                                        Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                                <Setter Property="Stroke"
+                                                        Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            </DataTrigger>
+                                        </Border.Triggers>
+                                        <VerticalStackLayout Spacing="2">
+                                            <Label Text="{Binding ChipText}"
+                                                   Style="{StaticResource MonoMetaStyle}" />
+                                            <Label Text="{Binding StatusText}"
+                                                   TextColor="{Binding AccentColor}"
+                                                   LineBreakMode="TailTruncation"
+                                                   MaxLines="1"
+                                                   Style="{StaticResource SectionTitleStyle}" />
+                                            <Label Text="{Binding DetailText}"
+                                                   LineBreakMode="TailTruncation"
+                                                   MaxLines="1"
+                                                   Style="{StaticResource PaneMetaStyle}" />
+                                        </VerticalStackLayout>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </HorizontalStackLayout>
+                    </ScrollView>
+
+                    <ContentView x:Name="ResponseBodyViewerHost"
+                                 Grid.Row="3" />
+                </Grid>
 
                 <Grid Grid.RowSpan="2"
                       RowDefinitions="Auto,*"

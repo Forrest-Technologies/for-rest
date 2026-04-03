@@ -125,6 +125,38 @@ public sealed class AgentFrameworkAiTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ExecuteAsync_recovery_prompt_prefers_loop_flow_for_repeated_patch_requests()
+    {
+        MutableActiveDocumentHost host = new("name \"Example\"\nmethod PATCH\nurl \"https://api.restful-api.dev/objects/1\"");
+        StubAgent agent = new(
+            (_, _) => CreateResponse("The editor rejected the change before the document was updated.", ChatFinishReason.Stop),
+            (_, _) =>
+            {
+                host.SourceText =
+                    "name \"Example\"\nmethod PATCH\nurl \"https://api.restful-api.dev/objects/1\"\nmax_send_iterations 3\n\nruntime trace_id = guid()\n\nforeach attempt in [1..3] {\n  request.method = \"PATCH\"\n  request.url = \"https://api.restful-api.dev/objects/1\"\n  request.content_type = \"application/json\"\n  request.body = $\"{{\\\"name\\\":\\\"Patch {attempt} {trace_id}\\\"}}\"\n  let sent = request.send()\n}";
+                return CreateResponse("Updated the request to loop over three patch attempts.", ChatFinishReason.Stop);
+            });
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(new StubRuntimeFactory(agent));
+
+        AiTurnExecutionResult result = await executor.ExecuteAsync(
+            new(
+                ConversationId: "doc-3b-loop",
+                Objective: "Update the active request.",
+                Prompt: "Perform the patch at least 3 times with at least 1 randomized value.",
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(2, agent.Calls.Count);
+        Assert.AreEqual(1, result.AutonomousEditRecoveryAttempts);
+        StringAssert.Contains(agent.Calls[1].MessageText, "repeat N times");
+        StringAssert.Contains(agent.Calls[1].MessageText, "foreach/range/max_send_iterations");
+        StringAssert.Contains(agent.Calls[1].MessageText, "Do not invent Math.*");
+        StringAssert.Contains(agent.Calls[1].MessageText, ".Substring(...)");
+        StringAssert.Contains(host.SourceText, "foreach attempt in [1..3]");
+    }
+
+    [TestMethod]
     public async Task ExecuteAsync_retries_internal_repair_for_edit_prompts_that_start_with_what_i_want_you_to_do()
     {
         MutableActiveDocumentHost host = new("name \"Example\"\nmethod GET");

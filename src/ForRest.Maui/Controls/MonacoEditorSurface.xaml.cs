@@ -611,6 +611,8 @@ public partial class MonacoEditorSurface : ContentView
         lastContextPosition: null,
         isApplyingProtectedEdit: false,
         layoutRefreshHandle: null,
+        renderStabilizationHandle: null,
+        pendingRenderStabilizationPosition: null,
         androidFontRemeasureHandle: null,
         textSyncHandle: null,
         topPadding: 8,
@@ -623,6 +625,44 @@ public partial class MonacoEditorSurface : ContentView
           this.layoutRefreshHandle = window.requestAnimationFrame(() => {
             this.layoutRefreshHandle = null;
             this.refreshViewportLayout();
+          });
+        },
+        scheduleRenderStabilization: function (position) {
+          if (position && Number.isInteger(position.lineNumber) && Number.isInteger(position.column)) {
+            this.pendingRenderStabilizationPosition = position;
+          }
+
+          if (this.renderStabilizationHandle) {
+            return;
+          }
+
+          const runPass = () => {
+            if (!this.editor) {
+              return;
+            }
+
+            this.editor.layout();
+            if (typeof this.editor.render === "function") {
+              this.editor.render(true);
+            }
+
+            if (this.isAndroid && this.pendingRenderStabilizationPosition) {
+              const target = this.pendingRenderStabilizationPosition;
+              if (typeof this.editor.revealPositionInCenterIfOutsideViewport === "function") {
+                this.editor.revealPositionInCenterIfOutsideViewport(target);
+              } else if (typeof this.editor.revealPositionInCenter === "function") {
+                this.editor.revealPositionInCenter(target);
+              }
+            }
+          };
+
+          this.renderStabilizationHandle = window.requestAnimationFrame(() => {
+            this.renderStabilizationHandle = null;
+            runPass();
+            window.requestAnimationFrame(() => {
+              runPass();
+              this.pendingRenderStabilizationPosition = null;
+            });
           });
         },
         scheduleTextSyncNotification: function () {
@@ -791,38 +831,47 @@ public partial class MonacoEditorSurface : ContentView
           const matches = String(text || "").match(/\r\n|\r|\n/g);
           return matches ? matches.length : 0;
         },
-        normalizeInlineAiPromptPaste: function (event) {
-          if (!this.editor || !this.model || !event || !Array.isArray(event.changes) || event.changes.length !== 1) {
-            return false;
+        getLineContentFromValue: function (value, lineNumber) {
+          if (!Number.isInteger(lineNumber) || lineNumber < 1) {
+            return "";
           }
 
-          const change = event.changes[0];
-          if (!change || !change.range || typeof change.text !== "string") {
-            return false;
+          const normalizedValue = String(value || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+          const lines = normalizedValue.split("\n");
+          return lineNumber <= lines.length ? (lines[lineNumber - 1] || "") : "";
+        },
+        buildInlineAiPromptPasteText: function (clipboardText, leadingWhitespace, normalizeFirstLine) {
+          const normalizedClipboardText = String(clipboardText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+          const rawLines = normalizedClipboardText.split("\n");
+          if (rawLines.length < 2) {
+            return null;
           }
 
-          const insertedLineBreakCount = this.countLineBreaks(change.text);
-          if (insertedLineBreakCount < 1) {
-            return false;
+          const normalizedLines = [];
+          for (let index = 0; index < rawLines.length; index++) {
+            const currentLineText = rawLines[index] || "";
+            if ((!normalizeFirstLine && index === 0) || this.isInlineAiPromptLine(currentLineText)) {
+              normalizedLines.push(currentLineText);
+              continue;
+            }
+
+            normalizedLines.push(
+              currentLineText.trim().length === 0
+                ? `${leadingWhitespace}## `
+                : `${leadingWhitespace}## ${currentLineText}`);
           }
 
-          const startLineNumber = change.range.startLineNumber;
-          const startLineText = this.model.getLineContent(startLineNumber) || "";
-          const startLine = this.parseInlineAiPromptLine(startLineText);
-          if (!startLine) {
-            return false;
-          }
-
-          const endLineNumber = Math.min(
-            this.model.getLineCount(),
-            startLineNumber + insertedLineBreakCount);
-          if (endLineNumber <= startLineNumber) {
+          return normalizedLines.join(this.model && this.model.getEOL ? this.model.getEOL() : "\n");
+        },
+        normalizeInlineAiPromptModelLines: function (startLineNumber, endLineNumber, leadingWhitespace, monaco, normalizeFirstLine) {
+          const firstLineNumber = normalizeFirstLine ? startLineNumber : startLineNumber + 1;
+          if (!this.editor || !this.model || !monaco || endLineNumber < firstLineNumber) {
             return false;
           }
 
           const normalizedLines = [];
           let changed = false;
-          for (let lineNumber = startLineNumber + 1; lineNumber <= endLineNumber; lineNumber++) {
+          for (let lineNumber = firstLineNumber; lineNumber <= endLineNumber; lineNumber++) {
             const currentLineText = this.model.getLineContent(lineNumber) || "";
             if (this.isInlineAiPromptLine(currentLineText)) {
               normalizedLines.push(currentLineText);
@@ -832,11 +881,11 @@ public partial class MonacoEditorSurface : ContentView
             changed = true;
             normalizedLines.push(
               currentLineText.trim().length === 0
-                ? `${startLine.leadingWhitespace}## `
-                : `${startLine.leadingWhitespace}## ${currentLineText}`);
+                ? `${leadingWhitespace}## `
+                : `${leadingWhitespace}## ${currentLineText}`);
           }
 
-          if (!changed || normalizedLines.length === 0 || !window.monaco) {
+          if (!changed || normalizedLines.length === 0) {
             return false;
           }
 
@@ -844,8 +893,8 @@ public partial class MonacoEditorSurface : ContentView
           try {
             this.editor.executeEdits("forrest-inline-ai-paste", [
               {
-                range: new window.monaco.Range(
-                  startLineNumber + 1,
+                range: new monaco.Range(
+                  firstLineNumber,
                   1,
                   endLineNumber,
                   this.model.getLineMaxColumn(endLineNumber)),
@@ -857,6 +906,105 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           return true;
+        },
+        handleInlineAiPromptClipboardPaste: function (clipboardText, monaco) {
+          if (this.pendingReadOnly || !this.editor || !this.model || !monaco || typeof clipboardText !== "string") {
+            return false;
+          }
+
+          if (this.countLineBreaks(clipboardText) < 1) {
+            return false;
+          }
+
+          const selection = this.editor.getSelection();
+          if (!selection) {
+            return false;
+          }
+
+          const startLineText = this.model.getLineContent(selection.startLineNumber) || "";
+          const startLine = this.parseInlineAiPromptLine(startLineText);
+          if (!startLine) {
+            return false;
+          }
+
+          const promptPrefix = `${startLine.leadingWhitespace}## `;
+          const shouldNormalizeFirstLine =
+            selection.startLineNumber !== selection.endLineNumber ||
+            selection.startColumn <= promptPrefix.length;
+          const normalizedText = this.buildInlineAiPromptPasteText(
+            clipboardText,
+            startLine.leadingWhitespace,
+            shouldNormalizeFirstLine);
+          if (!normalizedText) {
+            return false;
+          }
+
+          this.isApplyingProtectedEdit = true;
+          try {
+            this.editor.executeEdits("forrest-inline-ai-paste", [
+              {
+                range: selection,
+                text: normalizedText
+              }
+            ]);
+          } finally {
+            this.isApplyingProtectedEdit = false;
+          }
+
+          this.lastKnownValue = this.editor.getValue();
+          this.refreshEditableDecorations();
+          this.scheduleTextSyncNotification();
+          return true;
+        },
+        normalizeInlineAiPromptPaste: function (event) {
+          if (!this.editor || !this.model || !event || !Array.isArray(event.changes) || !window.monaco) {
+            return false;
+          }
+
+          const multilineChanges = event.changes.filter((change) =>
+            change &&
+            change.range &&
+            typeof change.text === "string" &&
+            this.countLineBreaks(change.text) >= 1);
+          if (multilineChanges.length === 0) {
+            return false;
+          }
+
+          const firstChange = multilineChanges
+            .slice()
+            .sort((left, right) => {
+              const lineDelta = left.range.startLineNumber - right.range.startLineNumber;
+              if (lineDelta !== 0) {
+                return lineDelta;
+              }
+
+              return left.range.startColumn - right.range.startColumn;
+            })[0];
+          const startLineNumber = firstChange.range.startLineNumber;
+          const previousStartLineText = this.getLineContentFromValue(this.lastKnownValue, startLineNumber);
+          const startLine = this.parseInlineAiPromptLine(previousStartLineText);
+          if (!startLine) {
+            return false;
+          }
+
+          const promptPrefix = `${startLine.leadingWhitespace}## `;
+          const shouldNormalizeFirstLine =
+            firstChange.range.startLineNumber !== firstChange.range.endLineNumber ||
+            firstChange.range.startColumn <= promptPrefix.length;
+          const endLineNumber = Math.min(
+            this.model.getLineCount(),
+            Math.max(...multilineChanges.map((change) =>
+              change.range.startLineNumber + this.countLineBreaks(change.text))));
+          if (endLineNumber < (shouldNormalizeFirstLine ? startLineNumber : startLineNumber + 1)) {
+            return false;
+          }
+
+          return this.normalizeInlineAiPromptModelLines(
+            startLineNumber,
+            endLineNumber,
+            startLine.leadingWhitespace,
+            window.monaco,
+            shouldNormalizeFirstLine);
         },
         hasPrimaryModifier: function (event) {
           return !!(event && (event.ctrlKey || event.metaKey));
@@ -908,9 +1056,9 @@ public partial class MonacoEditorSurface : ContentView
             return;
           }
 
-          const viewport = window.visualViewport;
+          const viewport = this.isAndroid && window.visualViewport ? window.visualViewport : null;
           const viewportHeight = Math.max(0, Math.floor(viewport ? viewport.height : window.innerHeight || document.documentElement.clientHeight || 0));
-          const nextHeight = viewportHeight > 0 ? `${viewportHeight}px` : "100%";
+          const nextHeight = this.isAndroid && viewportHeight > 0 ? `${viewportHeight}px` : "100%";
           document.documentElement.style.height = nextHeight;
           document.body.style.height = nextHeight;
           container.style.height = nextHeight;
@@ -930,7 +1078,7 @@ public partial class MonacoEditorSurface : ContentView
             this.scheduleAndroidFontRemeasure();
 
             const position = this.editor.getPosition();
-            if (position) {
+            if (this.isAndroid && position) {
               this.editor.revealPositionInCenterIfOutsideViewport(position);
             }
           }
@@ -942,7 +1090,7 @@ public partial class MonacoEditorSurface : ContentView
 
           this.viewportListenersAttached = true;
           window.addEventListener("resize", () => this.scheduleLayoutRefresh());
-          if (window.visualViewport) {
+          if (this.isAndroid && window.visualViewport) {
             window.visualViewport.addEventListener("resize", () => this.scheduleLayoutRefresh());
             window.visualViewport.addEventListener("scroll", () => this.scheduleLayoutRefresh());
           }
@@ -1012,6 +1160,17 @@ public partial class MonacoEditorSurface : ContentView
           const domNode = this.editor.getDomNode();
           if (domNode) {
             domNode.style.touchAction = "auto";
+            domNode.addEventListener("paste", (event) => {
+              if (!event || !event.clipboardData) {
+                return;
+              }
+
+              const clipboardText = event.clipboardData.getData("text/plain");
+              if (this.handleInlineAiPromptClipboardPaste(clipboardText, monaco)) {
+                event.preventDefault();
+                event.stopPropagation();
+              }
+            }, true);
           }
 
           this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function () {
@@ -1155,7 +1314,7 @@ public partial class MonacoEditorSurface : ContentView
 
           this.lastKnownValue = this.editor.getValue();
           this.refreshEditableDecorations();
-          this.editor.layout();
+          this.scheduleRenderStabilization();
         },
         parseEditableRanges: function (state) {
           if (Array.isArray(state?.editableRanges)) {
@@ -1237,6 +1396,7 @@ public partial class MonacoEditorSurface : ContentView
 
           this.editor.focus();
           this.lastAppliedCursorRequestVersion = this.pendingCursorRequestVersion;
+          this.scheduleRenderStabilization(position);
         },
         applyDiagnostics: function () {
           if (!this.model || !window.monaco) {
@@ -1265,6 +1425,12 @@ public partial class MonacoEditorSurface : ContentView
             }));
 
           window.monaco.editor.setModelMarkers(this.model, "forrest-diagnostics", markers);
+        },
+        hasPendingCursorRequest: function () {
+          return Number.isInteger(this.pendingCursorRequestVersion) &&
+            this.pendingCursorRequestVersion > this.lastAppliedCursorRequestVersion &&
+            Number.isInteger(this.pendingCursorLineNumber) &&
+            this.pendingCursorLineNumber > 0;
         },
         applyState: function (state) {
           const nextState = state || {};
@@ -1313,7 +1479,8 @@ public partial class MonacoEditorSurface : ContentView
             if (shouldApplyText) {
               const normalized = this.pendingValue ?? "";
               if (this.editor.getValue() !== normalized) {
-                this.replaceEditorValue(normalized, true);
+                const shouldRestoreViewState = !this.hasPendingCursorRequest();
+                this.replaceEditorValue(normalized, shouldRestoreViewState);
               } else {
                 this.refreshEditableDecorations();
                 this.editor.layout();
@@ -1653,7 +1820,7 @@ public partial class MonacoEditorSurface : ContentView
 	private int _requestedStateVersion;
 	private int _appliedStateVersion;
 	private int _pendingTextVersion;
-	private string _lastNonEmptySettingsText = string.Empty;
+	private int _queuedStateApplyDispatch;
 	private string _pendingText = string.Empty;
 	private string _pendingLanguage = "forrest";
 	private string _pendingThemeKey = "forrest-azure";
@@ -1829,12 +1996,6 @@ public partial class MonacoEditorSurface : ContentView
 			editor._contentHydrated = false;
 		}
 
-		if (string.Equals(editor.Language, "settings-toml", StringComparison.Ordinal) &&
-		    !string.IsNullOrWhiteSpace(nextValue))
-		{
-			editor._lastNonEmptySettingsText = nextValue;
-		}
-
 		if (editor._isPullingEditorText)
 		{
 			return;
@@ -1905,14 +2066,12 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
 		editor._pendingRequestedCursorLineNumber = newValue is int lineNumber ? lineNumber : 0;
-		editor.RequestStateApply();
 	}
 
 	private static void OnRequestedCursorColumnChanged(BindableObject bindable, object? oldValue, object? newValue)
 	{
 		MonacoEditorSurface editor = (MonacoEditorSurface)bindable;
 		editor._pendingRequestedCursorColumn = newValue is int column ? column : 0;
-		editor.RequestStateApply();
 	}
 
 	private static void OnRequestedCursorVersionChanged(BindableObject bindable, object? oldValue, object? newValue)
@@ -2063,7 +2222,44 @@ public partial class MonacoEditorSurface : ContentView
 		}
 
 		Interlocked.Increment(ref _requestedStateVersion);
-		_ = FlushPendingStateAsync();
+		QueuePendingStateApply();
+	}
+
+	private void QueuePendingStateApply()
+	{
+		if (Interlocked.Exchange(ref _queuedStateApplyDispatch, 1) == 1)
+		{
+			return;
+		}
+
+		void DispatchFlush()
+		{
+			_ = FlushQueuedStateApplyAsync();
+		}
+
+		if (Dispatcher?.Dispatch(DispatchFlush) == true)
+		{
+			return;
+		}
+
+		Microsoft.Maui.ApplicationModel.MainThread.BeginInvokeOnMainThread(DispatchFlush);
+	}
+
+	private async Task FlushQueuedStateApplyAsync()
+	{
+		try
+		{
+			await Task.Yield();
+			await FlushPendingStateAsync();
+		}
+		finally
+		{
+			Interlocked.Exchange(ref _queuedStateApplyDispatch, 0);
+			if (_isEditorReady && Volatile.Read(ref _requestedStateVersion) != _appliedStateVersion)
+			{
+				QueuePendingStateApply();
+			}
+		}
 	}
 
 	private async Task FlushPendingStateAsync()
@@ -2118,16 +2314,8 @@ public partial class MonacoEditorSurface : ContentView
 
 	private EditorStatePayload BuildCurrentStatePayload()
 	{
-		string text = _pendingText;
-		if (string.Equals(_pendingLanguage, "settings-toml", StringComparison.Ordinal) &&
-		    string.IsNullOrWhiteSpace(text) &&
-		    !string.IsNullOrWhiteSpace(_lastNonEmptySettingsText))
-		{
-			text = _lastNonEmptySettingsText;
-		}
-
 		return new EditorStatePayload(
-			Text: text,
+			Text: _pendingText,
 			Language: string.IsNullOrWhiteSpace(_pendingLanguage) ? "forrest" : _pendingLanguage,
 			ThemeKey: string.IsNullOrWhiteSpace(_pendingThemeKey) ? "forrest-azure" : _pendingThemeKey,
 			EditorFontSize: _pendingEditorFontSize,
@@ -2145,12 +2333,6 @@ public partial class MonacoEditorSurface : ContentView
 
 	private async Task ApplyEditorStateAsync(EditorStatePayload state)
 	{
-		if (string.Equals(state.Language, "settings-toml", StringComparison.Ordinal) &&
-		    !string.IsNullOrWhiteSpace(state.Text))
-		{
-			_lastNonEmptySettingsText = state.Text;
-		}
-
 		string payloadJson = JsonSerializer.Serialize(
 			state,
 			new JsonSerializerOptions
@@ -2328,20 +2510,6 @@ public partial class MonacoEditorSurface : ContentView
 		{
 			RequestStateApply();
 			await FlushPendingStateAsync();
-			return;
-		}
-
-		if (string.Equals(Language, "settings-toml", StringComparison.Ordinal) &&
-		    string.IsNullOrWhiteSpace(editorText))
-		{
-			string fallbackText = !string.IsNullOrWhiteSpace(Text) ? Text : _lastNonEmptySettingsText;
-			if (!string.IsNullOrWhiteSpace(fallbackText))
-			{
-				Text = fallbackText;
-				RequestStateApply();
-				await FlushPendingStateAsync();
-			}
-
 			return;
 		}
 

@@ -85,6 +85,7 @@ public sealed class RequestExecutionServiceTests
             Assert.AreEqual("Created", result.LatestResponse.ReasonPhrase);
             Assert.AreEqual("application/json", result.LatestResponse.ContentType);
             StringAssert.Contains(result.LatestResponse.Body, "\"received\":true");
+            Assert.HasCount(1, result.Runs.Single().Responses);
             StringAssert.Contains(result.Runs.Single().RawRequest, "X-Test-Mode: loopback");
             StringAssert.Contains(result.Runs.Single().RawRequest, "POST http://127.0.0.1:");
             Assert.HasCount(1, historyRepository.Runs);
@@ -206,6 +207,9 @@ public sealed class RequestExecutionServiceTests
             Assert.AreEqual("/extract?step=2", capturedRequests[1].PathAndQuery);
             Assert.AreEqual("2", result.RuntimeVariables.Single(static item => item.Key == "attempt").Value);
             Assert.AreEqual($"http://127.0.0.1:{port}/extract?step=2", run.TargetUri);
+            Assert.HasCount(2, run.Responses);
+            StringAssert.Contains(run.Responses[0].Body, "\"attempt\":1");
+            StringAssert.Contains(run.Responses[1].Body, "\"attempt\":2");
             StringAssert.Contains(run.Response?.Body ?? string.Empty, "\"attempt\":2");
             Assert.AreEqual("2", historyRepository.Runs.Single().RuntimeVariables.Single(static item => item.Key == "attempt").Value);
         }
