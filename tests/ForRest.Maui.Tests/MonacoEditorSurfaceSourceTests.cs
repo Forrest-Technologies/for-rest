@@ -47,6 +47,20 @@ public sealed class MonacoEditorSurfaceSourceTests
 		Assert.IsFalse(syncEditorTextBody.Contains("fallbackText", StringComparison.Ordinal));
 	}
 
+	[TestMethod]
+	public void MonacoEditorSurface_android_webview_registers_native_paste_menu_hooks()
+	{
+		string source = GetNormalizedMonacoEditorSurfaceSource();
+
+		StringAssert.Contains(source, "_androidPlatformWebView.ContextClickable = true;");
+		StringAssert.Contains(source, "_androidPlatformWebView.LongClick += OnAndroidWebViewLongClick;");
+		StringAssert.Contains(source, "_androidPlatformWebView.ContextClick += OnAndroidWebViewContextClick;");
+		StringAssert.Contains(source, "private async Task ShowAndroidEditorContextMenuAsync()");
+		StringAssert.Contains(source, "PopupMenu popupMenu = new(_androidPlatformWebView.Context, _androidPlatformWebView, GravityFlags.Start);");
+		StringAssert.Contains(source, "Clipboard.Default.GetTextAsync()");
+		StringAssert.Contains(source, "PasteTextFromAndroidContextMenuAsync");
+	}
+
 	private static string GetMethodBody(string source, string signaturePrefix, string methodName)
 	{
 		Match match = Regex.Match(

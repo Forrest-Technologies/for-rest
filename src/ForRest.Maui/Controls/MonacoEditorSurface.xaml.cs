@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using ForRest.Maui.Theming;
+using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Dispatching;
 using ForRest.Maui.Services;
 
@@ -11,6 +12,7 @@ using Android.Content;
 using Android.Views;
 using Android.Views.InputMethods;
 using Android.Webkit;
+using Android.Widget;
 #endif
 
 namespace ForRest.Maui.Controls;
@@ -69,12 +71,20 @@ public partial class MonacoEditorSurface : ContentView
   <script>
     (function () {
       const baseUrl = new URL("monaco/", document.baseURI).toString().replace(/\/$/, "");
+      const monacoBaseUrl = `${baseUrl}/`;
+      const directWorkerUrl = `${baseUrl}/vs/base/worker/workerMain.js`;
+      const isAndroidUserAgent = /Android/i.test(navigator.userAgent || "");
 
       window.MonacoEnvironment = {
+        baseUrl: monacoBaseUrl,
         getWorkerUrl: function () {
+          if (isAndroidUserAgent) {
+            return directWorkerUrl;
+          }
+
           const workerSource = `
-            self.MonacoEnvironment = { baseUrl: '${baseUrl}/' };
-            importScripts('${baseUrl}/vs/base/worker/workerMain.js');
+            self.MonacoEnvironment = { baseUrl: '${monacoBaseUrl}' };
+            importScripts('${directWorkerUrl}');
           `;
 
           return "data:text/javascript;charset=utf-8," + encodeURIComponent(workerSource);
@@ -594,7 +604,7 @@ public partial class MonacoEditorSurface : ContentView
         pendingTheme: "forrest-azure",
         pendingFontSize: 13.5,
         pendingReadOnly: false,
-        isAndroid: /Android/i.test(navigator.userAgent || ""),
+        isAndroid: isAndroidUserAgent,
         pendingEditableRanges: [],
         pendingDiagnostics: [],
         pendingLanguageHelp: [],
@@ -617,6 +627,79 @@ public partial class MonacoEditorSurface : ContentView
         textSyncHandle: null,
         topPadding: 8,
         baseBottomPadding: 24,
+        sanitizeEditorPosition: function (position) {
+          if (!position || !this.model ||
+              !Number.isInteger(position.lineNumber) ||
+              !Number.isInteger(position.column)) {
+            return null;
+          }
+
+          const lineCount = Math.max(1, this.model.getLineCount());
+          const lineNumber = Math.min(Math.max(1, position.lineNumber), lineCount);
+          const maxColumn = Math.max(1, this.model.getLineMaxColumn(lineNumber));
+          const column = Math.min(Math.max(1, position.column), maxColumn);
+          return { lineNumber, column };
+        },
+        getLinesFromValue: function (value) {
+          const normalizedValue = String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+          return normalizedValue.length === 0 ? [""] : normalizedValue.split("\n");
+        },
+        clampLineNumberToLines: function (lineNumber, lines) {
+          const lineCount = Math.max(1, Array.isArray(lines) ? lines.length : 1);
+          if (!Number.isInteger(lineNumber)) {
+            return 1;
+          }
+
+          return Math.min(Math.max(1, lineNumber), lineCount);
+        },
+        clampColumnToLine: function (column, lineNumber, lines) {
+          const safeLineNumber = this.clampLineNumberToLines(lineNumber, lines);
+          const lineText = safeLineNumber <= lines.length ? (lines[safeLineNumber - 1] || "") : "";
+          const maxColumn = Math.max(1, lineText.length + 1);
+          if (!Number.isInteger(column)) {
+            return 1;
+          }
+
+          return Math.min(Math.max(1, column), maxColumn);
+        },
+        sanitizeViewStateValue: function (value, lines) {
+          if (Array.isArray(value)) {
+            return value.map((entry) => this.sanitizeViewStateValue(entry, lines));
+          }
+
+          if (!value || typeof value !== "object") {
+            return value;
+          }
+
+          const clone = {};
+          Object.keys(value).forEach((key) => {
+            clone[key] = this.sanitizeViewStateValue(value[key], lines);
+          });
+
+          const lineNumberSuffix = "LineNumber";
+          Object.keys(clone)
+            .filter((key) => (key === "lineNumber" || key.endsWith(lineNumberSuffix)) && Number.isInteger(clone[key]))
+            .forEach((lineKey) => {
+              const lineNumber = this.clampLineNumberToLines(clone[lineKey], lines);
+              clone[lineKey] = lineNumber;
+
+              const columnKey = lineKey === "lineNumber"
+                ? "column"
+                : `${lineKey.substring(0, lineKey.length - lineNumberSuffix.length)}Column`;
+              if (Object.prototype.hasOwnProperty.call(clone, columnKey) && Number.isInteger(clone[columnKey])) {
+                clone[columnKey] = this.clampColumnToLine(clone[columnKey], lineNumber, lines);
+              }
+            });
+
+          return clone;
+        },
+        sanitizeEditorViewState: function (viewState, value) {
+          if (!viewState || typeof viewState !== "object") {
+            return null;
+          }
+
+          return this.sanitizeViewStateValue(viewState, this.getLinesFromValue(value));
+        },
         scheduleLayoutRefresh: function () {
           if (this.layoutRefreshHandle) {
             return;
@@ -628,9 +711,7 @@ public partial class MonacoEditorSurface : ContentView
           });
         },
         scheduleRenderStabilization: function (position) {
-          if (position && Number.isInteger(position.lineNumber) && Number.isInteger(position.column)) {
-            this.pendingRenderStabilizationPosition = position;
-          }
+          this.pendingRenderStabilizationPosition = position ? this.sanitizeEditorPosition(position) : null;
 
           if (this.renderStabilizationHandle) {
             return;
@@ -646,8 +727,8 @@ public partial class MonacoEditorSurface : ContentView
               this.editor.render(true);
             }
 
-            if (this.isAndroid && this.pendingRenderStabilizationPosition) {
-              const target = this.pendingRenderStabilizationPosition;
+            const target = this.sanitizeEditorPosition(this.pendingRenderStabilizationPosition);
+            if (this.isAndroid && target) {
               if (typeof this.editor.revealPositionInCenterIfOutsideViewport === "function") {
                 this.editor.revealPositionInCenterIfOutsideViewport(target);
               } else if (typeof this.editor.revealPositionInCenter === "function") {
@@ -956,6 +1037,46 @@ public partial class MonacoEditorSurface : ContentView
           this.scheduleTextSyncNotification();
           return true;
         },
+        pasteTextFromHost: function (base64ClipboardText) {
+          if (this.pendingReadOnly || !this.editor || !this.model || typeof base64ClipboardText !== "string") {
+            return false;
+          }
+
+          this.editor.focus();
+          const clipboardText = decodeBase64Utf8(base64ClipboardText);
+          if (clipboardText.length === 0) {
+            return false;
+          }
+
+          if (window.monaco && this.handleInlineAiPromptClipboardPaste(clipboardText, window.monaco)) {
+            this.editor.focus();
+            return true;
+          }
+
+          const position = this.sanitizeEditorPosition(this.editor.getPosition());
+          const selection = this.editor.getSelection() || (position
+            ? {
+                startLineNumber: position.lineNumber,
+                startColumn: position.column,
+                endLineNumber: position.lineNumber,
+                endColumn: position.column
+              }
+            : null);
+          if (!selection) {
+            return false;
+          }
+
+          this.editor.setSelection(selection);
+          this.editor.executeEdits("forrest-host-paste", [
+            {
+              range: selection,
+              text: clipboardText,
+              forceMoveMarkers: true
+            }
+          ]);
+          this.editor.focus();
+          return true;
+        },
         normalizeInlineAiPromptPaste: function (event) {
           if (!this.editor || !this.model || !event || !Array.isArray(event.changes) || !window.monaco) {
             return false;
@@ -1123,6 +1244,7 @@ public partial class MonacoEditorSurface : ContentView
             letterSpacing: 0.1,
             wordWrap: "on",
             wordBasedSuggestions: "off",
+            contextmenu: !this.isAndroid,
             smoothScrolling: true,
             renderLineHighlight: "line",
             renderWhitespace: "selection",
@@ -1300,7 +1422,7 @@ public partial class MonacoEditorSurface : ContentView
         },
         replaceEditorValue: function (value, restoreViewState) {
           const normalized = value ?? "";
-          const viewState = restoreViewState ? this.editor.saveViewState() : null;
+          const viewState = restoreViewState ? this.sanitizeEditorViewState(this.editor.saveViewState(), normalized) : null;
           this.isApplyingProtectedEdit = true;
           try {
             this.editor.setValue(normalized);
@@ -1309,12 +1431,16 @@ public partial class MonacoEditorSurface : ContentView
           }
 
           if (viewState) {
-            this.editor.restoreViewState(viewState);
+            try {
+              this.editor.restoreViewState(viewState);
+            } catch {
+            }
           }
 
+          const position = this.sanitizeEditorPosition(this.editor.getPosition());
           this.lastKnownValue = this.editor.getValue();
           this.refreshEditableDecorations();
-          this.scheduleRenderStabilization();
+          this.scheduleRenderStabilization(position);
         },
         parseEditableRanges: function (state) {
           if (Array.isArray(state?.editableRanges)) {
@@ -1836,7 +1962,9 @@ public partial class MonacoEditorSurface : ContentView
 	private bool _contentHydrated;
 	private bool _shouldApplyTextToEditor = true;
 #if ANDROID
+	private const int AndroidPasteMenuItemId = 1;
 	private Android.Webkit.WebView? _androidPlatformWebView;
+	private PopupMenu? _androidEditorContextMenu;
 #endif
 
 	public MonacoEditorSurface()
@@ -2581,6 +2709,33 @@ public partial class MonacoEditorSurface : ContentView
 		}
 	}
 
+#if ANDROID
+	private async Task<bool> PasteTextFromAndroidContextMenuAsync(string? clipboardText)
+	{
+		if (_pendingIsReadOnly || string.IsNullOrEmpty(clipboardText))
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Paste request skipped because the editor is read-only or the clipboard is empty.");
+			return false;
+		}
+
+		await EnsureEditorReadyAsync();
+		if (!_isEditorReady)
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Paste request skipped because the editor is not ready.");
+			return false;
+		}
+
+		string payloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(clipboardText));
+		string script =
+			$"window.forRestHost ? (window.forRestHost.pasteTextFromHost({JsonSerializer.Serialize(payloadBase64)}) ? 'true' : 'false') : 'false';";
+		string? result = await EvaluateOptionalAsync(script);
+		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		bool pasted = result?.Contains("true", StringComparison.OrdinalIgnoreCase) == true;
+		Debug.WriteLine($"[MonacoEditorSurface/Android] Paste menu command completed. Pasted={pasted} ClipboardLength={clipboardText.Length}");
+		return pasted;
+	}
+#endif
+
 	private async Task EnsureTextAppliedAsync(EditorStatePayload state)
 	{
 		if (string.IsNullOrEmpty(state.Text))
@@ -2638,6 +2793,7 @@ public partial class MonacoEditorSurface : ContentView
 		_androidPlatformWebView.FocusableInTouchMode = true;
 		_androidPlatformWebView.Clickable = true;
 		_androidPlatformWebView.LongClickable = true;
+		_androidPlatformWebView.ContextClickable = true;
 		WebSettings? settings = _androidPlatformWebView.Settings;
 		if (settings is not null)
 		{
@@ -2649,6 +2805,8 @@ public partial class MonacoEditorSurface : ContentView
 			settings.SetSupportZoom(false);
 		}
 
+		_androidPlatformWebView.LongClick += OnAndroidWebViewLongClick;
+		_androidPlatformWebView.ContextClick += OnAndroidWebViewContextClick;
 		_androidPlatformWebView.Touch += OnAndroidWebViewTouch;
 	}
 
@@ -2659,8 +2817,122 @@ public partial class MonacoEditorSurface : ContentView
 			return;
 		}
 
+		DismissAndroidEditorContextMenu();
+		_androidPlatformWebView.LongClick -= OnAndroidWebViewLongClick;
+		_androidPlatformWebView.ContextClick -= OnAndroidWebViewContextClick;
 		_androidPlatformWebView.Touch -= OnAndroidWebViewTouch;
 		_androidPlatformWebView = null;
+	}
+
+	private async void OnAndroidWebViewLongClick(object? sender, Android.Views.View.LongClickEventArgs e)
+	{
+		if (_pendingIsReadOnly)
+		{
+			e.Handled = false;
+			return;
+		}
+
+		e.Handled = true;
+		Debug.WriteLine("[MonacoEditorSurface/Android] WebView long-press detected. Showing native editor context menu.");
+		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await ShowAndroidEditorContextMenuAsync();
+	}
+
+	private async void OnAndroidWebViewContextClick(object? sender, Android.Views.View.ContextClickEventArgs e)
+	{
+		if (_pendingIsReadOnly)
+		{
+			e.Handled = false;
+			return;
+		}
+
+		e.Handled = true;
+		Debug.WriteLine("[MonacoEditorSurface/Android] WebView context-click detected. Showing native editor context menu.");
+		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await ShowAndroidEditorContextMenuAsync();
+	}
+
+	private async Task ShowAndroidEditorContextMenuAsync()
+	{
+		if (_pendingIsReadOnly || _androidPlatformWebView is null)
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Context menu request skipped because the editor is read-only or the platform WebView is unavailable.");
+			return;
+		}
+
+		string? clipboardText = null;
+		try
+		{
+			clipboardText = await Clipboard.Default.GetTextAsync();
+		}
+		catch
+		{
+		}
+
+		Debug.WriteLine(
+			$"[MonacoEditorSurface/Android] Showing native editor context menu. ClipboardHasText={!string.IsNullOrEmpty(clipboardText)} ClipboardLength={clipboardText?.Length ?? 0}");
+
+		await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(() =>
+		{
+			if (_androidPlatformWebView is null)
+			{
+				return;
+			}
+
+			DismissAndroidEditorContextMenu();
+			PopupMenu popupMenu = new(_androidPlatformWebView.Context, _androidPlatformWebView, GravityFlags.Start);
+			IMenuItem? pasteMenuItem = popupMenu.Menu?.Add(0, AndroidPasteMenuItemId, 0, "Paste");
+			pasteMenuItem?.SetEnabled(!string.IsNullOrEmpty(clipboardText));
+
+			EventHandler<PopupMenu.MenuItemClickEventArgs>? menuItemClickHandler = null;
+			EventHandler<PopupMenu.DismissEventArgs>? dismissHandler = null;
+			menuItemClickHandler = async (_, args) =>
+			{
+				if (args.Item?.ItemId != AndroidPasteMenuItemId)
+				{
+					return;
+				}
+
+				args.Handled = true;
+				await PasteTextFromAndroidContextMenuAsync(clipboardText);
+				popupMenu.Dismiss();
+			};
+			dismissHandler = (_, _) =>
+			{
+				popupMenu.MenuItemClick -= menuItemClickHandler;
+				popupMenu.DismissEvent -= dismissHandler;
+				if (ReferenceEquals(_androidEditorContextMenu, popupMenu))
+				{
+					_androidEditorContextMenu = null;
+				}
+
+				popupMenu.Dispose();
+			};
+
+			popupMenu.MenuItemClick += menuItemClickHandler;
+			popupMenu.DismissEvent += dismissHandler;
+			_androidEditorContextMenu = popupMenu;
+			popupMenu.Show();
+		});
+	}
+
+	private void DismissAndroidEditorContextMenu()
+	{
+		if (_androidEditorContextMenu is null)
+		{
+			return;
+		}
+
+		PopupMenu popupMenu = _androidEditorContextMenu;
+		_androidEditorContextMenu = null;
+		try
+		{
+			popupMenu.Dismiss();
+		}
+		catch
+		{
+			popupMenu.Dispose();
+		}
 	}
 
 	private void OnAndroidWebViewTouch(object? sender, Android.Views.View.TouchEventArgs e)

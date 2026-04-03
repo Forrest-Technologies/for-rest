@@ -20,9 +20,11 @@ public sealed class MonacoEditorSurfaceHtmlTests
 	{
 		string html = GetMonacoHostHtml();
 
+		StringAssert.Contains(html, "sanitizeEditorPosition: function (position) {");
+		StringAssert.Contains(html, "this.pendingRenderStabilizationPosition = position ? this.sanitizeEditorPosition(position) : null;");
+		StringAssert.Contains(html, "const target = this.sanitizeEditorPosition(this.pendingRenderStabilizationPosition);");
 		StringAssert.Contains(html, "scheduleRenderStabilization: function (position) {");
 		StringAssert.Contains(html, "this.editor.render(true);");
-		StringAssert.Contains(html, "this.scheduleRenderStabilization();");
 		StringAssert.Contains(html, "this.scheduleRenderStabilization(position);");
 	}
 
@@ -34,6 +36,52 @@ public sealed class MonacoEditorSurfaceHtmlTests
 		StringAssert.Contains(html, "hasPendingCursorRequest: function () {");
 		StringAssert.Contains(html, "const shouldRestoreViewState = !this.hasPendingCursorRequest();");
 		StringAssert.Contains(html, "this.replaceEditorValue(normalized, shouldRestoreViewState);");
+	}
+
+	[TestMethod]
+	public void MonacoHostHtml_sanitizes_saved_view_state_before_replacing_editor_text()
+	{
+		string html = GetMonacoHostHtml();
+
+		StringAssert.Contains(html, "sanitizeViewStateValue: function (value, lines) {");
+		StringAssert.Contains(html, "sanitizeEditorViewState: function (viewState, value) {");
+		StringAssert.Contains(html, "const viewState = restoreViewState ? this.sanitizeEditorViewState(this.editor.saveViewState(), normalized) : null;");
+		StringAssert.Contains(html, "this.editor.restoreViewState(viewState);");
+	}
+
+	[TestMethod]
+	public void MonacoHostHtml_uses_direct_worker_script_on_android()
+	{
+		string html = GetMonacoHostHtml();
+
+		StringAssert.Contains(html, "const directWorkerUrl = `${baseUrl}/vs/base/worker/workerMain.js`;");
+		StringAssert.Contains(html, "const isAndroidUserAgent = /Android/i.test(navigator.userAgent || \"\");");
+		StringAssert.Contains(html, "baseUrl: monacoBaseUrl,");
+		StringAssert.Contains(html, "if (isAndroidUserAgent) {");
+		StringAssert.Contains(html, "return directWorkerUrl;");
+	}
+
+	[TestMethod]
+	public void MonacoHostHtml_allows_native_android_context_menu_to_handle_paste()
+	{
+		string html = GetMonacoHostHtml();
+
+		StringAssert.Contains(html, "contextmenu: !this.isAndroid,");
+	}
+
+	[TestMethod]
+	public void MonacoHostHtml_accepts_host_driven_paste_for_android_clipboard_menu()
+	{
+		string html = GetMonacoHostHtml();
+
+		StringAssert.Contains(html, "pasteTextFromHost: function (base64ClipboardText) {");
+		StringAssert.Contains(html, "this.editor.focus();");
+		StringAssert.Contains(html, "const clipboardText = decodeBase64Utf8(base64ClipboardText);");
+		StringAssert.Contains(html, "this.handleInlineAiPromptClipboardPaste(clipboardText, window.monaco)");
+		StringAssert.Contains(html, "const position = this.sanitizeEditorPosition(this.editor.getPosition());");
+		StringAssert.Contains(html, "const selection = this.editor.getSelection() || (position");
+		StringAssert.Contains(html, "this.editor.setSelection(selection);");
+		StringAssert.Contains(html, "this.editor.executeEdits(\"forrest-host-paste\", [");
 	}
 
 	[TestMethod]
