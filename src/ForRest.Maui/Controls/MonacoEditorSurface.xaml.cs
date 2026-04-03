@@ -2662,6 +2662,21 @@ public partial class MonacoEditorSurface : ContentView
 		return SyncEditorTextAsync();
 	}
 
+	public async Task<bool> PasteFromClipboardAsync()
+	{
+		string? clipboardText = null;
+		try
+		{
+			clipboardText = await Clipboard.Default.GetTextAsync();
+		}
+		catch (Exception exception)
+		{
+			Debug.WriteLine($"[MonacoEditorSurface] Failed to read clipboard text for toolbar paste.{Environment.NewLine}{exception}");
+		}
+
+		return await PasteTextFromHostAsync(clipboardText, "toolbar");
+	}
+
 	public async Task MoveCursorToAsync(int lineNumber, int column)
 	{
 		await EnsureEditorReadyAsync();
@@ -2709,19 +2724,18 @@ public partial class MonacoEditorSurface : ContentView
 		}
 	}
 
-#if ANDROID
-	private async Task<bool> PasteTextFromAndroidContextMenuAsync(string? clipboardText)
+	private async Task<bool> PasteTextFromHostAsync(string? clipboardText, string origin)
 	{
 		if (_pendingIsReadOnly || string.IsNullOrEmpty(clipboardText))
 		{
-			Debug.WriteLine("[MonacoEditorSurface/Android] Paste request skipped because the editor is read-only or the clipboard is empty.");
+			Debug.WriteLine($"[MonacoEditorSurface] Paste request skipped. Origin={origin} ReadOnly={_pendingIsReadOnly} ClipboardLength={clipboardText?.Length ?? 0}");
 			return false;
 		}
 
 		await EnsureEditorReadyAsync();
 		if (!_isEditorReady)
 		{
-			Debug.WriteLine("[MonacoEditorSurface/Android] Paste request skipped because the editor is not ready.");
+			Debug.WriteLine($"[MonacoEditorSurface] Paste request skipped because the editor is not ready. Origin={origin}");
 			return false;
 		}
 
@@ -2729,10 +2743,20 @@ public partial class MonacoEditorSurface : ContentView
 		string script =
 			$"window.forRestHost ? (window.forRestHost.pasteTextFromHost({JsonSerializer.Serialize(payloadBase64)}) ? 'true' : 'false') : 'false';";
 		string? result = await EvaluateOptionalAsync(script);
+#if ANDROID
 		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+#else
+		await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
+#endif
 		bool pasted = result?.Contains("true", StringComparison.OrdinalIgnoreCase) == true;
-		Debug.WriteLine($"[MonacoEditorSurface/Android] Paste menu command completed. Pasted={pasted} ClipboardLength={clipboardText.Length}");
+		Debug.WriteLine($"[MonacoEditorSurface] Paste request completed. Origin={origin} Pasted={pasted} ClipboardLength={clipboardText.Length}");
 		return pasted;
+	}
+
+#if ANDROID
+	private Task<bool> PasteTextFromAndroidContextMenuAsync(string? clipboardText)
+	{
+		return PasteTextFromHostAsync(clipboardText, "android-context-menu");
 	}
 #endif
 

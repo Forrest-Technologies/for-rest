@@ -39,7 +39,8 @@
                     </ScrollView>
                 </Border>
 
-                <Editor Grid.Column="1"
+                <Editor x:Name="TextEditor"
+                        Grid.Column="1"
                         Text="{Binding Text, Source={x:Reference Root}, Mode=TwoWay}"
                         IsReadOnly="{Binding IsReadOnly, Source={x:Reference Root}}"
                         FontSize="{Binding EditorFontSize, Source={x:Reference Root}}"

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Linq;
+using Microsoft.Maui.ApplicationModel.DataTransfer;
 
 namespace ForRest.Maui.Controls;
 
@@ -109,6 +110,41 @@ public partial class EditorSurface : ContentView
 	{
 		get => (bool)GetValue(ShowFooterProperty);
 		set => SetValue(ShowFooterProperty, value);
+	}
+
+	public async Task<bool> PasteFromClipboardAsync()
+	{
+		if (IsReadOnly)
+		{
+			return false;
+		}
+
+		string? clipboardText = null;
+		try
+		{
+			clipboardText = await Clipboard.Default.GetTextAsync();
+		}
+		catch
+		{
+			return false;
+		}
+
+		if (string.IsNullOrEmpty(clipboardText))
+		{
+			return false;
+		}
+
+		string currentText = Text ?? string.Empty;
+		int cursorPosition = Math.Clamp(TextEditor.CursorPosition, 0, currentText.Length);
+		int selectionLength = Math.Clamp(TextEditor.SelectionLength, 0, currentText.Length - cursorPosition);
+		string nextText = currentText.Remove(cursorPosition, selectionLength).Insert(cursorPosition, clipboardText);
+		Text = nextText;
+
+		int nextCursorPosition = Math.Clamp(cursorPosition + clipboardText.Length, 0, nextText.Length);
+		TextEditor.Focus();
+		TextEditor.CursorPosition = nextCursorPosition;
+		TextEditor.SelectionLength = 0;
+		return true;
 	}
 
 	private static void OnTextChanged(BindableObject bindable, object? oldValue, object? newValue)

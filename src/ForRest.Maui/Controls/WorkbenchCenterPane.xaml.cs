@@ -83,6 +83,11 @@ public partial class WorkbenchCenterPane : ContentView
 		await ViewModel.CopyActiveEditorAsync();
 	}
 
+	private async void OnPasteClicked(object? sender, EventArgs e)
+	{
+		await PasteActiveDocumentAsync();
+	}
+
 	private async void OnUndoClicked(object? sender, EventArgs e)
 	{
 		await UndoActiveDocumentAsync();
@@ -209,6 +214,19 @@ public partial class WorkbenchCenterPane : ContentView
 	{
 		await FlushActiveEditorAsync();
 		ViewModel.Redo();
+	}
+
+	public async Task PasteActiveDocumentAsync()
+	{
+		switch (EditorHost.Content)
+		{
+			case MonacoEditorSurface monacoEditor:
+				await monacoEditor.PasteFromClipboardAsync();
+				break;
+			case EditorSurface editorSurface:
+				await editorSurface.PasteFromClipboardAsync();
+				break;
+		}
 	}
 
 	private async Task ApplyPendingCursorRequestAsync()

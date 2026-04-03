@@ -61,6 +61,17 @@ public sealed class MonacoEditorSurfaceSourceTests
 		StringAssert.Contains(source, "PasteTextFromAndroidContextMenuAsync");
 	}
 
+	[TestMethod]
+	public void MonacoEditorSurface_exposes_toolbar_clipboard_paste_through_host_bridge()
+	{
+		string source = GetNormalizedMonacoEditorSurfaceSource();
+
+		StringAssert.Contains(source, "public async Task<bool> PasteFromClipboardAsync()");
+		StringAssert.Contains(source, "return await PasteTextFromHostAsync(clipboardText, \"toolbar\");");
+		StringAssert.Contains(source, "private async Task<bool> PasteTextFromHostAsync(string? clipboardText, string origin)");
+		StringAssert.Contains(source, "window.forRestHost ? (window.forRestHost.pasteTextFromHost(");
+	}
+
 	private static string GetMethodBody(string source, string signaturePrefix, string methodName)
 	{
 		Match match = Regex.Match(

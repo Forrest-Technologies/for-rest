@@ -9,7 +9,7 @@
             Stroke="{DynamicResource ThemeDividerColor}">
         <Grid RowDefinitions="Auto,Auto,*">
             <Grid Padding="8,4,8,2"
-                  ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto"
+                  ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="6">
                 <Label Text="{Binding ActiveDocumentKindLabel}"
                        VerticalTextAlignment="Start"
@@ -42,6 +42,12 @@
                         SemanticProperties.Description="Redo the latest undone change in the current document" />
 
                 <Button Grid.Column="5"
+                        Text="Paste"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnPasteClicked"
+                        SemanticProperties.Description="Paste clipboard text into the current document" />
+
+                <Button Grid.Column="6"
                         Text="Copy"
                         Style="{StaticResource DenseTabButtonStyle}"
                         Clicked="OnCopyClicked"
