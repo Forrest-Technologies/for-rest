@@ -1254,6 +1254,41 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public void ActiveRequestDocumentHost_applies_successful_replacements_to_the_live_request_editor()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			executionService: new CompilerOnlyExecutionService(),
+			scriptEngine: new FakeScriptEngine());
+		viewModel.ActiveEditorText =
+			"""
+			name "Demo"
+			method GET
+			url "https://example.test/original"
+			""";
+
+		IAiActiveDocumentHost host = CreateActiveRequestDocumentHost(viewModel, viewModel.ActiveEditorText);
+		AiActiveDocumentSnapshot document = host.GetActiveDocument()!;
+
+		AiActiveDocumentUpdateResult result = host.UpdateActiveDocument(
+			document,
+			"""
+			name "Updated Demo"
+			method POST
+			url "https://example.test/updated"
+			header "Accept" = "application/json"
+			""");
+
+		Assert.IsTrue(result.Succeeded, result.Message);
+		Assert.AreEqual(result.UpdatedText, viewModel.RequestEditorText);
+		Assert.AreEqual(result.UpdatedText, viewModel.ActiveEditorText);
+		Assert.AreEqual("Updated Demo", viewModel.RequestName);
+		Assert.AreEqual("POST", viewModel.SelectedMethod);
+		Assert.AreEqual("https://example.test/updated", viewModel.RequestTarget);
+		StringAssert.Contains(viewModel.RequestLocation, "/updated-demo");
+	}
+
+	[TestMethod]
 	public void ActiveRequestDocumentHost_reuses_compilation_results_for_rejected_script_validation_updates()
 	{
 		using TestHarness harness = new();

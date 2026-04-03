@@ -5511,14 +5511,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 			try
 			{
-				if (MainThread.IsMainThread)
-				{
-					apply();
-				}
-				else
-				{
-					MainThread.InvokeOnMainThreadAsync(apply).GetAwaiter().GetResult();
-				}
+				MainPageViewModel.InvokeOnViewModelThreadAsync(apply).GetAwaiter().GetResult();
 			}
 			catch (Exception exception)
 			{

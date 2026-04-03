@@ -2615,7 +2615,10 @@ public partial class MonacoEditorSurface : ContentView
 
 	private async Task SyncEditorTextAsync()
 	{
-		if (!_isEditorReady || !_initialStateApplied || _isPushingEditorText || _isPullingEditorText)
+		// Let host-driven replacements finish hydrating before we pull text back out of Monaco.
+		// Otherwise the timer/text-sync path can race, read the old editor value, and overwrite
+		// the pending replacement before ApplyEditorStateAsync runs.
+		if (!_isEditorReady || !_initialStateApplied || _isPushingEditorText || _isPullingEditorText || _shouldApplyTextToEditor)
 		{
 			return;
 		}

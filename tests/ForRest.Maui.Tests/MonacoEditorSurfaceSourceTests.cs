@@ -48,6 +48,15 @@ public sealed class MonacoEditorSurfaceSourceTests
 	}
 
 	[TestMethod]
+	public void MonacoEditorSurface_skips_pull_sync_while_host_text_apply_is_pending()
+	{
+		string source = GetNormalizedMonacoEditorSurfaceSource();
+		string syncEditorTextBody = GetMethodBody(source, "private async Task", "SyncEditorTextAsync");
+
+		StringAssert.Contains(syncEditorTextBody, "_shouldApplyTextToEditor");
+	}
+
+	[TestMethod]
 	public void MonacoEditorSurface_android_webview_registers_native_paste_menu_hooks()
 	{
 		string source = GetNormalizedMonacoEditorSurfaceSource();
