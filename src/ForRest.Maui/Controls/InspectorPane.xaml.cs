@@ -17,6 +17,7 @@ public partial class InspectorPane : ContentView
 	private const double ResponseSnapshotCardSpacing = 8d;
 #if WINDOWS
 	private NativeScrollViewer? _responseSnapshotRailNativeView;
+	private NativeScrollViewer? _requestSnapshotRailNativeView;
 #endif
 
 	public InspectorPane()
@@ -25,10 +26,14 @@ public partial class InspectorPane : ContentView
 		Loaded += (_, _) =>
 		{
 			EnsureResponseBodyViewer();
+			EnsureRequestBodyViewer();
 			EnsureResponseSnapshotRailInteraction();
+			EnsureRequestSnapshotRailInteraction();
 			QueueScrollSelectedResponseSnapshotIntoView(animated: false);
+			QueueScrollSelectedRequestSnapshotIntoView(animated: false);
 		};
 		ResponseSnapshotRail.HandlerChanged += (_, _) => EnsureResponseSnapshotRailInteraction();
+		RequestSnapshotRail.HandlerChanged += (_, _) => EnsureRequestSnapshotRailInteraction();
 	}
 
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
@@ -50,8 +55,11 @@ public partial class InspectorPane : ContentView
 		}
 
 		EnsureResponseBodyViewer();
+		EnsureRequestBodyViewer();
 		EnsureResponseSnapshotRailInteraction();
+		EnsureRequestSnapshotRailInteraction();
 		QueueScrollSelectedResponseSnapshotIntoView(animated: false);
+		QueueScrollSelectedRequestSnapshotIntoView(animated: false);
 	}
 
 	private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -63,11 +71,25 @@ public partial class InspectorPane : ContentView
 		}
 
 		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorRequestVisible), StringComparison.Ordinal))
+		{
+			EnsureRequestBodyViewer();
+		}
+
+		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
 		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorResponseVisible), StringComparison.Ordinal) ||
 		    string.Equals(e.PropertyName, nameof(MainPageViewModel.ShowResponseSnapshotSelector), StringComparison.Ordinal) ||
 		    string.Equals(e.PropertyName, nameof(MainPageViewModel.SelectedResponseSnapshotEntry), StringComparison.Ordinal))
 		{
 			QueueScrollSelectedResponseSnapshotIntoView(animated: false);
+		}
+
+		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorRequestVisible), StringComparison.Ordinal) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.ShowRequestSnapshotSelector), StringComparison.Ordinal) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.SelectedRequestSnapshotEntry), StringComparison.Ordinal))
+		{
+			QueueScrollSelectedRequestSnapshotIntoView(animated: false);
 		}
 	}
 
@@ -82,6 +104,7 @@ public partial class InspectorPane : ContentView
 		{
 			ViewModel.SelectRightPaneTab(tab);
 			EnsureResponseBodyViewer();
+			EnsureRequestBodyViewer();
 		}
 	}
 
@@ -93,6 +116,11 @@ public partial class InspectorPane : ContentView
 	private async void OnCopyResponseClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyResponseBodyAsync();
+	}
+
+	private async void OnCopyRequestClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyRequestBodyAsync();
 	}
 
 	private void OnPreviousResponseSnapshotClicked(object? sender, EventArgs e)
@@ -113,6 +141,24 @@ public partial class InspectorPane : ContentView
 		}
 	}
 
+	private void OnPreviousRequestSnapshotClicked(object? sender, EventArgs e)
+	{
+		if (ViewModel.SelectPreviousRequestSnapshot())
+		{
+			FocusRequestSnapshotRail();
+			QueueScrollSelectedRequestSnapshotIntoView(animated: true);
+		}
+	}
+
+	private void OnNextRequestSnapshotClicked(object? sender, EventArgs e)
+	{
+		if (ViewModel.SelectNextRequestSnapshot())
+		{
+			FocusRequestSnapshotRail();
+			QueueScrollSelectedRequestSnapshotIntoView(animated: true);
+		}
+	}
+
 	private void OnResponseSnapshotTapped(object? sender, TappedEventArgs e)
 	{
 		if (sender is Border { BindingContext: ResponseSnapshotEntryViewModel entry })
@@ -123,9 +169,24 @@ public partial class InspectorPane : ContentView
 		}
 	}
 
+	private void OnRequestSnapshotTapped(object? sender, TappedEventArgs e)
+	{
+		if (sender is Border { BindingContext: RequestSnapshotEntryViewModel entry })
+		{
+			ViewModel.SelectedRequestSnapshotEntry = entry;
+			FocusRequestSnapshotRail();
+			QueueScrollSelectedRequestSnapshotIntoView(animated: true);
+		}
+	}
+
 	private async void OnCopyRawResponseClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyRawResponseAsync();
+	}
+
+	private async void OnCopyRawRequestClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyRawRequestAsync();
 	}
 
 	private async void OnCopyStashClicked(object? sender, EventArgs e)
@@ -175,6 +236,18 @@ public partial class InspectorPane : ContentView
 			: BuildNativeResponseViewer();
 	}
 
+	private void EnsureRequestBodyViewer()
+	{
+		if (RequestBodyViewerHost.Content is not null || !IsVisible || !ViewModel.IsInspectorRequestVisible)
+		{
+			return;
+		}
+
+		RequestBodyViewerHost.Content = PlatformExperience.UseWebCodeEditors() && !AppLaunchGuard.IsSafeModeEnabled
+			? BuildMonacoRequestViewer()
+			: BuildNativeRequestViewer();
+	}
+
 	protected override void OnPropertyChanged(string? propertyName = null)
 	{
 		base.OnPropertyChanged(propertyName);
@@ -182,8 +255,11 @@ public partial class InspectorPane : ContentView
 		if (string.Equals(propertyName, nameof(IsVisible), StringComparison.Ordinal) && IsVisible)
 		{
 			EnsureResponseBodyViewer();
+			EnsureRequestBodyViewer();
 			EnsureResponseSnapshotRailInteraction();
+			EnsureRequestSnapshotRailInteraction();
 			QueueScrollSelectedResponseSnapshotIntoView(animated: false);
+			QueueScrollSelectedRequestSnapshotIntoView(animated: false);
 		}
 	}
 
@@ -212,6 +288,31 @@ public partial class InspectorPane : ContentView
 #endif
 	}
 
+	private void EnsureRequestSnapshotRailInteraction()
+	{
+#if WINDOWS
+		NativeScrollViewer? platformView = RequestSnapshotRail.Handler?.PlatformView as NativeScrollViewer;
+		if (ReferenceEquals(_requestSnapshotRailNativeView, platformView))
+		{
+			return;
+		}
+
+		if (_requestSnapshotRailNativeView is not null)
+		{
+			_requestSnapshotRailNativeView.PointerWheelChanged -= OnRequestSnapshotRailPointerWheelChanged;
+			_requestSnapshotRailNativeView.KeyDown -= OnRequestSnapshotRailKeyDown;
+		}
+
+		_requestSnapshotRailNativeView = platformView;
+		if (_requestSnapshotRailNativeView is not null)
+		{
+			_requestSnapshotRailNativeView.IsTabStop = true;
+			_requestSnapshotRailNativeView.PointerWheelChanged += OnRequestSnapshotRailPointerWheelChanged;
+			_requestSnapshotRailNativeView.KeyDown += OnRequestSnapshotRailKeyDown;
+		}
+#endif
+	}
+
 	private void FocusResponseSnapshotRail()
 	{
 #if WINDOWS
@@ -222,6 +323,18 @@ public partial class InspectorPane : ContentView
 		}
 #endif
 		ResponseSnapshotRail.Focus();
+	}
+
+	private void FocusRequestSnapshotRail()
+	{
+#if WINDOWS
+		if (_requestSnapshotRailNativeView is not null)
+		{
+			_requestSnapshotRailNativeView.Focus(FocusState.Programmatic);
+			return;
+		}
+#endif
+		RequestSnapshotRail.Focus();
 	}
 
 	private void QueueScrollSelectedResponseSnapshotIntoView(bool animated)
@@ -238,6 +351,22 @@ public partial class InspectorPane : ContentView
 		}
 
 		_ = ScrollSelectedResponseSnapshotIntoViewAsync(animated);
+	}
+
+	private void QueueScrollSelectedRequestSnapshotIntoView(bool animated)
+	{
+		if (!IsVisible || !ViewModel.ShowRequestSnapshotSelector || ViewModel.SelectedRequestSnapshotEntry is null)
+		{
+			return;
+		}
+
+		if (Dispatcher?.IsDispatchRequired == true)
+		{
+			Dispatcher.Dispatch(() => _ = ScrollSelectedRequestSnapshotIntoViewAsync(animated));
+			return;
+		}
+
+		_ = ScrollSelectedRequestSnapshotIntoViewAsync(animated);
 	}
 
 	private async Task ScrollSelectedResponseSnapshotIntoViewAsync(bool animated)
@@ -258,6 +387,26 @@ public partial class InspectorPane : ContentView
 
 		double targetOffset = Math.Max(0d, (selectedIndex * (ResponseSnapshotCardWidth + ResponseSnapshotCardSpacing)) - ResponseSnapshotCardSpacing);
 		await ResponseSnapshotRail.ScrollToAsync(targetOffset, 0d, animated);
+	}
+
+	private async Task ScrollSelectedRequestSnapshotIntoViewAsync(bool animated)
+	{
+		if (ViewModel.SelectedRequestSnapshotEntry is not { } selectedEntry ||
+		    !ViewModel.ShowRequestSnapshotSelector ||
+		    RequestSnapshotRail.Width <= 0d)
+		{
+			return;
+		}
+
+		await Task.Yield();
+		int selectedIndex = ViewModel.RequestSnapshotEntries.IndexOf(selectedEntry);
+		if (selectedIndex < 0)
+		{
+			return;
+		}
+
+		double targetOffset = Math.Max(0d, (selectedIndex * (ResponseSnapshotCardWidth + ResponseSnapshotCardSpacing)) - ResponseSnapshotCardSpacing);
+		await RequestSnapshotRail.ScrollToAsync(targetOffset, 0d, animated);
 	}
 
 	private View BuildMonacoResponseViewer()
@@ -284,6 +433,31 @@ public partial class InspectorPane : ContentView
 			ShowFooter = false
 		};
 		viewer.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.ResponseBodyText));
+		return viewer;
+	}
+
+	private View BuildMonacoRequestViewer()
+	{
+		MonacoEditorSurface viewer = new()
+		{
+			Language = "json",
+			IsReadOnly = true,
+		};
+		viewer.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		viewer.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.RequestBodyText));
+		return viewer;
+	}
+
+	private View BuildNativeRequestViewer()
+	{
+		EditorSurface viewer = new()
+		{
+			Language = "json",
+			IsReadOnly = true,
+			ShowHeader = false,
+			ShowFooter = false
+		};
+		viewer.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.RequestBodyText));
 		return viewer;
 	}
 
@@ -315,6 +489,58 @@ public partial class InspectorPane : ContentView
 	{
 		if (sender is not NativeScrollViewer platformView ||
 		    !ViewModel.ShowResponseSnapshotSelector ||
+		    platformView.ScrollableWidth <= 0d)
+		{
+			return;
+		}
+
+		int wheelDelta = e.GetCurrentPoint(platformView).Properties.MouseWheelDelta;
+		if (wheelDelta == 0)
+		{
+			return;
+		}
+
+		double step = Math.Max(ResponseSnapshotCardWidth + ResponseSnapshotCardSpacing, platformView.ViewportWidth * 0.72d);
+		double targetOffset = Math.Clamp(
+			platformView.HorizontalOffset - (Math.Sign(wheelDelta) * step),
+			0d,
+			platformView.ScrollableWidth);
+		if (Math.Abs(targetOffset - platformView.HorizontalOffset) < 0.5d)
+		{
+			return;
+		}
+
+		platformView.ChangeView(targetOffset, null, null, true);
+		e.Handled = true;
+	}
+
+	private void OnRequestSnapshotRailKeyDown(object sender, KeyRoutedEventArgs e)
+	{
+		if (!ViewModel.ShowRequestSnapshotSelector)
+		{
+			return;
+		}
+
+		bool handled = e.Key switch
+		{
+			VirtualKey.Left => ViewModel.SelectPreviousRequestSnapshot(),
+			VirtualKey.Right => ViewModel.SelectNextRequestSnapshot(),
+			_ => false,
+		};
+
+		if (!handled)
+		{
+			return;
+		}
+
+		QueueScrollSelectedRequestSnapshotIntoView(animated: true);
+		e.Handled = true;
+	}
+
+	private void OnRequestSnapshotRailPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+	{
+		if (sender is not NativeScrollViewer platformView ||
+		    !ViewModel.ShowRequestSnapshotSelector ||
 		    platformView.ScrollableWidth <= 0d)
 		{
 			return;

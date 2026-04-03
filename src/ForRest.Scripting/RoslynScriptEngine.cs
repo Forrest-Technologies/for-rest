@@ -175,6 +175,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 Response = originalRequest.Response,
                 SentResponse = requestApi?.LastSentResponse,
                 SentResponses = requestApi?.SentResponses is null ? [] : [.. requestApi.SentResponses],
+                SentRequests = requestApi?.SentRequests is null ? [] : [.. requestApi.SentRequests],
                 SendCount = requestApi?.SendCount ?? 0,
                 RuntimeVariables =
                 [
@@ -199,6 +200,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             Response = responseApi?.Snapshot ?? originalRequest.Response,
             SentResponse = requestApi.LastSentResponse,
             SentResponses = [.. requestApi.SentResponses],
+            SentRequests = [.. requestApi.SentRequests],
             SendCount = requestApi.SendCount,
             RuntimeVariables =
             [

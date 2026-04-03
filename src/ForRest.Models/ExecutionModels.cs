@@ -57,6 +57,25 @@ public sealed record ResponseSnapshot
     public DateTimeOffset ReceivedUtc { get; init; } = DateTimeOffset.UtcNow;
 }
 
+public sealed record RequestSnapshot
+{
+    public string Method { get; init; } = string.Empty;
+
+    public string Url { get; init; } = string.Empty;
+
+    public string ContentType { get; init; } = string.Empty;
+
+    public long SizeBytes { get; init; }
+
+    public string Body { get; init; } = string.Empty;
+
+    public string RawRequest { get; init; } = string.Empty;
+
+    public List<KeyValueDefinition> Headers { get; init; } = [];
+
+    public DateTimeOffset SentUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
 public sealed record ExecutionRun
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -85,6 +104,8 @@ public sealed record ExecutionRun
     public ResponseSnapshot? Response { get; init; }
 
     public List<ResponseSnapshot> Responses { get; init; } = [];
+
+    public List<RequestSnapshot> Requests { get; init; } = [];
 
     public List<TestResult> Tests { get; init; } = [];
 

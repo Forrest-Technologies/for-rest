@@ -174,6 +174,10 @@ public sealed class RequestExecutionService(
             [
                 .. preRequestResult.SentResponses,
             ];
+            List<RequestSnapshot> capturedRequests =
+            [
+                .. preRequestResult.SentRequests,
+            ];
             if (!string.IsNullOrWhiteSpace(preRequestResult.ErrorMessage))
             {
                 PreparedRequest failedRequest = lastSentPreparedRequest ?? preRequestResult.PreparedRequest ?? preparedRequest;
@@ -191,6 +195,7 @@ public sealed class RequestExecutionService(
                     RawRequest = failedRequest.RawRequest,
                     Response = preRequestResult.Response,
                     Responses = [.. capturedResponses],
+                    Requests = [.. capturedRequests],
                     ConsoleEntries = [.. preRequestResult.ConsoleEntries],
                     RuntimeVariables = [.. runtimeVariables],
                     Stash = runStash,
@@ -230,11 +235,12 @@ public sealed class RequestExecutionService(
                 {
                     using (httpResponse)
                     {
-                        responseSnapshot = await BuildResponseSnapshot(httpResponse, durationMilliseconds, iterationCancellationToken);
+                    responseSnapshot = await BuildResponseSnapshot(httpResponse, durationMilliseconds, iterationCancellationToken);
                     }
 
                     if (responseSnapshot is not null)
                     {
+                        capturedRequests.Add(PreparedRequestSnapshotBuilder.Build(preparedRequest));
                         capturedResponses.Add(responseSnapshot);
                     }
                 }
@@ -263,6 +269,7 @@ public sealed class RequestExecutionService(
 
             responseSnapshot = testScriptResult.SentResponse ?? responseSnapshot;
             capturedResponses.AddRange(testScriptResult.SentResponses);
+            capturedRequests.AddRange(testScriptResult.SentRequests);
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, testScriptResult.RuntimeVariables);
             var finalExtractedVariables = responseExtractionService.Extract(responseSnapshot, request.Extractions);
             runtimeVariables = MergeRuntimeVariables(runtimeVariables, finalExtractedVariables);
@@ -290,6 +297,7 @@ public sealed class RequestExecutionService(
                 RawRequest = executedRequest.RawRequest,
                 Response = responseSnapshot,
                 Responses = [.. capturedResponses],
+                Requests = [.. capturedRequests],
                 ConsoleEntries =
                 [
                     .. preRequestResult.ConsoleEntries,
@@ -392,6 +400,9 @@ public sealed class RequestExecutionService(
                 : nestedExecution.LatestResponse is null
                     ? []
                     : [nestedExecution.LatestResponse],
+            SentRequests = nestedExecution.Runs.LastOrDefault() is { } latestRequestRun && latestRequestRun.Requests.Count > 0
+                ? [.. latestRequestRun.Requests]
+                : [],
             RuntimeVariables = [.. nestedExecution.RuntimeVariables],
             Tests = [.. nestedExecution.Tests],
             ConsoleEntries = [.. nestedExecution.ConsoleEntries],

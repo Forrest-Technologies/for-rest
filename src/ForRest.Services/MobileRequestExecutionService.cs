@@ -120,6 +120,7 @@ public sealed class MobileRequestExecutionService(
 				RawRequest = preparedRequest.RawRequest,
 				Response = responseSnapshot,
 				Responses = responseSnapshot is null ? [] : [responseSnapshot],
+				Requests = responseSnapshot is null ? [] : [PreparedRequestSnapshotBuilder.Build(preparedRequest)],
 				ConsoleEntries = [.. iterationConsoleEntries],
 				RuntimeVariables = [.. runtimeVariables],
 			};

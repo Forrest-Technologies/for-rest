@@ -266,6 +266,40 @@ public sealed class ResponseSnapshotEntryViewModel(
 	}
 }
 
+public sealed class RequestSnapshotEntryViewModel(
+	RequestSnapshot snapshot,
+	int position,
+	string methodText,
+	string detailText,
+	Color accentColor,
+	bool isSelected = false) : ObservableObject
+{
+	private Color _accentColor = accentColor;
+	private bool _isSelected = isSelected;
+
+	public RequestSnapshot Snapshot { get; } = snapshot;
+
+	public int Position { get; } = position;
+
+	public string ChipText => $"Send {Position}";
+
+	public string MethodText { get; } = methodText;
+
+	public string DetailText { get; } = detailText;
+
+	public Color AccentColor
+	{
+		get => _accentColor;
+		set => SetProperty(ref _accentColor, value);
+	}
+
+	public bool IsSelected
+	{
+		get => _isSelected;
+		set => SetProperty(ref _isSelected, value);
+	}
+}
+
 public sealed class NameValueRowViewModel(string name, string value, string scope, bool isEnabled = true)
 {
 	public string Name { get; } = name;

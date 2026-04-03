@@ -725,6 +725,12 @@ public sealed class ForRestScriptExecutionServiceTests
             Assert.AreEqual("1", result.Execution.RuntimeVariables.Single(static item => item.Key == "first_attempt").Value);
             Assert.AreEqual("2", result.Execution.RuntimeVariables.Single(static item => item.Key == "second_attempt").Value);
             Assert.AreEqual($"http://127.0.0.1:{port}/probe?step=2", run.TargetUri);
+            Assert.HasCount(2, run.Requests);
+            Assert.AreEqual("GET", run.Requests[0].Method);
+            Assert.AreEqual($"http://127.0.0.1:{port}/probe?step=1", run.Requests[0].Url);
+            Assert.AreEqual($"http://127.0.0.1:{port}/probe?step=2", run.Requests[1].Url);
+            StringAssert.Contains(run.Requests[0].RawRequest, "/probe?step=1");
+            StringAssert.Contains(run.Requests[1].RawRequest, "/probe?step=2");
             StringAssert.Contains(result.Execution.LatestResponse?.Body ?? string.Empty, "\"attempt\":2");
         }
         finally

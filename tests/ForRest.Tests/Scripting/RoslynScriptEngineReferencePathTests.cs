@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace ForRest.Tests.Scripting;
 
 [TestClass]

@@ -252,6 +252,69 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task SendAsync_keeps_request_and_response_snapshot_selection_in_lockstep()
+	{
+		using TestHarness harness = new();
+		ResponseSnapshot first = CreateResponseSnapshot(
+			200,
+			"OK",
+			"""{"step":"one"}""",
+			"HTTP/1.1 200 OK",
+			12,
+			64);
+		ResponseSnapshot second = CreateResponseSnapshot(
+			201,
+			"Created",
+			"""{"step":"two"}""",
+			"HTTP/1.1 201 Created",
+			18,
+			72);
+		ResponseSnapshot third = CreateResponseSnapshot(
+			204,
+			"No Content",
+			"""{"step":"three"}""",
+			"HTTP/1.1 204 No Content",
+			26,
+			96);
+		RequestSnapshot firstRequest = CreateRequestSnapshot("GET", "https://example.test/requests/one", """{"step":"request-one"}""");
+		RequestSnapshot secondRequest = CreateRequestSnapshot("POST", "https://example.test/requests/two", """{"step":"request-two"}""");
+		RequestSnapshot thirdRequest = CreateRequestSnapshot("DELETE", "https://example.test/requests/three", """{"step":"request-three"}""");
+		MainPageViewModel viewModel = harness.CreateViewModel(
+			new FakeExecutionService(
+				responses: [first, second, third],
+				requests: [firstRequest, secondRequest, thirdRequest]));
+
+		await viewModel.SendAsync();
+
+		Assert.IsTrue(viewModel.ShowRequestSnapshotSelector);
+		Assert.AreEqual(3, viewModel.RequestSnapshotEntries.Count);
+		CollectionAssert.AreEqual(new[] { 3, 2, 1 }, viewModel.RequestSnapshotEntries.Select(static item => item.Position).ToArray());
+		Assert.AreEqual(3, viewModel.SelectedResponseSnapshotEntry?.Position);
+		Assert.AreEqual(3, viewModel.SelectedRequestSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, "DELETE");
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, "https://example.test/requests/three");
+		StringAssert.Contains(viewModel.SelectedRequestSnapshotTargetText, "https://example.test/requests/three");
+		StringAssert.Contains(viewModel.RequestBodyText, "request-three");
+
+		viewModel.SelectedResponseSnapshotEntry = viewModel.ResponseSnapshotEntries[^1];
+
+		Assert.AreEqual(1, viewModel.SelectedResponseSnapshotEntry?.Position);
+		Assert.AreEqual(1, viewModel.SelectedRequestSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, "GET");
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, "https://example.test/requests/one");
+		StringAssert.Contains(viewModel.RequestBodyText, "request-one");
+
+		viewModel.SelectedRequestSnapshotEntry = viewModel.RequestSnapshotEntries[1];
+
+		Assert.AreEqual(2, viewModel.SelectedRequestSnapshotEntry?.Position);
+		Assert.AreEqual(2, viewModel.SelectedResponseSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.ResponseBodyText, "two");
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, "POST");
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, "https://example.test/requests/two");
+		StringAssert.Contains(viewModel.RequestBodyText, "request-two");
+	}
+
+	[TestMethod]
 	public void SelectHistoryEntry_exposes_prior_response_snapshots_for_review()
 	{
 		using TestHarness harness = new();
@@ -305,6 +368,68 @@ public sealed class MainPageViewModelLayoutTests
 		Assert.AreEqual(1, viewModel.SelectedResponseSnapshotEntry?.Position);
 		StringAssert.Contains(viewModel.ResponseBodyText, "one");
 		Assert.AreEqual("alpha", viewModel.ResponseHeaderRows.Single(row => row.Name == "X-Step").Value);
+	}
+
+	[TestMethod]
+	public void SelectHistoryEntry_keeps_request_and_response_snapshots_aligned_for_multi_send_runs()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		ResponseSnapshot first = CreateResponseSnapshot(
+			200,
+			"OK",
+			"""{"step":"one"}""",
+			"HTTP/1.1 200 OK",
+			11,
+			60);
+		ResponseSnapshot second = CreateResponseSnapshot(
+			202,
+			"Accepted",
+			"""{"step":"two"}""",
+			"HTTP/1.1 202 Accepted",
+			19,
+			44);
+		RequestSnapshot firstRequest = CreateRequestSnapshot("GET", "https://example.test/history/one", """{"step":"history-one"}""");
+		RequestSnapshot secondRequest = CreateRequestSnapshot("PATCH", "https://example.test/history/two", """{"step":"history-two"}""");
+		ExecutionRun run = new()
+		{
+			WorkspaceId = Guid.NewGuid(),
+			RequestId = Guid.NewGuid(),
+			RequestName = "History Demo",
+			State = ExecutionState.Completed,
+			StartedUtc = DateTimeOffset.Parse("2026-04-02T14:15:00Z"),
+			CompletedUtc = DateTimeOffset.Parse("2026-04-02T14:15:05Z"),
+			TargetUri = secondRequest.Url,
+			RawRequest = secondRequest.RawRequest,
+			Response = second,
+			Responses = [first, second],
+			Requests = [firstRequest, secondRequest],
+		};
+		HistoryEntryViewModel entry = new(
+			run,
+			"PATCH",
+			"History Demo",
+			"Shows prior sends",
+			"10:15 AM",
+			Color.FromArgb("#167C65"));
+
+		viewModel.SelectHistoryEntry(entry);
+
+		Assert.IsTrue(viewModel.ShowRequestSnapshotSelector);
+		Assert.AreEqual(2, viewModel.RequestSnapshotEntries.Count);
+		Assert.AreEqual(2, viewModel.SelectedResponseSnapshotEntry?.Position);
+		Assert.AreEqual(2, viewModel.SelectedRequestSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, "PATCH");
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, secondRequest.Url);
+		StringAssert.Contains(viewModel.SelectedRequestSnapshotTargetText, secondRequest.Url);
+		StringAssert.Contains(viewModel.RequestBodyText, "history-two");
+
+		viewModel.SelectedRequestSnapshotEntry = viewModel.RequestSnapshotEntries[^1];
+
+		Assert.AreEqual(1, viewModel.SelectedRequestSnapshotEntry?.Position);
+		Assert.AreEqual(1, viewModel.SelectedResponseSnapshotEntry?.Position);
+		StringAssert.Contains(viewModel.SelectedResponseSnapshotTargetText, firstRequest.Url);
+		StringAssert.Contains(viewModel.RequestBodyText, "history-one");
 	}
 
 	[TestMethod]
@@ -1638,6 +1763,36 @@ public sealed class MainPageViewModelLayoutTests
 		};
 	}
 
+	private static RequestSnapshot CreateRequestSnapshot(
+		string method,
+		string url,
+		string body,
+		string? rawRequest = null,
+		IEnumerable<KeyValueDefinition>? headers = null)
+	{
+		List<KeyValueDefinition> headerList = headers is null
+			? [new() { Key = "Content-Type", Value = "application/json" }]
+			: [.. headers];
+		string headerText = string.Join(
+			"\n",
+			headerList
+				.Where(static item => item.IsEnabled)
+				.Select(static item => $"{item.Key}: {item.Value}"));
+		string requestText = rawRequest ?? $"{method} {url}\n{headerText}\n\n{body}";
+
+		return new()
+		{
+			Method = method,
+			Url = url,
+			ContentType = "application/json",
+			SizeBytes = body.Length,
+			Body = body,
+			RawRequest = requestText,
+			Headers = headerList,
+			SentUtc = DateTimeOffset.Parse("2026-04-02T14:15:00Z"),
+		};
+	}
+
 	private sealed class TestHarness : IDisposable
 	{
 		private readonly string _previousConfigFile;
@@ -1739,17 +1894,20 @@ public sealed class MainPageViewModelLayoutTests
 	{
 		private readonly StashTable _stash;
 		private readonly IReadOnlyList<ResponseSnapshot> _responses;
+		private readonly IReadOnlyList<RequestSnapshot> _requests;
 		private readonly bool _throwOnCompile;
 
 		public FakeExecutionService(
 			StashTable? stash = null,
 			IReadOnlyList<ResponseSnapshot>? responses = null,
+			IReadOnlyList<RequestSnapshot>? requests = null,
 			bool throwOnCompile = false)
 		{
 			_stash = stash ?? new();
 			_responses = responses is { Count: > 0 }
 				? [.. responses]
 				: [CreateResponseSnapshot(200, "OK", """{"ok":true}""", "HTTP/1.1 200 OK", 42, 128)];
+			_requests = requests is { Count: > 0 } ? [.. requests] : [];
 			_throwOnCompile = throwOnCompile;
 		}
 
@@ -1794,15 +1952,17 @@ public sealed class MainPageViewModelLayoutTests
 			ResponseSnapshot response = _responses[^1];
 
 			RequestDefinition request = BuildRequestDefinition(workspace.Workspace.Id, defaultRequestName);
+			RequestSnapshot? latestRequest = _requests.LastOrDefault();
 			ExecutionRun run = new()
 			{
 				WorkspaceId = workspace.Workspace.Id,
 				RequestId = request.Id,
 				RequestName = request.Name,
-				TargetUri = request.UrlTemplate,
-				RawRequest = "GET https://example.test/mobile",
+				TargetUri = latestRequest?.Url ?? request.UrlTemplate,
+				RawRequest = latestRequest?.RawRequest ?? "GET https://example.test/mobile",
 				Response = response,
 				Responses = [.. _responses],
+				Requests = [.. _requests],
 				Stash = _stash,
 			};
 

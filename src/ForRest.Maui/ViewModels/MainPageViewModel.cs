@@ -84,16 +84,21 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _variablesEditorText;
 	private string _responseBodyText;
 	private string _responseRawText;
+	private string _requestBodyText;
+	private string _requestRawText;
 	private string _responseState;
 	private string _responseTimeStatus;
 	private string _responseSizeStatus;
 	private ResponseSnapshot? _latestResponseSnapshot;
 	private ResponseSnapshot? _selectedInspectorResponseSnapshot;
+	private RequestSnapshot? _selectedInspectorRequestSnapshot;
 	private ResponseSnapshotEntryViewModel? _selectedResponseSnapshotEntry;
+	private RequestSnapshotEntryViewModel? _selectedRequestSnapshotEntry;
 	private string _latestRuntimeStateText = string.Empty;
 	private string _latestRuntimeErrorText = string.Empty;
 	private string _latestRuntimeDebugText = string.Empty;
 	private bool _isResponsePrettyPrintEnabled = true;
+	private bool _isSynchronizingInspectorSnapshotSelection;
 	private string _debugOutputText;
 	private string _executionStatus;
 	private string _activationStatus;
@@ -201,6 +206,8 @@ public sealed class MainPageViewModel : ObservableObject
 		_variablesEditorText = string.Empty;
 		_responseBodyText = string.Empty;
 		_responseRawText = string.Empty;
+		_requestBodyText = string.Empty;
+		_requestRawText = string.Empty;
 		_responseState = "Idle";
 		_responseTimeStatus = "--";
 		_responseSizeStatus = "--";
@@ -257,6 +264,7 @@ public sealed class MainPageViewModel : ObservableObject
 		RightPaneTabs =
 		[
 			new PaneTabViewModel("response", "Response", true),
+			new PaneTabViewModel("requests", "Requests"),
 			new PaneTabViewModel("stash", "Stash"),
 			new PaneTabViewModel("headers", "Headers"),
 			new PaneTabViewModel("trace", "Trace"),
@@ -270,6 +278,9 @@ public sealed class MainPageViewModel : ObservableObject
 		[];
 
 		ResponseSnapshotEntries =
+		[];
+
+		RequestSnapshotEntries =
 		[];
 
 		ResponseHeaderRows =
@@ -336,6 +347,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public ObservableCollection<HistoryEntryViewModel> HistoryItems { get; }
 
 	public ObservableCollection<ResponseSnapshotEntryViewModel> ResponseSnapshotEntries { get; }
+
+	public ObservableCollection<RequestSnapshotEntryViewModel> RequestSnapshotEntries { get; }
 
 	public ObservableCollection<NameValueRowViewModel> ResponseHeaderRows { get; }
 
@@ -534,6 +547,30 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public string RequestBodyText
+	{
+		get => _requestBodyText;
+		private set
+		{
+			if (SetProperty(ref _requestBodyText, value))
+			{
+				OnPropertyChanged(nameof(CanCopyRequestBody));
+			}
+		}
+	}
+
+	public string RequestRawText
+	{
+		get => _requestRawText;
+		private set
+		{
+			if (SetProperty(ref _requestRawText, value))
+			{
+				OnPropertyChanged(nameof(CanCopyRawRequest));
+			}
+		}
+	}
+
 	public bool IsResponsePrettyPrintEnabled
 	{
 		get => _isResponsePrettyPrintEnabled;
@@ -543,6 +580,7 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				OnPropertyChanged(nameof(ResponsePrettyPrintButtonText));
 				RefreshResponsePresentation();
+				RefreshRequestPresentation();
 			}
 		}
 	}
@@ -813,9 +851,38 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 
 			ApplySelectedResponseSnapshot(value?.Snapshot);
+			SynchronizeSelectedRequestSnapshot(value?.Position);
 			OnPropertyChanged(nameof(SelectedResponseSnapshotSummaryText));
+			OnPropertyChanged(nameof(SelectedResponseSnapshotTargetText));
+			OnPropertyChanged(nameof(SelectedResponseSnapshotMetaText));
 			OnPropertyChanged(nameof(CanSelectPreviousResponseSnapshot));
 			OnPropertyChanged(nameof(CanSelectNextResponseSnapshot));
+		}
+	}
+
+	public RequestSnapshotEntryViewModel? SelectedRequestSnapshotEntry
+	{
+		get => _selectedRequestSnapshotEntry;
+		set
+		{
+			if (!SetProperty(ref _selectedRequestSnapshotEntry, value))
+			{
+				return;
+			}
+
+			foreach (RequestSnapshotEntryViewModel entry in RequestSnapshotEntries)
+			{
+				entry.IsSelected = ReferenceEquals(entry, value);
+			}
+
+			ApplySelectedRequestSnapshot(value?.Snapshot);
+			SynchronizeSelectedResponseSnapshot(value?.Position);
+			OnPropertyChanged(nameof(SelectedRequestSnapshotSummaryText));
+			OnPropertyChanged(nameof(SelectedRequestSnapshotTargetText));
+			OnPropertyChanged(nameof(SelectedRequestSnapshotMetaText));
+			OnPropertyChanged(nameof(SelectedResponseSnapshotTargetText));
+			OnPropertyChanged(nameof(CanSelectPreviousRequestSnapshot));
+			OnPropertyChanged(nameof(CanSelectNextRequestSnapshot));
 		}
 	}
 
@@ -970,17 +1037,29 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool ShowResponseSnapshotSelector => ResponseSnapshotEntries.Count > 1;
 
+	public bool ShowRequestSnapshotSelector => RequestSnapshotEntries.Count > 1;
+
 	public bool CanSelectPreviousResponseSnapshot =>
 		GetSelectedResponseSnapshotEntryIndex() > 0;
 
 	public bool CanSelectNextResponseSnapshot =>
 		GetSelectedResponseSnapshotEntryIndex() is int index && index >= 0 && index < ResponseSnapshotEntries.Count - 1;
 
+	public bool CanSelectPreviousRequestSnapshot =>
+		GetSelectedRequestSnapshotEntryIndex() > 0;
+
+	public bool CanSelectNextRequestSnapshot =>
+		GetSelectedRequestSnapshotEntryIndex() is int index && index >= 0 && index < RequestSnapshotEntries.Count - 1;
+
 	public bool ShowStashEmptyState => !HasStashData;
 
 	public bool CanCopyResponseBody => !string.IsNullOrWhiteSpace(ResponseBodyText);
 
 	public bool CanCopyRawResponse => !string.IsNullOrWhiteSpace(ResponseRawText);
+
+	public bool CanCopyRequestBody => !string.IsNullOrWhiteSpace(RequestBodyText);
+
+	public bool CanCopyRawRequest => !string.IsNullOrWhiteSpace(RequestRawText);
 
 	public bool CanCopyDebugOutput => !string.IsNullOrWhiteSpace(DebugOutputText);
 
@@ -1010,6 +1089,99 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public string SelectedResponseSnapshotTargetText
+	{
+		get
+		{
+			if (SelectedResponseSnapshotEntry is null)
+			{
+				return "No response captured for this run yet.";
+			}
+
+			RequestSnapshot? request = ResolveRequestSnapshotForSelectedResponse();
+			return request is null
+				? "Request details are unavailable for this response."
+				: $"{request.Method}  {request.Url}";
+		}
+	}
+
+	public string SelectedResponseSnapshotMetaText
+	{
+		get
+		{
+			if (SelectedResponseSnapshotEntry?.Snapshot is not { } response)
+			{
+				return string.Empty;
+			}
+
+			List<string> parts = [];
+			if (!string.IsNullOrWhiteSpace(response.ContentType))
+			{
+				parts.Add(response.ContentType);
+			}
+
+			parts.Add($"{response.DurationMilliseconds} ms");
+			parts.Add(FormatResponseSize(response.SizeBytes));
+			parts.Add($"Received {response.ReceivedUtc.ToLocalTime():T}");
+			return string.Join("  ", parts);
+		}
+	}
+
+	public string SelectedRequestSnapshotSummaryText
+	{
+		get
+		{
+			if (SelectedRequestSnapshotEntry is null)
+			{
+				return ResponseSnapshotEntries.Count > 1
+					? "Captured requests are unavailable for this multi-send run."
+					: "No request captured for this run yet.";
+			}
+
+			string summary = $"{SelectedRequestSnapshotEntry.MethodText}  {SelectedRequestSnapshotEntry.DetailText}".Trim();
+			return RequestSnapshotEntries.Count > 1
+				? $"Send {SelectedRequestSnapshotEntry.Position} of {RequestSnapshotEntries.Count}  {summary}"
+				: summary;
+		}
+	}
+
+	public string SelectedRequestSnapshotTargetText
+	{
+		get
+		{
+			if (SelectedRequestSnapshotEntry?.Snapshot is not { } request)
+			{
+				return ResponseSnapshotEntries.Count > 1
+					? "Requests were not captured for every send in this run."
+					: "No request captured for this run yet.";
+			}
+
+			return $"{request.Method}  {request.Url}";
+		}
+	}
+
+	public string SelectedRequestSnapshotMetaText
+	{
+		get
+		{
+			if (SelectedRequestSnapshotEntry?.Snapshot is not { } request)
+			{
+				return string.Empty;
+			}
+
+			List<string> parts = [];
+			if (!string.IsNullOrWhiteSpace(request.ContentType))
+			{
+				parts.Add(request.ContentType);
+			}
+
+			parts.Add(FormatResponseSize(request.SizeBytes));
+			parts.Add($"{request.Headers.Count(static item => item.IsEnabled)} headers");
+			parts.Add($"Sent {request.SentUtc.ToLocalTime():T}");
+			return string.Join("  ", parts);
+		}
+	}
+
 	public Color SelectedMethodColor => SelectedMethod switch
 	{
 		"GET" => _methodGet,
@@ -1024,6 +1196,7 @@ public sealed class MainPageViewModel : ObservableObject
 	public string RightSurfaceStatus => RightPaneTabs.FirstOrDefault(tab => tab.IsSelected)?.Key switch
 	{
 		"response" => "Primary response viewer",
+		"requests" => "Captured request viewer",
 		"stash" => "Structured stash table",
 		"headers" => "Response metadata and transport details",
 		"trace" => "Execution trace and feedback",
@@ -1049,6 +1222,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public bool IsVariablesTabVisible => IsTabSelected(CenterTabs, "variables");
 
 	public bool IsInspectorResponseVisible => IsTabSelected(RightPaneTabs, "response");
+
+	public bool IsInspectorRequestVisible => IsTabSelected(RightPaneTabs, "requests");
 
 	public bool IsInspectorStashVisible => IsTabSelected(RightPaneTabs, "stash");
 
@@ -1219,7 +1394,9 @@ public sealed class MainPageViewModel : ObservableObject
 				ClearLatestRuntimeContext();
 			}
 
-			ApplyResponseSnapshotEntries(BuildCapturedResponses(latestRun, outcome.Execution?.LatestResponse));
+			List<ResponseSnapshot> capturedResponses = BuildCapturedResponses(latestRun, outcome.Execution?.LatestResponse);
+			ApplyRequestSnapshotEntries(BuildCapturedRequests(latestRun, capturedResponses.Count));
+			ApplyResponseSnapshotEntries(capturedResponses);
 
 			ApplyStashTable(latestRun?.Stash ?? outcome.Execution?.Stash ?? new());
 
@@ -1267,6 +1444,7 @@ public sealed class MainPageViewModel : ObservableObject
 			_responseTimeStatus = "--";
 			_responseSizeStatus = "--";
 			_latestResponseSnapshot = null;
+			ApplyRequestSnapshotEntries([]);
 			ApplyResponseSnapshotEntries([]);
 			DebugOutputText = exception.ToString();
 			RecordLatestRuntimeContext("Failed", exception.Message, DebugOutputText);
@@ -1472,6 +1650,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		SetSelected(RightPaneTabs, tab);
 		OnPropertyChanged(nameof(IsInspectorResponseVisible));
+		OnPropertyChanged(nameof(IsInspectorRequestVisible));
 		OnPropertyChanged(nameof(IsInspectorStashVisible));
 		OnPropertyChanged(nameof(IsInspectorHeadersVisible));
 		OnPropertyChanged(nameof(IsInspectorTraceVisible));
@@ -1854,6 +2033,28 @@ public sealed class MainPageViewModel : ObservableObject
 
 		await Clipboard.Default.SetTextAsync(ResponseBodyText);
 		ExecutionStatus = "Copied response body.";
+	}
+
+	public async Task CopyRequestBodyAsync()
+	{
+		if (!CanCopyRequestBody)
+		{
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(RequestBodyText);
+		ExecutionStatus = "Copied request body.";
+	}
+
+	public async Task CopyRawRequestAsync()
+	{
+		if (!CanCopyRawRequest)
+		{
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(RequestRawText);
+		ExecutionStatus = "Copied raw request.";
 	}
 
 	public async Task CopyRawResponseAsync()
@@ -2663,6 +2864,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_responseTimeStatus = "--";
 		_responseSizeStatus = "--";
 		_latestResponseSnapshot = null;
+		ApplyRequestSnapshotEntries([]);
 		ApplyResponseSnapshotEntries([]);
 		ClearStashTable();
 		OutputMetrics.Clear();
@@ -2754,6 +2956,7 @@ public sealed class MainPageViewModel : ObservableObject
 			"GET" => _methodGet,
 			"POST" => _methodPost,
 			"PUT" => _methodPut,
+			"PATCH" => _methodPut,
 			"DELETE" => _methodDelete,
 			_ => _methodNeutral
 		};
@@ -3997,6 +4200,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		ResponseState = "Compile failed";
 		_latestResponseSnapshot = null;
+		ApplyRequestSnapshotEntries([]);
 		ApplyResponseSnapshotEntries([]);
 		DebugOutputText = string.Join(Environment.NewLine, diagnostics.Select(static diagnostic => $"Line {diagnostic.Line}, Col {diagnostic.Column}: {diagnostic.Message}"));
 		_responseTimeStatus = "--";
@@ -4461,6 +4665,12 @@ public sealed class MainPageViewModel : ObservableObject
 		ResponseRawText = ResponsePresentationFormatter.NormalizeDisplayText(_selectedInspectorResponseSnapshot?.RawResponse);
 	}
 
+	private void RefreshRequestPresentation()
+	{
+		RequestBodyText = ResponsePresentationFormatter.FormatBody(_selectedInspectorRequestSnapshot?.Body, IsResponsePrettyPrintEnabled);
+		RequestRawText = ResponsePresentationFormatter.NormalizeDisplayText(_selectedInspectorRequestSnapshot?.RawRequest);
+	}
+
 	private void ApplySelectedResponseSnapshot(ResponseSnapshot? response)
 	{
 		_selectedInspectorResponseSnapshot = response;
@@ -4472,6 +4682,12 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		OnPropertyChanged(nameof(CanCopyHeaders));
+	}
+
+	private void ApplySelectedRequestSnapshot(RequestSnapshot? request)
+	{
+		_selectedInspectorRequestSnapshot = request;
+		RefreshRequestPresentation();
 	}
 
 	private void ApplyResponseSnapshotEntries(IReadOnlyList<ResponseSnapshot> responses)
@@ -4503,6 +4719,37 @@ public sealed class MainPageViewModel : ObservableObject
 		SelectedResponseSnapshotEntry = ResponseSnapshotEntries[0];
 	}
 
+	private void ApplyRequestSnapshotEntries(IReadOnlyList<RequestSnapshot> requests)
+	{
+		SelectedRequestSnapshotEntry = null;
+		RequestSnapshotEntries.Clear();
+
+		for (int index = requests.Count - 1; index >= 0; index--)
+		{
+			RequestSnapshot request = requests[index];
+			RequestSnapshotEntries.Add(
+				new RequestSnapshotEntryViewModel(
+					request,
+					index + 1,
+					request.Method,
+					BuildRequestSnapshotCardDetail(request),
+					ResolveMethodAccent(request.Method)));
+		}
+
+		OnPropertyChanged(nameof(ShowRequestSnapshotSelector));
+		OnPropertyChanged(nameof(CanSelectPreviousRequestSnapshot));
+		OnPropertyChanged(nameof(CanSelectNextRequestSnapshot));
+		if (RequestSnapshotEntries.Count == 0)
+		{
+			OnPropertyChanged(nameof(SelectedRequestSnapshotSummaryText));
+			OnPropertyChanged(nameof(SelectedRequestSnapshotTargetText));
+			OnPropertyChanged(nameof(SelectedRequestSnapshotMetaText));
+			return;
+		}
+
+		SelectedRequestSnapshotEntry = RequestSnapshotEntries[0];
+	}
+
 	public bool SelectPreviousResponseSnapshot()
 	{
 		int selectedIndex = GetSelectedResponseSnapshotEntryIndex();
@@ -4527,11 +4774,100 @@ public sealed class MainPageViewModel : ObservableObject
 		return true;
 	}
 
+	public bool SelectPreviousRequestSnapshot()
+	{
+		int selectedIndex = GetSelectedRequestSnapshotEntryIndex();
+		if (selectedIndex <= 0)
+		{
+			return false;
+		}
+
+		SelectedRequestSnapshotEntry = RequestSnapshotEntries[selectedIndex - 1];
+		return true;
+	}
+
+	public bool SelectNextRequestSnapshot()
+	{
+		int selectedIndex = GetSelectedRequestSnapshotEntryIndex();
+		if (selectedIndex < 0 || selectedIndex >= RequestSnapshotEntries.Count - 1)
+		{
+			return false;
+		}
+
+		SelectedRequestSnapshotEntry = RequestSnapshotEntries[selectedIndex + 1];
+		return true;
+	}
+
 	private int GetSelectedResponseSnapshotEntryIndex()
 	{
 		return SelectedResponseSnapshotEntry is null
 			? -1
 			: ResponseSnapshotEntries.IndexOf(SelectedResponseSnapshotEntry);
+	}
+
+	private int GetSelectedRequestSnapshotEntryIndex()
+	{
+		return SelectedRequestSnapshotEntry is null
+			? -1
+			: RequestSnapshotEntries.IndexOf(SelectedRequestSnapshotEntry);
+	}
+
+	private void SynchronizeSelectedRequestSnapshot(int? position)
+	{
+		if (_isSynchronizingInspectorSnapshotSelection)
+		{
+			return;
+		}
+
+		_isSynchronizingInspectorSnapshotSelection = true;
+		try
+		{
+			SelectedRequestSnapshotEntry = position is int value
+				? RequestSnapshotEntries.FirstOrDefault(item => item.Position == value)
+				: null;
+		}
+		finally
+		{
+			_isSynchronizingInspectorSnapshotSelection = false;
+		}
+	}
+
+	private void SynchronizeSelectedResponseSnapshot(int? position)
+	{
+		if (_isSynchronizingInspectorSnapshotSelection)
+		{
+			return;
+		}
+
+		_isSynchronizingInspectorSnapshotSelection = true;
+		try
+		{
+			SelectedResponseSnapshotEntry = position is int value
+				? ResponseSnapshotEntries.FirstOrDefault(item => item.Position == value)
+				: null;
+		}
+		finally
+		{
+			_isSynchronizingInspectorSnapshotSelection = false;
+		}
+	}
+
+	private RequestSnapshot? ResolveRequestSnapshotForSelectedResponse()
+	{
+		if (SelectedResponseSnapshotEntry is null)
+		{
+			return null;
+		}
+
+		if (SelectedRequestSnapshotEntry is not null &&
+		    SelectedRequestSnapshotEntry.Position == SelectedResponseSnapshotEntry.Position)
+		{
+			return SelectedRequestSnapshotEntry.Snapshot;
+		}
+
+		return RequestSnapshotEntries
+			.FirstOrDefault(item => item.Position == SelectedResponseSnapshotEntry.Position)
+			?.Snapshot;
 	}
 
 	private Color ResolveResponseSnapshotAccent(ResponseSnapshot response)
@@ -4558,6 +4894,101 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 
 		return fallbackResponse is null ? [] : [fallbackResponse];
+	}
+
+	private static List<RequestSnapshot> BuildCapturedRequests(ExecutionRun? run, int responseCount)
+	{
+		if (run?.Requests is { Count: > 0 } capturedRequests)
+		{
+			if (responseCount <= 1 || capturedRequests.Count == responseCount)
+			{
+				return [.. capturedRequests];
+			}
+
+			return [];
+		}
+
+		if (run is null || string.IsNullOrWhiteSpace(run.RawRequest))
+		{
+			return [];
+		}
+
+		if (responseCount > 1)
+		{
+			return [];
+		}
+
+		return [BuildFallbackRequestSnapshot(run)];
+	}
+
+	private static RequestSnapshot BuildFallbackRequestSnapshot(ExecutionRun run)
+	{
+		string normalizedRawRequest = ResponsePresentationFormatter.NormalizeDisplayText(run.RawRequest);
+		string[] lines = normalizedRawRequest.Split('\n');
+		string firstLine = lines.FirstOrDefault() ?? string.Empty;
+		string[] firstLineParts = firstLine.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+		string method = firstLineParts.Length > 0 ? firstLineParts[0] : ResolveHistoryMethod(run);
+		string url = firstLineParts.Length > 1 ? firstLineParts[1] : run.TargetUri;
+		List<KeyValueDefinition> headers = [];
+		List<string> bodyLines = [];
+		bool bodyStarted = false;
+
+		for (int index = 1; index < lines.Length; index++)
+		{
+			string line = lines[index];
+			if (!bodyStarted)
+			{
+				if (string.IsNullOrWhiteSpace(line))
+				{
+					bodyStarted = true;
+					continue;
+				}
+
+				int separatorIndex = line.IndexOf(':');
+				if (separatorIndex > 0)
+				{
+					headers.Add(
+						new KeyValueDefinition
+						{
+							Key = line[..separatorIndex].Trim(),
+							Value = line[(separatorIndex + 1)..].Trim(),
+						});
+				}
+
+				continue;
+			}
+
+			bodyLines.Add(line);
+		}
+
+		string body = string.Join('\n', bodyLines).TrimEnd();
+		string contentType = headers
+			.FirstOrDefault(static header => string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+			?.Value
+			?? string.Empty;
+
+		return new RequestSnapshot
+		{
+			Method = method,
+			Url = string.IsNullOrWhiteSpace(url) ? run.TargetUri : url,
+			ContentType = contentType,
+			SizeBytes = Encoding.UTF8.GetByteCount(body),
+			Body = body,
+			RawRequest = normalizedRawRequest,
+			Headers = headers,
+			SentUtc = run.StartedUtc,
+		};
+	}
+
+	private static string BuildRequestSnapshotCardDetail(RequestSnapshot request)
+	{
+		if (Uri.TryCreate(request.Url, UriKind.Absolute, out Uri? uri))
+		{
+			string target = string.IsNullOrWhiteSpace(uri.PathAndQuery) ? uri.Host : $"{uri.Host}{uri.PathAndQuery}";
+			return string.IsNullOrWhiteSpace(target) ? request.Url : target;
+		}
+
+		return request.Url;
 	}
 
 	private ForRestEditorDebugSnapshot CreateRequestEditorDebugSnapshot(ForRestScriptCompilationResult compilation, string source)
@@ -4671,7 +5102,9 @@ public sealed class MainPageViewModel : ObservableObject
 		_latestResponseSnapshot = response;
 		_responseTimeStatus = response is not null ? $"{response.DurationMilliseconds} ms" : "--";
 		_responseSizeStatus = response is not null ? FormatResponseSize(response.SizeBytes) : "--";
-		ApplyResponseSnapshotEntries(BuildCapturedResponses(run, response));
+		List<ResponseSnapshot> capturedResponses = BuildCapturedResponses(run, response);
+		ApplyRequestSnapshotEntries(BuildCapturedRequests(run, capturedResponses.Count));
+		ApplyResponseSnapshotEntries(capturedResponses);
 		DebugOutputText = BuildDebugOutput(run, SelectedWorkspace, SelectedEnvironment, method);
 		RecordLatestRuntimeContext(run.State.ToString(), run.ErrorMessage, DebugOutputText);
 		ApplyStashTable(run.Stash);

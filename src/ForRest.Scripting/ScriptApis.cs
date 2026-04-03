@@ -54,6 +54,8 @@ public sealed class ScriptRequestApi
 
     private readonly List<ResponseSnapshot> sentResponses = [];
 
+    private readonly List<RequestSnapshot> sentRequests = [];
+
     public string Method { get; set; }
 
     public string Url { get; set; }
@@ -79,6 +81,17 @@ public sealed class ScriptRequestApi
             lock (sentResponses)
             {
                 return [.. sentResponses];
+            }
+        }
+    }
+
+    public IReadOnlyList<RequestSnapshot> SentRequests
+    {
+        get
+        {
+            lock (sentRequests)
+            {
+                return [.. sentRequests];
             }
         }
     }
@@ -115,6 +128,7 @@ public sealed class ScriptRequestApi
         }
 
         var preparedRequest = ToPreparedRequest();
+        RequestSnapshot requestSnapshot = PreparedRequestSnapshotBuilder.Build(preparedRequest);
         var nextSendCount = Interlocked.Increment(ref sendCount);
         if (nextSendCount > maxSendIterations)
         {
@@ -128,6 +142,11 @@ public sealed class ScriptRequestApi
             lock (sentResponses)
             {
                 sentResponses.Add(response);
+            }
+
+            lock (sentRequests)
+            {
+                sentRequests.Add(requestSnapshot);
             }
         }
 

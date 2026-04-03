@@ -72,6 +72,10 @@ public sealed class MobileRequestExecutionServiceTests
 		Assert.AreEqual("200", result.Stash.Rows[0].Values["Status"]);
 		Assert.AreEqual("alpha", result.Stash.Rows[0].Values["Uuid"]);
 		Assert.HasCount(1, history);
+		Assert.HasCount(1, history[0].Requests);
+		Assert.AreEqual("GET", history[0].Requests[0].Method);
+		Assert.AreEqual(server.Url, history[0].Requests[0].Url);
+		StringAssert.Contains(history[0].Requests[0].RawRequest, server.Url);
 		Assert.IsFalse(result.ConsoleEntries.Any(static entry => entry.Message.Contains("mobile-safe mode", StringComparison.OrdinalIgnoreCase)));
 	}
 
