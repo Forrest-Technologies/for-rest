@@ -96,6 +96,22 @@ jobs:
         shell: pwsh
         run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:ForRestWindowsOnly=$env:WINDOWS_ONLY_BUILD
 
+      - name: Run core unit tests
+        shell: pwsh
+        run: dotnet test tests/ForRest.Tests/ForRest.Tests.csproj -c Debug
+
+      - name: Run MAUI unit tests
+        shell: pwsh
+        run: dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj -c Debug
+
+      - name: Build licensing function
+        shell: pwsh
+        run: dotnet build src/ForRest.Licensing.Functions/ForRest.Licensing.Functions.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
+
+      - name: Build licensing admin tool
+        shell: pwsh
+        run: dotnet build src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
+
       - name: Build Windows app
         shell: pwsh
         run: |
@@ -115,7 +131,33 @@ jobs:
             -p:FileVersion=${{ needs.prepare.outputs.file_version }} `
             -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} `
             -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} `
+            -p:ForRestLicenseServiceBaseUrl="${{ vars.FORREST_LICENSE_SERVICE_BASE_URL }}" `
+            -p:ForRestLicenseIssuer="${{ vars.FORREST_LICENSE_ISSUER }}" `
+            -p:ForRestLicenseAudience="${{ vars.FORREST_LICENSE_AUDIENCE }}" `
+            -p:ForRestLicenseSigningPublicKeyPem="${{ vars.FORREST_LICENSE_SIGNING_PUBLIC_KEY_PEM }}" `
+            -p:ForRestLicenseBuildGraceDays="${{ vars.FORREST_LICENSE_BUILD_GRACE_DAYS }}" `
+            -p:ForRestLicenseOfflineLeaseDays="${{ vars.FORREST_LICENSE_OFFLINE_LEASE_DAYS }}" `
+            -p:ForRestLicenseRefreshIntervalDays="${{ vars.FORREST_LICENSE_REFRESH_INTERVAL_DAYS }}" `
+            -p:ForRestLicenseClockSkewMinutes="${{ vars.FORREST_LICENSE_CLOCK_SKEW_MINUTES }}" `
+            -p:ForRestLicenseMaxActivations="${{ vars.FORREST_LICENSE_MAX_ACTIVATIONS }}" `
             -o $outputDirectory
+
+      - name: Restore local tools
+        if: needs.prepare.outputs.build_configuration == 'Release'
+        shell: pwsh
+        run: dotnet tool restore
+
+      - name: Obfuscate release assemblies
+        if: needs.prepare.outputs.build_configuration == 'Release'
+        shell: pwsh
+        run: |
+          $inputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
+          $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\${{ matrix.arch }}\ForRest.Obfuscar.Mapping.xml"
+          powershell -ExecutionPolicy Bypass -File scripts\Invoke-ForRestObfuscation.ps1 `
+            -InputDirectory $inputDirectory `
+            -OutputDirectory $inputDirectory `
+            -KeepPublicApi:$true `
+            -MappingOutputPath $mappingPath
 
       - name: Package build output
         shell: pwsh
@@ -143,6 +185,15 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}
           path: artifacts/release/${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload obfuscation mapping
+        if: needs.prepare.outputs.build_configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}-obfuscation-map
+          path: artifacts/obfuscation-maps/${{ matrix.arch }}/*
           if-no-files-found: error
           retention-days: 14
 

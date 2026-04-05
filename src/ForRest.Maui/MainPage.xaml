@@ -5,9 +5,34 @@
              x:Class="ForRest.Maui.MainPage">
 
     <Grid Padding="0"
-          RowDefinitions="*,Auto,Auto"
+          RowDefinitions="Auto,*,Auto,Auto"
           RowSpacing="0">
-        <Grid
+        <Border IsVisible="{Binding IsStatusBannerVisible}"
+                BackgroundColor="{Binding StatusBannerBackgroundColor}"
+                Stroke="{Binding StatusBannerBorderColor}"
+                StrokeThickness="1"
+                Padding="12,10"
+                Margin="10,10,10,0">
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="10">
+                <VerticalStackLayout Spacing="2">
+                    <Label Text="{Binding StatusBannerTitle}"
+                           FontAttributes="Bold"
+                           TextColor="{Binding StatusBannerTextColor}" />
+                    <Label Text="{Binding StatusBannerDetail}"
+                           LineBreakMode="WordWrap"
+                           TextColor="{Binding StatusBannerTextColor}" />
+                </VerticalStackLayout>
+                <Button Grid.Column="1"
+                        Text="✕"
+                        Clicked="OnDismissStatusBannerClicked"
+                        Padding="8,2"
+                        VerticalOptions="Start"
+                        HorizontalOptions="End" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1"
               x:Name="WorkbenchHost"
               SizeChanged="OnWorkbenchHostSizeChanged">
             <Grid x:Name="WorkbenchGrid"
@@ -104,7 +129,7 @@
 
         </Grid>
 
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 IsVisible="{Binding ShowCompactActionBar}"
                 Style="{StaticResource StatusBarBorderStyle}">
             <Grid ColumnDefinitions="Auto,Auto,*"
@@ -124,7 +149,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Margin="{OnPlatform Android='8,0,8,8', Default='0'}"
                 Style="{StaticResource StatusBarBorderStyle}">
             <Grid>

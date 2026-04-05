@@ -10,12 +10,15 @@ public sealed class ForRestMauiProjectTrimSettingsTests
 	{
 		string project = ReadProjectFile();
 
+		StringAssert.Contains(project, "<AndroidPackageFormats Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidPackageFormats)' == ''\">apk</AndroidPackageFormats>");
+		StringAssert.Contains(project, "<EmbedAssembliesIntoApk Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(EmbedAssembliesIntoApk)' == ''\">true</EmbedAssembliesIntoApk>");
 		StringAssert.Contains(project, "<PublishTrimmed Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release' and '$(PublishTrimmed)' == ''\">true</PublishTrimmed>");
 		StringAssert.Contains(project, "<AndroidLinkMode Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release' and '$(AndroidLinkMode)' == ''\">SdkOnly</AndroidLinkMode>");
 		StringAssert.Contains(project, "<TrimMode Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release' and '$(TrimMode)' == ''\">partial</TrimMode>");
 		StringAssert.Contains(project, "<Target Name=\"ValidateAndroidScriptingBuildSettings\"");
 		StringAssert.Contains(project, "PublishAot/NativeAOT builds are not supported");
 		StringAssert.Contains(project, "only support SdkOnly/partial trimming");
+		StringAssert.Contains(project, "device deploys and Roslyn metadata staging both work reliably");
 	}
 
 	[TestMethod]
@@ -29,6 +32,9 @@ public sealed class ForRestMauiProjectTrimSettingsTests
 		StringAssert.Contains(project, "<TrimmerRootAssembly Include=\"System.Text.Json\" RootMode=\"All\" />");
 		StringAssert.Contains(project, "<TrimmerRootAssembly Include=\"System.Text.RegularExpressions\" RootMode=\"All\" />");
 		StringAssert.Contains(project, "<LinkDescription Include=\"Linker\\ForRest.Android.Scripting.linker.xml\" />");
+		StringAssert.Contains(project, "<MauiAsset Include=\"roslyn-runtime\\*.dll\" LogicalName=\"roslyn-runtime/%(Filename)%(Extension)\" />");
+		StringAssert.Contains(project, "<MauiAsset Include=\"..\\ForRest.Scripting\\bin\\$(Configuration)\\net10.0\\ForRest.Scripting.dll\" LogicalName=\"roslyn-runtime/ForRest.Scripting.dll\" />");
+		StringAssert.Contains(project, "<MauiAsset Include=\"$(TargetDir)ForRest.Maui.dll\" LogicalName=\"roslyn-runtime/ForRest.Maui.dll\" />");
 	}
 
 	[TestMethod]

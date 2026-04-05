@@ -33,6 +33,18 @@ public static class ResponsePaneCopyFormatter
 			rows.Select(static row => row.Cells.Select(static cell => cell.Value)));
 	}
 
+	public static string BuildStashRowText(IReadOnlyList<StashColumnViewModel> columns, StashRowViewModel row)
+	{
+		if (columns.Count == 0)
+		{
+			return string.Empty;
+		}
+
+		return BuildTable(
+			["#", .. columns.Select(static column => column.Title)],
+			[[row.RowLabel, .. row.Cells.Select(static cell => cell.Value)]]);
+	}
+
 	private static string BuildTable(IEnumerable<string> headers, IEnumerable<IEnumerable<string>> rows)
 	{
 		List<string> headerCells = headers.Select(NormalizeCell).ToList();

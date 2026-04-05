@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
-using ForRest.Services.Licensing;
+using ForRest.Licensing;
 
 namespace ForRest.Maui.Tests;
 
@@ -32,7 +32,7 @@ public sealed class SettingsTomlDocumentServiceTests
 		Assert.IsFalse(editorText.Contains("super-secret-license", StringComparison.Ordinal));
 		StringAssert.Contains(editorText, $"license = \"{SettingsTomlTemplate.MaskedLicenseValue}\"");
 		StringAssert.Contains(editorText, "[license.info]");
-		StringAssert.Contains(editorText, "build_started_utc = ");
+		StringAssert.Contains(editorText, "build_grace_ends_utc = ");
 	}
 
 	[TestMethod]
@@ -280,7 +280,7 @@ public sealed class SettingsTomlDocumentServiceTests
 		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
 		string edited = editorText
 			.Replace("summary = ", "summary = \"hacked\" # ", StringComparison.Ordinal)
-			.Replace("grace_days_remaining = ", "grace_days_remaining = 999 # ", StringComparison.Ordinal);
+			.Replace("lease_expires_utc = ", "lease_expires_utc = \"2099-01-01T00:00:00Z\" # ", StringComparison.Ordinal);
 		service.SaveRawText(edited);
 
 		string rawText = File.ReadAllText(scope.ConfigFilePath);
@@ -295,20 +295,11 @@ public sealed class SettingsTomlDocumentServiceTests
 		ThemeConfigParser parser = new();
 		ThemeConfigNormalizer normalizer = new(template);
 		ThemeConfigStore store = new();
-		ILicenseValidationService licenseValidationService = new StandardLicenseValidationService(
-			new LicenseValidationOptions("unused-public-key", GracePeriodDays: 30));
 		return new SettingsTomlDocumentService(
 			store,
 			parser,
 			normalizer,
-			template,
-			licenseValidationService,
-			new TestBuildMetadataProvider(DateTimeOffset.Parse("2026-03-24T00:00:00Z", null, System.Globalization.DateTimeStyles.AssumeUniversal)));
-	}
-
-	private sealed class TestBuildMetadataProvider(DateTimeOffset buildDateUtc) : IBuildMetadataProvider
-	{
-		public DateTimeOffset GetBuildDateUtc() => buildDateUtc;
+			template);
 	}
 
 	private sealed class TestConfigScope : IDisposable

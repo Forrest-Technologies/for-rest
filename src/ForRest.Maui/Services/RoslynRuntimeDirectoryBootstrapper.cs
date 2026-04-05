@@ -61,9 +61,14 @@ public static class RoslynRuntimeDirectoryBootstrapper
 		RecreateDirectory(stagingDirectory);
 
 		bool extractedAny = false;
-		extractedAny |= TryExtractAssembliesFromFastDevOverrideDirectory(stagingDirectory);
-		extractedAny |= TryExtractAssembliesFromInstalledPackages(stagingDirectory);
 		extractedAny |= TryExtractAssembliesFromPackagedAssets(stagingDirectory);
+		if (!extractedAny)
+		{
+			extractedAny |= TryExtractAssembliesFromInstalledPackages(stagingDirectory);
+		}
+
+		// If a fast-deploy override exists, let it replace packaged/reference copies for the local build.
+		extractedAny |= TryExtractAssembliesFromFastDevOverrideDirectory(stagingDirectory);
 		if (!extractedAny)
 		{
 			return;

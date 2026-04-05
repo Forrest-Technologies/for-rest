@@ -16,10 +16,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\ForRest.Licensing.Functions\ForRest.Licensing.Functions.csproj" />
+    <ProjectReference Include="..\..\src\ForRest.Licensing\ForRest.Licensing.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Shared\ForRest.Shared.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Models\ForRest.Models.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Domain\ForRest.Domain.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Services\ForRest.Services.csproj" />
+    <ProjectReference Include="..\..\src\ForRest.Licensing.Functions\ForRest.Licensing.Functions.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Repositories\ForRest.Repositories.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Infrastructure.Sqlite\ForRest.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Scripting\ForRest.Scripting.csproj" />

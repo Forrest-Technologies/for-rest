@@ -22,7 +22,7 @@
 		<ForRestAndroidRuntimeIdentifiers>android-arm64;android-x64</ForRestAndroidRuntimeIdentifiers>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
 		<RuntimeIdentifiers Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == ''">$(ForRestAndroidRuntimeIdentifiers)</RuntimeIdentifiers>
-		<AndroidPackageFormats Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidPackageFormats)' == ''">apk;aab</AndroidPackageFormats>
+		<AndroidPackageFormats Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidPackageFormats)' == ''">apk</AndroidPackageFormats>
 		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Debug' and '$(PublishTrimmed)' == ''">false</PublishTrimmed>
 		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release' and '$(PublishTrimmed)' == ''">true</PublishTrimmed>
 		<AndroidLinkMode Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Debug' and '$(AndroidLinkMode)' == ''">None</AndroidLinkMode>
@@ -38,16 +38,61 @@
 		<AndroidSigningKeyAlias Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidSigningKeyAlias)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">$(ForRestAndroidSigningKeyAlias)</AndroidSigningKeyAlias>
 		<AndroidSigningKeyPass Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidSigningKeyPass)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">$(ForRestAndroidSigningKeyPass)</AndroidSigningKeyPass>
 		<AndroidSigningStorePass Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(AndroidSigningStorePass)' == '' and Exists('$(ForRestAndroidDevKeystorePath)')">$(ForRestAndroidSigningStorePass)</AndroidSigningStorePass>
-		<EmbedAssembliesIntoApk Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(EmbedAssembliesIntoApk)' == '' and ('$(Configuration)' == 'Release' or '$(ContinuousIntegrationBuild)' == 'true')">true</EmbedAssembliesIntoApk>
+		<EmbedAssembliesIntoApk Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(EmbedAssembliesIntoApk)' == ''">true</EmbedAssembliesIntoApk>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 		<ForRestBuildDateUtc Condition="'$(ForRestBuildDateUtc)' == ''">$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</ForRestBuildDateUtc>
+		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == ''">https://localhost:7071/api/</ForRestLicenseServiceBaseUrl>
+		<ForRestLicenseIssuer Condition="'$(ForRestLicenseIssuer)' == ''">forrest-license</ForRestLicenseIssuer>
+		<ForRestLicenseAudience Condition="'$(ForRestLicenseAudience)' == ''">forrest-client</ForRestLicenseAudience>
+		<ForRestLicenseSigningPublicKeyPem Condition="'$(ForRestLicenseSigningPublicKeyPem)' == ''"></ForRestLicenseSigningPublicKeyPem>
+		<ForRestLicenseBuildGraceDays Condition="'$(ForRestLicenseBuildGraceDays)' == ''">30</ForRestLicenseBuildGraceDays>
+		<ForRestLicenseOfflineLeaseDays Condition="'$(ForRestLicenseOfflineLeaseDays)' == ''">14</ForRestLicenseOfflineLeaseDays>
+		<ForRestLicenseRefreshIntervalDays Condition="'$(ForRestLicenseRefreshIntervalDays)' == ''">3</ForRestLicenseRefreshIntervalDays>
+		<ForRestLicenseClockSkewMinutes Condition="'$(ForRestLicenseClockSkewMinutes)' == ''">10</ForRestLicenseClockSkewMinutes>
+		<ForRestLicenseMaxActivations Condition="'$(ForRestLicenseMaxActivations)' == ''">3</ForRestLicenseMaxActivations>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
 			<_Parameter1>ForRestBuildDateUtc</_Parameter1>
 			<_Parameter2>$(ForRestBuildDateUtc)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseServiceBaseUrl</_Parameter1>
+			<_Parameter2>$(ForRestLicenseServiceBaseUrl)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseIssuer</_Parameter1>
+			<_Parameter2>$(ForRestLicenseIssuer)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseAudience</_Parameter1>
+			<_Parameter2>$(ForRestLicenseAudience)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseSigningPublicKeyPem</_Parameter1>
+			<_Parameter2>$(ForRestLicenseSigningPublicKeyPem)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseBuildGraceDays</_Parameter1>
+			<_Parameter2>$(ForRestLicenseBuildGraceDays)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseOfflineLeaseDays</_Parameter1>
+			<_Parameter2>$(ForRestLicenseOfflineLeaseDays)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseRefreshIntervalDays</_Parameter1>
+			<_Parameter2>$(ForRestLicenseRefreshIntervalDays)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseClockSkewMinutes</_Parameter1>
+			<_Parameter2>$(ForRestLicenseClockSkewMinutes)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>ForRestLicenseMaxActivations</_Parameter1>
+			<_Parameter2>$(ForRestLicenseMaxActivations)</_Parameter2>
 		</AssemblyAttribute>
 	</ItemGroup>
 
@@ -58,6 +103,16 @@
 		<MauiImage Update="Resources\Images\dotnet_bot.png" Resize="True" BaseSize="300,185" />
 		<MauiFont Include="Resources\Fonts\*" />
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+		<MauiAsset Include="roslyn-runtime\*.dll" Exclude="roslyn-runtime\ForRest.*.dll" LogicalName="roslyn-runtime/%(Filename)%(Extension)" />
+		<MauiAsset Include="..\ForRest.Domain\bin\$(Configuration)\net10.0\ForRest.Domain.dll" LogicalName="roslyn-runtime/ForRest.Domain.dll" />
+		<MauiAsset Include="..\ForRest.Licensing\bin\$(Configuration)\net10.0\ForRest.Licensing.dll" LogicalName="roslyn-runtime/ForRest.Licensing.dll" />
+		<MauiAsset Include="..\ForRest.Models\bin\$(Configuration)\net10.0\ForRest.Models.dll" LogicalName="roslyn-runtime/ForRest.Models.dll" />
+		<MauiAsset Include="..\ForRest.Plugins.Abstractions\bin\$(Configuration)\net10.0\ForRest.Plugins.Abstractions.dll" LogicalName="roslyn-runtime/ForRest.Plugins.Abstractions.dll" />
+		<MauiAsset Include="..\ForRest.Repositories\bin\$(Configuration)\net10.0\ForRest.Repositories.dll" LogicalName="roslyn-runtime/ForRest.Repositories.dll" />
+		<MauiAsset Include="..\ForRest.Scripting\bin\$(Configuration)\net10.0\ForRest.Scripting.dll" LogicalName="roslyn-runtime/ForRest.Scripting.dll" />
+		<MauiAsset Include="..\ForRest.Services\bin\$(Configuration)\net10.0\ForRest.Services.dll" LogicalName="roslyn-runtime/ForRest.Services.dll" />
+		<MauiAsset Include="..\ForRest.Shared\bin\$(Configuration)\net10.0\ForRest.Shared.dll" LogicalName="roslyn-runtime/ForRest.Shared.dll" />
+		<MauiAsset Include="$(TargetDir)ForRest.Maui.dll" LogicalName="roslyn-runtime/ForRest.Maui.dll" />
 	</ItemGroup>
 
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
@@ -88,11 +143,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\ForRest.Licensing\ForRest.Licensing.csproj" />
 		<ProjectReference Include="..\ForRest.Models\ForRest.Models.csproj" />
 		<ProjectReference Include="..\ForRest.Repositories\ForRest.Repositories.csproj" />
 		<ProjectReference Include="..\ForRest.Scripting\ForRest.Scripting.csproj" />
@@ -106,7 +163,7 @@
 	<Target Name="ValidateAndroidScriptingBuildSettings" BeforeTargets="PrepareForBuild" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
 		<Error Condition="'$(PublishAot)' == 'true' or '$(_AndroidRuntime)' == 'NativeAOT'" Text="ForRest uses Roslyn runtime scripting on Android. PublishAot/NativeAOT builds are not supported because runtime script compilation and execution require a JIT/interpreter-capable runtime." />
 		<Error Condition="'$(PublishTrimmed)' == 'true' and ('$(AndroidLinkMode)' == 'Full' or '$(TrimMode)' == 'full')" Text="ForRest Android scripting builds only support SdkOnly/partial trimming. Full trimming can strip APIs that runtime scripts need even when the app itself does not reference them directly." />
-		<Error Condition="'$(Configuration)' == 'Release' and '$(EmbedAssembliesIntoApk)' != 'true'" Text="ForRest Android release builds with runtime scripting must embed managed assemblies into the package so Roslyn can stage metadata references on device." />
+		<Error Condition="'$(EmbedAssembliesIntoApk)' != 'true'" Text="ForRest Android builds with runtime scripting must embed managed assemblies into the package so device deploys and Roslyn metadata staging both work reliably." />
 	</Target>
 
 </Project>

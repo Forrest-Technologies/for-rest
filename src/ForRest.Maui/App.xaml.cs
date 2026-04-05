@@ -13,6 +13,7 @@ public partial class App : Application
 	public App(IServiceProvider services, IThemeService themeService)
 	{
 		AppLaunchGuard.Initialize();
+		AppLaunchGuard.RecordMessage("App startup", "Application constructor entered.");
 		InitializeComponent();
 		_services = services;
 		_themeService = themeService;
@@ -37,6 +38,7 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
+		AppLaunchGuard.RecordMessage("App startup", "CreateWindow invoked.");
 		Page shellPage;
 		string shellPageName;
 		try
@@ -83,10 +85,17 @@ public partial class App : Application
 
 		try
 		{
-			if (sender is Window window &&
-			    window.Page is MainPage mainPage)
+			if (sender is Window window)
 			{
-				await mainPage.PrepareForShutdownAsync();
+				switch (window.Page)
+				{
+					case MainPage mainPage:
+						await mainPage.PrepareForShutdownAsync();
+						break;
+					case AndroidMainPage androidMainPage:
+						await androidMainPage.PrepareForShutdownAsync();
+						break;
+				}
 			}
 		}
 		catch (Exception exception)

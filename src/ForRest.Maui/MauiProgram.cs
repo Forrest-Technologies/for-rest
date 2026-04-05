@@ -5,7 +5,6 @@ using ForRest.Maui.ViewModels;
 using ForRest.Repositories;
 using ForRest.Services;
 using ForRest.Services.AI;
-using ForRest.Services.Licensing;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging;
 
@@ -33,11 +32,14 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IWorkbenchAiSettingsProvider, WorkbenchAiSettingsProvider>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
-		builder.Services.AddSingleton(
-			new LicenseValidationOptions(
-				ForRestLicenseProfile.PublicKey,
-				GracePeriodDays: 30));
-		builder.Services.AddSingleton<ILicenseValidationService, StandardLicenseValidationService>();
+		builder.Services.AddSingleton<ILicenseLeaseCacheStore, FileLicenseLeaseCacheStore>();
+		builder.Services.AddSingleton<ILicenseInstallationService, SecureStorageInstallationService>();
+		builder.Services.AddHttpClient<ILicenseApiClient, LicenseApiClient>(
+			static client =>
+			{
+				client.BaseAddress = new Uri(ForRestLicenseProfile.ServiceBaseUrl, UriKind.Absolute);
+				client.Timeout = TimeSpan.FromSeconds(5);
+			});
 		builder.Services.AddSingleton<IAppActivationService, AppActivationService>();
 		builder.Services.AddSingleton<RequestWorkbenchStateStore>();
 		builder.Services.AddSingleton<IExecutionHistoryRepository, InMemoryExecutionHistoryRepository>();
@@ -65,8 +67,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IAiTurnExecutor, AgentFrameworkAiTurnExecutor>();
 		builder.Services.AddSingleton<IAiInlineConversationService, AiInlineConversationService>();
 		builder.Services.AddSingleton<MainPageViewModel>();
-		builder.Services.AddSingleton<MainPage>();
-		builder.Services.AddSingleton(static _ => new AndroidMainPage());
+		builder.Services.AddTransient<MainPage>();
+		builder.Services.AddTransient<AndroidMainPage>();
 
 #if DEBUG
 		builder.Logging.AddDebug();

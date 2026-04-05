@@ -23,6 +23,8 @@ public sealed class RoslynRuntimeDirectoryBootstrapperSourceTests
 		string source = File.ReadAllText(sourcePath);
 
 		StringAssert.Contains(source, "FastDevOverrideDirectoryName = \".__override__\"");
+		StringAssert.Contains(source, "TryExtractAssembliesFromPackagedAssets(stagingDirectory)");
+		StringAssert.Contains(source, "TryExtractAssembliesFromInstalledPackages(stagingDirectory)");
 		StringAssert.Contains(source, "TryExtractAssembliesFromFastDevOverrideDirectory(stagingDirectory)");
 		StringAssert.Contains(source, "Path.Combine(FileSystem.AppDataDirectory, FastDevOverrideDirectoryName)");
 		StringAssert.Contains(source, "Directory.EnumerateFiles(overrideRoot, \"*.dll\", SearchOption.AllDirectories)");

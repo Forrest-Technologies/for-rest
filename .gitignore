@@ -16,6 +16,8 @@
 /.local/
 /build/android/
 /config/settings.toml
+/config/license-admin.local.json
+/docs/local/
 /.env
 /.env.*
 *.keystore

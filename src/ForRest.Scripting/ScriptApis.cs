@@ -3,6 +3,7 @@ using System.Collections;
 using System.Dynamic;
 using System.Linq.Expressions;
 using System.Security.Cryptography;
+using System.Threading;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -1788,4 +1789,35 @@ public sealed class ScriptGlobals
     public required WorkspaceApi workspace { get; init; }
 
     public required dynamic stash { get; init; }
+}
+
+public static class ScriptRuntimeContext
+{
+    private static readonly AsyncLocal<ScriptGlobals?> CurrentGlobals = new();
+
+    public static ScriptGlobals Globals =>
+        CurrentGlobals.Value ?? throw new InvalidOperationException("Script runtime context is unavailable.");
+
+    public static IDisposable Enter(ScriptGlobals globals)
+    {
+        ScriptGlobals? previous = CurrentGlobals.Value;
+        CurrentGlobals.Value = globals;
+        return new Scope(previous);
+    }
+
+    private sealed class Scope(ScriptGlobals? previous) : IDisposable
+    {
+        private bool disposed;
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            CurrentGlobals.Value = previous;
+            disposed = true;
+        }
+    }
 }

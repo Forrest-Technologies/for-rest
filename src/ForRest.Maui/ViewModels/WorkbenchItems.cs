@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Linq;
 using ForRest.Models;
 using Microsoft.Maui.Graphics;
 
@@ -43,6 +45,18 @@ public sealed class WorkspaceItemViewModel(Guid id, string title, string subtitl
 	{
 		get => _isSelected;
 		set => SetProperty(ref _isSelected, value);
+	}
+
+	private static string Summarize(string value)
+	{
+		string normalized = value
+			.Replace("\r", " ", StringComparison.Ordinal)
+			.Replace("\n", " ", StringComparison.Ordinal)
+			.Trim();
+
+		return normalized.Length <= 42
+			? normalized
+			: $"{normalized[..39]}...";
 	}
 }
 
@@ -343,19 +357,86 @@ public sealed class TraceEntryViewModel(string title, string detail, string when
 	}
 }
 
-public sealed class StashColumnViewModel(string title)
+public sealed class StashColumnViewModel(string title, int populatedValueCount = 0)
 {
 	public string Title { get; } = title;
+
+	public int PopulatedValueCount { get; } = populatedValueCount;
+
+	public string SummaryText => PopulatedValueCount == 1
+		? "1 row"
+		: $"{PopulatedValueCount} rows";
 }
 
-public sealed class StashCellViewModel(string value)
+public sealed class StashCellViewModel(string value, string columnTitle = "")
 {
 	public string Value { get; } = value;
+
+	public string ColumnTitle { get; } = columnTitle;
+
+	public string DisplayValue => string.IsNullOrWhiteSpace(Value) ? "\u2014" : Value;
+
+	public bool IsEmpty => string.IsNullOrWhiteSpace(Value);
 }
 
-public sealed class StashRowViewModel(IEnumerable<StashCellViewModel> cells)
+public sealed class StashRowViewModel(
+	int rowNumber,
+	IEnumerable<StashCellViewModel> cells,
+	IEnumerable<NameValueRowViewModel> details,
+	bool isAlternate,
+	string searchText) : ObservableObject
 {
+	private bool _isSelected;
+
+	public int RowNumber { get; } = rowNumber;
+
+	public string RowLabel => RowNumber.ToString(CultureInfo.InvariantCulture);
+
+	public string RowHeadingText => $"Row {RowLabel}";
+
 	public ObservableCollection<StashCellViewModel> Cells { get; } = new(cells);
+
+	public IReadOnlyList<NameValueRowViewModel> Details { get; } = details.ToList();
+
+	public bool IsAlternate { get; } = isAlternate;
+
+	public string SearchText { get; } = searchText;
+
+	public bool HasDetails => Details.Count > 0;
+
+	public bool ShowEmptyDetails => !HasDetails;
+
+	public int PopulatedCellCount => Cells.Count(static cell => !cell.IsEmpty);
+
+	public string DetailSummaryText => PopulatedCellCount == 1
+		? "1 populated field"
+		: $"{PopulatedCellCount} populated fields";
+
+	public string PreviewText => Details.Count == 0
+		? "No populated fields in this row."
+		: string.Join(
+			"  |  ",
+			Details.Take(2).Select(static detail => $"{detail.Name}: {Summarize(detail.Value)}"));
+
+	public string CompactSummaryText => $"{DetailSummaryText}  \u2022  {PreviewText}";
+
+	private static string Summarize(string value)
+	{
+		string normalized = value
+			.Replace("\r", " ", StringComparison.Ordinal)
+			.Replace("\n", " ", StringComparison.Ordinal)
+			.Trim();
+
+		return normalized.Length <= 42
+			? normalized
+			: $"{normalized[..39]}...";
+	}
+
+	public bool IsSelected
+	{
+		get => _isSelected;
+		set => SetProperty(ref _isSelected, value);
+	}
 }
 
 public sealed class LanguageHelpEntryViewModel(
