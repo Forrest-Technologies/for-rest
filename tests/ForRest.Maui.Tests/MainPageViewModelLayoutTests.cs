@@ -1080,7 +1080,7 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
-	public async Task ActiveEditorText_refreshes_settings_projection_after_ai_toggle_autosave()
+	public async Task ActiveEditorText_refreshes_settings_projection_after_ai_toggle_autosave_once_editor_is_idle()
 	{
 		using TestHarness harness = new();
 		MainPageViewModel viewModel = harness.CreateViewModel();
@@ -1093,11 +1093,41 @@ public sealed class MainPageViewModelLayoutTests
 		string updatedText = viewModel.ActiveEditorText.Replace("enabled = false", "enabled = true", StringComparison.Ordinal);
 
 		viewModel.ActiveEditorText = updatedText;
-		await Task.Delay(900);
+		await Task.Delay(700);
+
+		StringAssert.Contains(viewModel.ActiveEditorText, "enabled = true");
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("provider = ", StringComparison.Ordinal));
+
+		await Task.Delay(700);
 
 		StringAssert.Contains(viewModel.ActiveEditorText, "enabled = true");
 		StringAssert.Contains(viewModel.ActiveEditorText, "provider = \"openai\"");
 		StringAssert.Contains(viewModel.ActiveEditorText, "api_key = \"\"");
+	}
+
+	[TestMethod]
+	public async Task ActiveEditorText_does_not_autosave_or_escape_unterminated_ai_model_strings()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		viewModel.ActiveEditorText = viewModel.ActiveEditorText.Replace("enabled = false", "enabled = true", StringComparison.Ordinal);
+		await Task.Delay(1500);
+
+		string incompleteModelText = viewModel.ActiveEditorText.Replace("model = \"\"", "model = \"gpt-5.4-na", StringComparison.Ordinal);
+		viewModel.ActiveEditorText = incompleteModelText;
+
+		await Task.Delay(900);
+
+		Assert.AreEqual(incompleteModelText, viewModel.ActiveEditorText);
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("\\\"gpt-5.4-na", StringComparison.Ordinal));
+
+		string savedConfig = await File.ReadAllTextAsync(harness.ConfigFilePath);
+		Assert.IsFalse(savedConfig.Contains("gpt-5.4-na", StringComparison.Ordinal));
 	}
 
 	[TestMethod]

@@ -32,8 +32,10 @@ public sealed class ForRestMauiProjectTrimSettingsTests
 		StringAssert.Contains(project, "<TrimmerRootAssembly Include=\"System.Text.Json\" RootMode=\"All\" />");
 		StringAssert.Contains(project, "<TrimmerRootAssembly Include=\"System.Text.RegularExpressions\" RootMode=\"All\" />");
 		StringAssert.Contains(project, "<LinkDescription Include=\"Linker\\ForRest.Android.Scripting.linker.xml\" />");
-		StringAssert.Contains(project, "<MauiAsset Include=\"roslyn-runtime\\*.dll\" LogicalName=\"roslyn-runtime/%(Filename)%(Extension)\" />");
+		StringAssert.Contains(project, "<MauiAsset Include=\"roslyn-runtime\\*.dll\" Exclude=\"roslyn-runtime\\ForRest.*.dll\" LogicalName=\"roslyn-runtime/%(Filename)%(Extension)\" />");
+		StringAssert.Contains(project, "<MauiAsset Include=\"..\\ForRest.Domain\\bin\\$(Configuration)\\net10.0\\ForRest.Domain.dll\" LogicalName=\"roslyn-runtime/ForRest.Domain.dll\" />");
 		StringAssert.Contains(project, "<MauiAsset Include=\"..\\ForRest.Scripting\\bin\\$(Configuration)\\net10.0\\ForRest.Scripting.dll\" LogicalName=\"roslyn-runtime/ForRest.Scripting.dll\" />");
+		StringAssert.Contains(project, "<MauiAsset Include=\"..\\ForRest.Services\\bin\\$(Configuration)\\net10.0\\ForRest.Services.dll\" LogicalName=\"roslyn-runtime/ForRest.Services.dll\" />");
 		StringAssert.Contains(project, "<MauiAsset Include=\"$(TargetDir)ForRest.Maui.dll\" LogicalName=\"roslyn-runtime/ForRest.Maui.dll\" />");
 	}
 

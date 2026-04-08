@@ -35,6 +35,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private const double CompactPaneMinWidth = 300d;
 	private const double CompactPaneMaxWidth = 440d;
 	private const int MaxDocumentHistoryEntries = 200;
+	private static readonly TimeSpan SettingsEditorProjectionRefreshQuietPeriod = TimeSpan.FromMilliseconds(1000);
 	private const string RequestDocumentKind = "request";
 	private const string SettingsDocumentKind = "settings";
 
@@ -138,9 +139,11 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _editorDebugDetailText;
 	private Color _editorDebugAccentColor;
 	private CancellationTokenSource? _settingsSaveSource;
+	private CancellationTokenSource? _settingsProjectionRefreshSource;
 	private CancellationTokenSource? _requestSaveSource;
 	private CancellationTokenSource? _requestMetadataRefreshSource;
 	private int _requestMetadataRefreshVersion;
+	private DateTimeOffset _lastSettingsEditUtc = DateTimeOffset.MinValue;
 	private bool _suppressSettingsAutosave;
 	private bool _suppressRequestAutosave;
 	private bool _suppressDocumentSynchronization;
@@ -659,6 +662,8 @@ public sealed class MainPageViewModel : ObservableObject
 
 			if (IsActiveSettingsEditor)
 			{
+				_lastSettingsEditUtc = DateTimeOffset.UtcNow;
+				CancelPendingSettingsProjectionRefresh();
 				_themeConfigText = value;
 				ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
 				if (!_suppressSettingsAutosave)
@@ -1486,6 +1491,7 @@ public sealed class MainPageViewModel : ObservableObject
 		CancelPendingRequestMetadataRefresh();
 		CancelPendingRequestAutosave();
 		CancelPendingSettingsAutosave();
+		CancelPendingSettingsProjectionRefresh();
 
 		try
 		{
@@ -3261,9 +3267,9 @@ public sealed class MainPageViewModel : ObservableObject
 		ApplyStyleSettings(e.Settings.Style);
 		ExecutionStatus = e.StatusMessage;
 		ApplyThemePalette(e.Theme);
-		if (!(e.IsPreview && IsActiveSettingsEditor))
+		if (!e.IsPreview)
 		{
-			UpdateSettingsTextFromDisk(_currentThemeName, _latestActivationSnapshot);
+			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
 		}
 
 		_ = RefreshActivationStatusAsync();
@@ -3314,10 +3320,7 @@ public sealed class MainPageViewModel : ObservableObject
 			{
 				ShowStatusBanner(snapshot.StatusText, snapshot.DetailText, isWarning: false);
 			}
-			if (!IsActiveSettingsEditor)
-			{
-				UpdateSettingsTextFromDisk(_currentThemeName, snapshot);
-			}
+			RequestSettingsProjectionRefresh(_currentThemeName, snapshot);
 		}
 		catch (Exception exception)
 		{
@@ -3327,10 +3330,7 @@ public sealed class MainPageViewModel : ObservableObject
 			_latestActivationSnapshot = CreateUnavailableActivationSnapshot(exception.Message);
 			ShowStatusBanner("Activation unavailable", exception.Message, isWarning: false);
 			AppLaunchGuard.RecordException("Activation status refresh failed.", exception);
-			if (!IsActiveSettingsEditor)
-			{
-				UpdateSettingsTextFromDisk(_currentThemeName, _latestActivationSnapshot);
-			}
+			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
 		}
 
 		OnPropertyChanged(nameof(CanSend));
@@ -3739,6 +3739,13 @@ public sealed class MainPageViewModel : ObservableObject
 	private void CancelPendingSettingsAutosave()
 	{
 		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _settingsSaveSource, null);
+		pendingSource?.Cancel();
+		pendingSource?.Dispose();
+	}
+
+	private void CancelPendingSettingsProjectionRefresh()
+	{
+		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _settingsProjectionRefreshSource, null);
 		pendingSource?.Cancel();
 		pendingSource?.Dispose();
 	}
@@ -4996,12 +5003,12 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		void refresh()
 		{
-			if (_isShuttingDown || !IsActiveSettingsEditor)
+			if (_isShuttingDown)
 			{
 				return;
 			}
 
-			UpdateSettingsTextFromDisk(_currentThemeName, _latestActivationSnapshot);
+			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
 		}
 
 		try
@@ -5021,6 +5028,66 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	private void RequestSettingsProjectionRefresh(ShellThemeName currentTheme, ActivationSnapshot activation)
+	{
+		if (_isShuttingDown)
+		{
+			return;
+		}
+
+		if (!IsActiveSettingsEditor)
+		{
+			CancelPendingSettingsProjectionRefresh();
+			UpdateSettingsTextFromDisk(currentTheme, activation);
+			return;
+		}
+
+		TimeSpan elapsedSinceEdit = DateTimeOffset.UtcNow - _lastSettingsEditUtc;
+		if (_lastSettingsEditUtc == DateTimeOffset.MinValue || elapsedSinceEdit >= SettingsEditorProjectionRefreshQuietPeriod)
+		{
+			CancelPendingSettingsProjectionRefresh();
+			UpdateSettingsTextFromDisk(currentTheme, activation);
+			return;
+		}
+
+		TimeSpan delay = SettingsEditorProjectionRefreshQuietPeriod - elapsedSinceEdit;
+		CancellationTokenSource refreshSource = new();
+		CancellationTokenSource? previousSource = Interlocked.Exchange(ref _settingsProjectionRefreshSource, refreshSource);
+		previousSource?.Cancel();
+		previousSource?.Dispose();
+
+		_ = Task.Run(
+			async () =>
+			{
+				try
+				{
+					await Task.Delay(delay, refreshSource.Token);
+					await InvokeOnViewModelThreadAsync(
+						() =>
+						{
+							if (refreshSource.IsCancellationRequested || _isShuttingDown)
+							{
+								return;
+							}
+
+							UpdateSettingsTextFromDisk(currentTheme, activation);
+						});
+				}
+				catch (OperationCanceledException)
+				{
+				}
+				finally
+				{
+					if (ReferenceEquals(Volatile.Read(ref _settingsProjectionRefreshSource), refreshSource))
+					{
+						Interlocked.CompareExchange(ref _settingsProjectionRefreshSource, null, refreshSource);
+					}
+
+					refreshSource.Dispose();
+				}
+			});
+	}
+
 	private void UpdateSettingsTextFromDisk(ShellThemeName currentTheme, ActivationSnapshot activation)
 	{
 		string latestText = ReadSettingsText(currentTheme, activation);
@@ -5035,7 +5102,10 @@ public sealed class MainPageViewModel : ObservableObject
 		try
 		{
 			ActiveEditorEditableRangesJson = BuildEditableRangesJson(latestText);
-			SetActiveEditorTextInternal(latestText);
+			if (!string.Equals(_activeEditorText, latestText, StringComparison.Ordinal))
+			{
+				SetActiveEditorTextInternal(latestText);
+			}
 		}
 		finally
 		{
