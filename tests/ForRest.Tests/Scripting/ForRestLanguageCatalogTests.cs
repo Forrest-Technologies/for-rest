@@ -98,11 +98,11 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(markdown, "convert.ToBool / convert.ToInt");
         StringAssert.Contains(markdown, "time.Parse / time.Format");
         StringAssert.Contains(markdown, "switch / case / default");
-        StringAssert.Contains(markdown, "| `let` |");
-        StringAssert.Contains(markdown, "log / warn / error");
-        StringAssert.Contains(markdown, "tests.Assert / tests.Equal");
-        StringAssert.Contains(markdown, "guid() / now()");
-        StringAssert.Contains(markdown, "break / continue");
+        StringAssert.Contains(markdown, "### `let`");
+        StringAssert.Contains(markdown, "### `log / warn / error`");
+        StringAssert.Contains(markdown, "### `tests.Assert / tests.Equal`");
+        StringAssert.Contains(markdown, "### `guid() / now() / utc_now() / random()`");
+        StringAssert.Contains(markdown, "### `break / continue`");
     }
 
     [TestMethod]
