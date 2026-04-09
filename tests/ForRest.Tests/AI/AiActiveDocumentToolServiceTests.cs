@@ -265,6 +265,10 @@ public sealed class AiActiveDocumentToolServiceTests
             };
             return AiActiveDocumentUpdateResult.Success();
         }
+
+        public AiWorkspaceContext? GetWorkspaceContext() => null;
+
+        public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
     }
 
     private sealed class RejectingActiveDocumentHost(AiActiveDocumentSnapshot? snapshot) : IAiActiveDocumentHost
@@ -283,5 +287,9 @@ public sealed class AiActiveDocumentToolServiceTests
                 ],
                 retryWithReplace: true);
         }
+
+        public AiWorkspaceContext? GetWorkspaceContext() => null;
+
+        public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
     }
 }

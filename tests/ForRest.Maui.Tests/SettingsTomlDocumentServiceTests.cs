@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
-using ForRest.Services.Licensing;
+using ForRest.Licensing;
 
 namespace ForRest.Maui.Tests;
 
@@ -32,7 +32,7 @@ public sealed class SettingsTomlDocumentServiceTests
 		Assert.IsFalse(editorText.Contains("super-secret-license", StringComparison.Ordinal));
 		StringAssert.Contains(editorText, $"license = \"{SettingsTomlTemplate.MaskedLicenseValue}\"");
 		StringAssert.Contains(editorText, "[license.info]");
-		StringAssert.Contains(editorText, "build_started_utc = ");
+		StringAssert.Contains(editorText, "build_grace_ends_utc = ");
 	}
 
 	[TestMethod]
@@ -110,6 +110,40 @@ public sealed class SettingsTomlDocumentServiceTests
 
 		StringAssert.Contains(editorText, "OpenAI endpoint is optional");
 		StringAssert.Contains(editorText, "Azure OpenAI requires endpoint and deployment_name");
+	}
+
+	[TestMethod]
+	public void CanAutoSave_rejects_unterminated_ai_string_values()
+	{
+		SettingsTomlTemplate template = new();
+		string text =
+			"""
+			license = ""
+
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = false
+			amber = false
+
+			[appearance.style]
+			editor_font_size = 13.5
+			result_pane_tab_font_size = 11.5
+
+			[ai]
+			enabled = true
+			stream_responses = true
+			provider = "openai"
+			api = "responses"
+			endpoint = "https://api.example.test"
+			model = "gpt-5.4-na
+			deployment_name = "gpt-5.4-nano"
+			api_key = ""
+			system_prompt = ""
+			""";
+
+		Assert.IsFalse(template.CanAutoSave(text));
 	}
 
 	[TestMethod]
@@ -280,7 +314,7 @@ public sealed class SettingsTomlDocumentServiceTests
 		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
 		string edited = editorText
 			.Replace("summary = ", "summary = \"hacked\" # ", StringComparison.Ordinal)
-			.Replace("grace_days_remaining = ", "grace_days_remaining = 999 # ", StringComparison.Ordinal);
+			.Replace("lease_expires_utc = ", "lease_expires_utc = \"2099-01-01T00:00:00Z\" # ", StringComparison.Ordinal);
 		service.SaveRawText(edited);
 
 		string rawText = File.ReadAllText(scope.ConfigFilePath);
@@ -295,20 +329,11 @@ public sealed class SettingsTomlDocumentServiceTests
 		ThemeConfigParser parser = new();
 		ThemeConfigNormalizer normalizer = new(template);
 		ThemeConfigStore store = new();
-		ILicenseValidationService licenseValidationService = new StandardLicenseValidationService(
-			new LicenseValidationOptions("unused-public-key", GracePeriodDays: 30));
 		return new SettingsTomlDocumentService(
 			store,
 			parser,
 			normalizer,
-			template,
-			licenseValidationService,
-			new TestBuildMetadataProvider(DateTimeOffset.Parse("2026-03-24T00:00:00Z", null, System.Globalization.DateTimeStyles.AssumeUniversal)));
-	}
-
-	private sealed class TestBuildMetadataProvider(DateTimeOffset buildDateUtc) : IBuildMetadataProvider
-	{
-		public DateTimeOffset GetBuildDateUtc() => buildDateUtc;
+			template);
 	}
 
 	private sealed class TestConfigScope : IDisposable

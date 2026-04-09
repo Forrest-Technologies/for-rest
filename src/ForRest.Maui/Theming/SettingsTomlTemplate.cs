@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using ForRest.Services.Licensing;
 
 namespace ForRest.Maui.Theming;
 
@@ -61,24 +60,24 @@ public sealed class SettingsTomlTemplate
 			.Replace("\"", "\\\"", StringComparison.Ordinal);
 	}
 
-	public string BuildLicenseInfoBlock(LicenseValidationResult validation)
+	public string BuildLicenseInfoBlock(ActivationSnapshot activation)
 	{
 		return string.Join(
 			Environment.NewLine,
 			[
 				"# Read-only activation details. Changes here are ignored.",
 				GeneratedLicenseInfoSectionHeader,
-				$"state = \"{EscapeTomlString(validation.Status.ToString())}\"",
-				$"summary = \"{EscapeTomlString(validation.Summary)}\"",
-				$"detail = \"{EscapeTomlString(validation.Detail)}\"",
-				$"registered_to = \"{EscapeTomlString(validation.RegisteredTo)}\"",
-				$"registered_email = \"{EscapeTomlString(validation.RegisteredEmail)}\"",
-				$"license_expires_utc = \"{EscapeTomlString(FormatDate(validation.LicenseExpirationUtc))}\"",
-				$"beta_trial_active = {(validation.IsGraceActive ? "true" : "false")}",
-				$"build_started_utc = \"{EscapeTomlString(FormatDate(validation.BuildDateUtc))}\"",
-				$"beta_trial_ends_utc = \"{EscapeTomlString(FormatDate(validation.GraceExpiresUtc))}\"",
-				$"grace_days_remaining = {validation.GraceDaysRemaining}",
-				$"can_execute_requests = {(validation.IsExecutionAllowed ? "true" : "false")}"
+				$"state = \"{EscapeTomlString(activation.State.ToString())}\"",
+				$"summary = \"{EscapeTomlString(activation.StatusText)}\"",
+				$"detail = \"{EscapeTomlString(activation.DetailText)}\"",
+				$"registered_to = \"{EscapeTomlString(activation.RegisteredTo)}\"",
+				$"registered_email = \"{EscapeTomlString(activation.RegisteredEmail)}\"",
+				$"server_validated_utc = \"{EscapeTomlString(FormatDate(activation.ServerValidatedUtc))}\"",
+				$"lease_refresh_utc = \"{EscapeTomlString(FormatDate(activation.LeaseRefreshAfterUtc))}\"",
+				$"lease_expires_utc = \"{EscapeTomlString(FormatDate(activation.LeaseExpiresUtc))}\"",
+				$"license_expires_utc = \"{EscapeTomlString(FormatDate(activation.LicenseExpiresUtc))}\"",
+				$"build_grace_ends_utc = \"{EscapeTomlString(FormatDate(activation.BuildGraceExpiresUtc))}\"",
+				$"can_execute_requests = {(activation.CanExecuteRequests ? "true" : "false")}"
 			]);
 	}
 
@@ -289,6 +288,11 @@ public sealed class SettingsTomlTemplate
 				if (topLevelMatch.Success &&
 				    string.Equals(topLevelMatch.Groups["key"].Value, LicenseKeyName, StringComparison.OrdinalIgnoreCase))
 				{
+					if (!IsValidStringScalarForAutosave(topLevelMatch.Groups["value"].Value.Trim()))
+					{
+						return false;
+					}
+
 					continue;
 				}
 
@@ -345,6 +349,13 @@ public sealed class SettingsTomlTemplate
 			if ((string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) ||
 			     string.Equals(key, AiStreamResponsesKeyName, StringComparison.OrdinalIgnoreCase)) &&
 			    !bool.TryParse(value, out _))
+			{
+				return false;
+			}
+
+			if (!string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) &&
+			    !string.Equals(key, AiStreamResponsesKeyName, StringComparison.OrdinalIgnoreCase) &&
+			    !IsValidStringScalarForAutosave(value))
 			{
 				return false;
 			}
@@ -414,6 +425,58 @@ public sealed class SettingsTomlTemplate
 	{
 		return double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out result) &&
 		       double.IsFinite(result);
+	}
+
+	private static bool IsValidStringScalarForAutosave(string value)
+	{
+		string trimmed = value.Trim();
+		if (trimmed.Length == 0)
+		{
+			return true;
+		}
+
+		if (trimmed[0] == '"' || trimmed[^1] == '"')
+		{
+			return TryParseQuotedString(trimmed);
+		}
+
+		return !trimmed.Contains('"') && !trimmed.Contains('\\');
+	}
+
+	private static bool TryParseQuotedString(string value)
+	{
+		if (value.Length < 2 || value[0] != '"' || value[^1] != '"')
+		{
+			return false;
+		}
+
+		for (int index = 1; index < value.Length - 1; index++)
+		{
+			char character = value[index];
+			if (character == '\\')
+			{
+				if (index + 1 >= value.Length - 1)
+				{
+					return false;
+				}
+
+				char escaped = value[index + 1];
+				if (escaped != '\\' && escaped != '"')
+				{
+					return false;
+				}
+
+				index++;
+				continue;
+			}
+
+			if (character == '"')
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 }

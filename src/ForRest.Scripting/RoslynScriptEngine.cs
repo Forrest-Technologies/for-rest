@@ -1,13 +1,18 @@
 namespace ForRest.Scripting;
 
 using System.Collections.Immutable;
+using System.IO;
 using Microsoft.CSharp.RuntimeBinder;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
+using Microsoft.CodeAnalysis.Emit;
 using Microsoft.CodeAnalysis.Scripting;
 using Microsoft.CodeAnalysis.Scripting.Hosting;
 
@@ -16,6 +21,38 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     #region Private Fields
 
     private const string RoslynRuntimeDirectoryDataKey = "ForRest.RoslynRuntimeDirectory";
+    private const string ScriptPreamble =
+        """
+        var request = global::ForRest.Scripting.ScriptRuntimeContext.Globals.request;
+        dynamic response = global::ForRest.Scripting.ScriptRuntimeContext.Globals.response;
+        var variables = global::ForRest.Scripting.ScriptRuntimeContext.Globals.variables;
+        var tests = global::ForRest.Scripting.ScriptRuntimeContext.Globals.tests;
+        var console = global::ForRest.Scripting.ScriptRuntimeContext.Globals.console;
+        var time = global::ForRest.Scripting.ScriptRuntimeContext.Globals.time;
+        var strings = global::ForRest.Scripting.ScriptRuntimeContext.Globals.strings;
+        var convert = global::ForRest.Scripting.ScriptRuntimeContext.Globals.convert;
+        var json = global::ForRest.Scripting.ScriptRuntimeContext.Globals.json;
+        var encoding = global::ForRest.Scripting.ScriptRuntimeContext.Globals.encoding;
+        var crypto = global::ForRest.Scripting.ScriptRuntimeContext.Globals.crypto;
+        var regex = global::ForRest.Scripting.ScriptRuntimeContext.Globals.regex;
+        var random = global::ForRest.Scripting.ScriptRuntimeContext.Globals.random;
+        var workspace = global::ForRest.Scripting.ScriptRuntimeContext.Globals.workspace;
+        dynamic stash = global::ForRest.Scripting.ScriptRuntimeContext.Globals.stash;
+        var snapshot = global::ForRest.Scripting.ScriptRuntimeContext.Globals.snapshot;
+
+        """;
+    private static readonly string[] DefaultImports =
+    [
+        "System",
+        "System.Linq",
+        "System.Collections.Generic",
+        "System.Text",
+        "System.Text.Json.Nodes",
+        "System.Text.RegularExpressions",
+        "System.Threading.Tasks",
+        "ForRest.Scripting",
+        "ForRest.Models",
+    ];
 
     private static readonly Lazy<ScriptRuntimeConfiguration> ScriptRuntime = new(
         CreateScriptRuntimeConfiguration,
@@ -34,8 +71,8 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
 
         try
         {
-            Script<object> compiledScript = CreateScript(script);
-            ImmutableArray<Diagnostic> diagnostics = compiledScript.Compile();
+            ScriptCompilationResult compilation = CompileScript(script);
+            ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics();
             string message = string.Join(
                 Environment.NewLine,
                 diagnostics
@@ -125,17 +162,23 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                     stashApi,
                     request.ExecuteWorkspaceRequestAsync),
                 stash = stashApi,
+                snapshot = new SnapshotApi(),
             };
 
-            Script<object> script = CreateScript(request.Script);
-            await script.RunAsync(globals, cancellationToken: cancellationToken);
-        }
-        catch (CompilationErrorException exception)
-        {
-            var message = string.Join(Environment.NewLine, exception.Diagnostics.Select(static item => item.ToString()));
-            logger.LogWarning("Script compilation failed: {Message}", message);
-            consoleApi.Error(message);
-            return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
+            ScriptCompilationResult compilation = CompileScript(request.Script);
+            ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics(cancellationToken)
+                .Where(static item => item.Severity == DiagnosticSeverity.Error)
+                .ToImmutableArray();
+            if (!diagnostics.IsEmpty)
+            {
+                string message = string.Join(Environment.NewLine, diagnostics.Select(static item => item.ToString()));
+                logger.LogWarning("Script compilation failed: {Message}", message);
+                consoleApi.Error(message);
+                return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
+            }
+
+            using IDisposable scope = ScriptRuntimeContext.Enter(globals);
+            await ExecuteCompiledScript(compilation, cancellationToken);
         }
         catch (Exception exception)
         {
@@ -219,14 +262,107 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             };
     }
 
-    private static Script<object> CreateScript(string script)
+    private static ScriptCompilationResult CompileScript(string script)
     {
         ScriptRuntimeConfiguration scriptRuntime = ScriptRuntime.Value;
-        return CSharpScript.Create(
-            script,
-            scriptRuntime.Options,
-            typeof(ScriptGlobals),
-            CreateAssemblyLoader(scriptRuntime.ReferenceAssemblies));
+        string typeName = $"GeneratedScript_{Guid.NewGuid():N}";
+        string assemblyName = $"ForRest.Script.{Guid.NewGuid():N}";
+        string preparedScript = BuildScriptSource(typeName, script);
+        SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(
+            preparedScript,
+            new CSharpParseOptions(LanguageVersion.Latest),
+            path: "script.cs");
+        CSharpCompilation compilation = CSharpCompilation.Create(
+            assemblyName,
+            [syntaxTree],
+            scriptRuntime.References,
+            new CSharpCompilationOptions(
+                    OutputKind.DynamicallyLinkedLibrary,
+                    optimizationLevel: OptimizationLevel.Release)
+                .WithNullableContextOptions(NullableContextOptions.Enable)
+                .WithUsings(DefaultImports));
+        return new(compilation, typeName);
+    }
+
+    private static string BuildScriptSource(string typeName, string script)
+    {
+        string imports = string.Join(
+            Environment.NewLine,
+            DefaultImports.Select(static item => $"using global::{item};"));
+        return
+            $$"""
+            {{imports}}
+            using StringComparison = global::System.StringComparison;
+
+            namespace ForRest.Scripting.Generated;
+
+            internal static class {{typeName}}
+            {
+                public static async global::System.Threading.Tasks.Task<object?> RunAsync()
+                {
+            {{IndentScriptBody(ScriptPreamble)}}    #line 1
+            {{IndentScriptBody(script)}}
+                    return null;
+                }
+            }
+            """;
+    }
+
+    private static string IndentScriptBody(string script)
+    {
+        if (string.IsNullOrEmpty(script))
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new();
+        using StringReader reader = new(script);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            builder.Append("        ");
+            builder.AppendLine(line);
+        }
+
+        return builder.ToString();
+    }
+
+    private static async Task ExecuteCompiledScript(ScriptCompilationResult compilation, CancellationToken cancellationToken)
+    {
+        using MemoryStream assemblyStream = new();
+        EmitResult emitResult = compilation.Compilation.Emit(assemblyStream, cancellationToken: cancellationToken);
+        if (!emitResult.Success)
+        {
+            string message = string.Join(
+                Environment.NewLine,
+                emitResult.Diagnostics
+                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
+                    .Select(static item => item.ToString()));
+            throw new InvalidOperationException(message);
+        }
+
+        assemblyStream.Position = 0;
+
+        ScriptAssemblyLoadContext loadContext = new();
+        try
+        {
+            Assembly assembly = loadContext.LoadFromStream(assemblyStream);
+            Type scriptType = assembly.GetType($"ForRest.Scripting.Generated.{compilation.TypeName}", throwOnError: true)!;
+            MethodInfo method = scriptType.GetMethod("RunAsync", BindingFlags.Public | BindingFlags.Static)
+                ?? throw new MissingMethodException(scriptType.FullName, "RunAsync");
+            Task executionTask = (Task)(method.Invoke(null, null)
+                ?? throw new InvalidOperationException("Compiled script did not return a task."));
+            await executionTask.WaitAsync(cancellationToken);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
+        finally
+        {
+            loadContext.Unload();
+        }
     }
 
     private static string BuildFriendlyRuntimeErrorMessage(Exception exception)
@@ -262,59 +398,121 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     private static ScriptRuntimeConfiguration CreateScriptRuntimeConfiguration()
     {
         var assemblies = GetReferenceAssemblies();
-        var references = assemblies
-            .Select(CreateMetadataReference)
-            .ToArray();
+        IReadOnlyList<MetadataReference> references = BuildCompilationReferences(assemblies);
 
-        var options = Microsoft.CodeAnalysis.Scripting.ScriptOptions.Default
-           .WithReferences(references)
-           .AddImports(
-               "System",
-               "System.Linq",
-               "System.Collections.Generic",
-               "System.Text",
-               "System.Text.Json.Nodes",
-               "System.Text.RegularExpressions",
-               "ForRest.Scripting",
-               "ForRest.Models");
+        return new(references, assemblies);
+    }
 
-        return new(options, assemblies);
+    private static IReadOnlyList<MetadataReference> BuildCompilationReferences(IReadOnlyList<Assembly> assemblies)
+    {
+        List<MetadataReference> references = [];
+        HashSet<string> seenPaths = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> requiredAssemblyNames = assemblies
+            .Select(static assembly => assembly.GetName().Name)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string referencePath in EnumerateCompilationReferenceFilePaths(assemblies, requiredAssemblyNames))
+        {
+            if (!seenPaths.Add(referencePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                references.Add(MetadataReference.CreateFromFile(referencePath));
+            }
+            catch (BadImageFormatException)
+            {
+                // Skip non-managed payloads if one slips into the runtime directory.
+            }
+            catch (FileNotFoundException)
+            {
+                // Skip disappearing files; curated assembly fallbacks below still apply.
+            }
+        }
+
+        foreach (Assembly assembly in assemblies)
+        {
+            string? assemblyPath = TryGetAssemblyFilePath(assembly);
+            if (assemblyPath is not null && seenPaths.Contains(assemblyPath))
+            {
+                continue;
+            }
+
+            if (TryCreateMetadataReferenceFromRawMetadata(assembly, out MetadataReference metadataReference))
+            {
+                references.Add(metadataReference);
+            }
+        }
+
+        return references;
+    }
+
+    private static IEnumerable<string> EnumerateCompilationReferenceFilePaths(
+        IReadOnlyList<Assembly> assemblies,
+        ISet<string> requiredAssemblyNames)
+    {
+        string? trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (!string.IsNullOrWhiteSpace(trustedPlatformAssemblies))
+        {
+            foreach (string path in trustedPlatformAssemblies.Split(
+                         Path.PathSeparator,
+                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                string assemblyName = Path.GetFileNameWithoutExtension(path);
+                if (requiredAssemblyNames.Contains(assemblyName) && File.Exists(path))
+                {
+                    yield return path;
+                }
+            }
+        }
+
+        string? roslynRuntimeDirectory = GetRoslynRuntimeDirectory();
+        if (!string.IsNullOrWhiteSpace(roslynRuntimeDirectory) && Directory.Exists(roslynRuntimeDirectory))
+        {
+            foreach (string path in Directory.EnumerateFiles(roslynRuntimeDirectory, "*.dll", SearchOption.TopDirectoryOnly))
+            {
+                string assemblyName = Path.GetFileNameWithoutExtension(path);
+                if (requiredAssemblyNames.Contains(assemblyName))
+                {
+                    yield return path;
+                }
+            }
+        }
+
+        foreach (Assembly assembly in assemblies)
+        {
+            if (TryGetAssemblyFilePath(assembly) is { } assemblyPath)
+            {
+                yield return assemblyPath;
+            }
+        }
     }
 
     private static IReadOnlyList<Assembly> GetReferenceAssemblies()
     {
-        var assemblies = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
-        var pending = new Queue<Assembly>();
+        Dictionary<string, Assembly> assemblies = new(StringComparer.OrdinalIgnoreCase);
+        Queue<Assembly> pending = new();
 
-        foreach (var assembly in GetReferenceAssemblyRoots())
+        foreach (Assembly assembly in GetReferenceAssemblyRoots())
         {
             Enqueue(assembly);
-        }
-
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().Where(ShouldIncludeAssembly))
-        {
-            Enqueue(assembly);
-        }
-
-        foreach (var referenceName in GetDefaultReferenceNames())
-        {
-            if (TryResolveAssembly(referenceName, out var assembly))
-            {
-                Enqueue(assembly);
-            }
         }
 
         while (pending.Count > 0)
         {
-            var assembly = pending.Dequeue();
-            foreach (var reference in assembly.GetReferencedAssemblies())
+            Assembly assembly = pending.Dequeue();
+            foreach (AssemblyName reference in assembly.GetReferencedAssemblies())
             {
                 if (!ShouldIncludeAssemblyName(reference.Name))
                 {
                     continue;
                 }
 
-                if (TryResolveAssembly(reference, out var resolvedAssembly))
+                if (TryResolveAssembly(reference, out Assembly resolvedAssembly))
                 {
                     Enqueue(resolvedAssembly);
                 }
@@ -330,7 +528,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 return;
             }
 
-            var assemblyName = assembly.GetName().Name;
+            string? assemblyName = assembly.GetName().Name;
             if (string.IsNullOrWhiteSpace(assemblyName) || assemblies.ContainsKey(assemblyName))
             {
                 return;
@@ -339,21 +537,6 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             assemblies[assemblyName] = assembly;
             pending.Enqueue(assembly);
         }
-    }
-
-    private static InteractiveAssemblyLoader CreateAssemblyLoader(IReadOnlyList<Assembly> assemblies)
-    {
-        var loader = new InteractiveAssemblyLoader();
-        foreach (var assembly in assemblies)
-        {
-            loader.RegisterDependency(assembly);
-            if (TryGetAssemblyFilePath(assembly) is { } assemblyPath)
-            {
-                loader.RegisterDependency(AssemblyIdentity.FromAssemblyDefinition(assembly), assemblyPath);
-            }
-        }
-
-        return loader;
     }
 
     private static string? GetRoslynRuntimeDirectory()
@@ -392,7 +575,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         }
 
         AddDirectory(runtimeDirectory);
-        AddDirectory(string.IsNullOrWhiteSpace(assemblyLocation) ? null : Path.GetDirectoryName(assemblyLocation));
+        AddDirectory(IsUsableAssemblyFilePath(assemblyLocation) ? Path.GetDirectoryName(assemblyLocation) : null);
 
         return directories;
 
@@ -460,7 +643,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     private static string? TryGetAssemblyFilePath(Assembly assembly)
     {
         var location = GetAssemblyLocation(assembly);
-        if (!string.IsNullOrWhiteSpace(location) && Path.IsPathRooted(location) && File.Exists(location))
+        if (IsUsableAssemblyFilePath(location))
         {
             return location;
         }
@@ -479,6 +662,13 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             location);
     }
 
+    internal static bool IsUsableAssemblyFilePath(string? path)
+    {
+        return !string.IsNullOrWhiteSpace(path) &&
+               Path.IsPathRooted(path) &&
+               File.Exists(path);
+    }
+
     private static IEnumerable<Assembly> GetReferenceAssemblyRoots() =>
     [
         typeof(object).Assembly,
@@ -489,36 +679,12 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         typeof(ForRestFlowRuntime).Assembly,
         typeof(PreparedRequest).Assembly,
         typeof(VariableDefinition).Assembly,
+        typeof(ScriptRuntimeContext).Assembly,
     ];
-
-    private static IEnumerable<string> GetDefaultReferenceNames() =>
-        Microsoft.CodeAnalysis.Scripting.ScriptOptions.Default.MetadataReferences
-            .Select(GetReferenceName)
-            .Where(static name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.OrdinalIgnoreCase)!;
-
-    private static string? GetReferenceName(MetadataReference reference)
-    {
-        if (string.IsNullOrWhiteSpace(reference.Display))
-        {
-            return null;
-        }
-
-        const string unresolvedPrefix = "Unresolved: ";
-        return reference.Display.StartsWith(unresolvedPrefix, StringComparison.OrdinalIgnoreCase)
-            ? reference.Display[unresolvedPrefix.Length..].Trim()
-            : Path.GetFileNameWithoutExtension(reference.Display);
-    }
-
-    private static bool TryResolveAssembly(string simpleName, out Assembly assembly)
-    {
-        var assemblyName = new AssemblyName(simpleName);
-        return TryResolveAssembly(assemblyName, out assembly);
-    }
 
     private static bool TryResolveAssembly(AssemblyName assemblyName, out Assembly assembly)
     {
-        var loadedAssembly = AppDomain.CurrentDomain.GetAssemblies()
+        Assembly? loadedAssembly = AppDomain.CurrentDomain.GetAssemblies()
             .FirstOrDefault(candidate => string.Equals(candidate.GetName().Name, assemblyName.Name, StringComparison.OrdinalIgnoreCase));
         if (loadedAssembly is not null)
         {
@@ -683,12 +849,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             return false;
         }
 
-        var filePath = GetAssemblyLocation(assembly);
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-        {
-            filePath = null;
-        }
-
+        var filePath = TryGetAssemblyFilePath(assembly);
         var moduleMetadata = ModuleMetadata.CreateFromMetadata((nint)metadataBlob, metadataLength);
         var assemblyMetadata = AssemblyMetadata.Create(moduleMetadata);
         reference = assemblyMetadata.GetReference(
@@ -711,6 +872,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     {
         var builder = new StringBuilder();
         builder.AppendLine("Roslyn reference diagnostics:");
+        builder.AppendLine("  ScriptHostMode: ambient-context");
 
         string? runtimeDirectory = TryGetRuntimeDirectory();
         string runtimeDirectoryDisplay = runtimeDirectory ?? "<unavailable>";
@@ -748,9 +910,15 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         return builder.ToString().TrimEnd();
     }
 
+    private sealed record ScriptCompilationResult(
+        CSharpCompilation Compilation,
+        string TypeName);
+
     private sealed record ScriptRuntimeConfiguration(
-        ScriptOptions Options,
+        IReadOnlyList<MetadataReference> References,
         IReadOnlyList<Assembly> ReferenceAssemblies);
+
+    private sealed class ScriptAssemblyLoadContext() : AssemblyLoadContext($"ForRestScript_{Guid.NewGuid():N}", isCollectible: true);
 
     #endregion
 }

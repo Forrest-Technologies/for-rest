@@ -1469,5 +1469,9 @@ public sealed class AiInlineConversationServiceTests
             SourceText = updatedText;
             return AiActiveDocumentUpdateResult.Success();
         }
+
+        public AiWorkspaceContext? GetWorkspaceContext() => null;
+
+        public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
     }
 }

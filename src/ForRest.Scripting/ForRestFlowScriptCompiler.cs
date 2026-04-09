@@ -12,7 +12,9 @@ internal static class ForRestFlowScriptCompiler
     [
         "await",
         "break",
+        "call",
         "continue",
+        "define",
         "__flow",
         "console",
         "convert",
@@ -25,9 +27,12 @@ internal static class ForRestFlowScriptCompiler
         "Encoding",
         "Enumerable",
         "Environment",
+        "extract",
         "false",
+        "from",
         "Guid",
         "if",
+        "import",
         "in",
         "int",
         "Math",
@@ -36,22 +41,32 @@ internal static class ForRestFlowScriptCompiler
         "new",
         "null",
         "object",
+        "on",
+        "parallel",
+        "pipe",
         "regex",
         "Regex",
         "request",
         "response",
+        "retry",
         "runtime",
+        "scenario",
+        "secret",
+        "snapshot",
+        "stash",
         "string",
         "StringComparison",
-        "stash",
         "strings",
+        "switch",
         "tests",
         "time",
         "true",
         "Uri",
+        "use",
         "var",
         "variables",
         "while",
+        "with",
         "workspace",
         "json",
         "random",
@@ -73,6 +88,8 @@ internal static class ForRestFlowScriptCompiler
         ("request.remaining_send_iterations", "request.RemainingSendIterations"),
         ("workspace.name", "workspace.Name"),
         ("workspace.id", "workspace.Id"),
+        ("request.user_agent", "request.UserAgent"),
+        ("request.custom_user_agent", "request.CustomUserAgent"),
     ];
 
     public static string Compile(
@@ -168,6 +185,21 @@ internal static class ForRestFlowScriptCompiler
                 return;
             }
 
+            if (TryCompileDefineStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            {
+                continue;
+            }
+
+            if (TryCompileParallelStatement(builder, lines, ref index, diagnostics, locals, ref tempCounter))
+            {
+                continue;
+            }
+
+            if (TryCompilePipeStatement(builder, lines, ref index, diagnostics, locals, ref tempCounter))
+            {
+                continue;
+            }
+
             if (TryCompileIfStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
             {
                 continue;
@@ -178,7 +210,17 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
+            if (TryCompileRetryStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            {
+                continue;
+            }
+
             if (TryCompileForEachStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            {
+                continue;
+            }
+
+            if (TryCompileSwitchStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
             {
                 continue;
             }
@@ -192,6 +234,12 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
+            if (TryCompileExtractLetStatement(builder, statementText, locals))
+            {
+                index += consumedLineCount;
+                continue;
+            }
+
             if (TryCompileLetStatement(builder, statementText, locals, templateBoundIdentifiers))
             {
                 index += consumedLineCount;
@@ -199,6 +247,30 @@ internal static class ForRestFlowScriptCompiler
             }
 
             if (TryCompileRuntimeStatement(builder, statementText, locals, ref tempCounter))
+            {
+                index += consumedLineCount;
+                continue;
+            }
+
+            if (TryCompileSecretStatement(builder, statementText, locals, ref tempCounter))
+            {
+                index += consumedLineCount;
+                continue;
+            }
+
+            if (TryCompileCallStatement(builder, statementText, locals))
+            {
+                index += consumedLineCount;
+                continue;
+            }
+
+            if (TryCompileSnapshotStatement(builder, statementText, locals))
+            {
+                index += consumedLineCount;
+                continue;
+            }
+
+            if (TryCompileStashColumnsStatement(builder, statementText))
             {
                 index += consumedLineCount;
                 continue;
@@ -474,6 +546,147 @@ internal static class ForRestFlowScriptCompiler
         return true;
     }
 
+    private static bool TryCompileSecretStatement(
+        StringBuilder builder,
+        string trimmed,
+        HashSet<string> locals,
+        ref int tempCounter)
+    {
+        if (!TryReadKeywordRemainder(trimmed, "secret", out var remainder))
+        {
+            return false;
+        }
+
+        if (!TrySplitAssignment(remainder, out var name, out var expression))
+        {
+            return false;
+        }
+
+        tempCounter++;
+        var tempName = $"__secretValue{tempCounter}";
+        builder.Append("dynamic ");
+        builder.Append(tempName);
+        builder.Append(" = ");
+        builder.Append(TranslateExpression(expression, locals));
+        builder.AppendLine(";");
+        builder.Append("variables.Set(");
+        builder.Append(RenderString(name));
+        builder.Append(", __flow.S(");
+        builder.Append(tempName);
+        builder.Append("), ");
+        builder.Append("VariableScope.Runtime, ");
+        builder.AppendLine("isSecret: true);");
+        if (locals.Contains(name))
+        {
+            builder.Append(name);
+            builder.Append(" = ");
+            builder.Append(tempName);
+            builder.AppendLine(";");
+        }
+        else
+        {
+            builder.Append("dynamic ");
+            builder.Append(name);
+            builder.Append(" = ");
+            builder.Append(tempName);
+            builder.AppendLine(";");
+            locals.Add(name);
+        }
+
+        return true;
+    }
+
+    private static bool TryCompileSwitchStatement(
+        StringBuilder builder,
+        IReadOnlyList<string> lines,
+        ref int index,
+        List<ForRestScriptDiagnostic> diagnostics,
+        HashSet<string> locals,
+        IReadOnlySet<string> templateBoundIdentifiers,
+        ref int tempCounter)
+    {
+        if (!TryReadBlockHeader(lines, index, "switch", out var expression, out var consumedLineCount))
+        {
+            return false;
+        }
+
+        tempCounter++;
+        var switchVar = $"__switchValue{tempCounter}";
+        builder.Append("dynamic ");
+        builder.Append(switchVar);
+        builder.Append(" = ");
+        builder.Append(TranslateExpression(expression, locals));
+        builder.AppendLine(";");
+
+        index += consumedLineCount;
+        var isFirstCase = true;
+
+        while (index < lines.Count)
+        {
+            var caseLine = lines[index].Trim();
+            if (string.IsNullOrWhiteSpace(caseLine))
+            {
+                index++;
+                continue;
+            }
+
+            if (caseLine.StartsWith('#'))
+            {
+                builder.Append("//");
+                builder.AppendLine(caseLine[1..]);
+                index++;
+                continue;
+            }
+
+            if (caseLine == "}")
+            {
+                index++;
+                break;
+            }
+
+            if (TryReadBlockHeader(lines, index, "case", out var caseValue, out var caseConsumed))
+            {
+                builder.Append(isFirstCase ? "if (" : "else if (");
+                builder.Append(switchVar);
+                builder.Append(" == ");
+                builder.Append(TranslateExpression(caseValue, locals));
+                builder.AppendLine(") {");
+                index += caseConsumed;
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                builder.AppendLine("}");
+                isFirstCase = false;
+                continue;
+            }
+
+            if (IsDefaultBlockHeader(lines, index, out var defaultConsumed))
+            {
+                builder.AppendLine(isFirstCase ? "{" : "else {");
+                index += defaultConsumed;
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                builder.AppendLine("}");
+                isFirstCase = false;
+                continue;
+            }
+
+            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "Expected 'case', 'default', or '}' inside switch block.", index + 1, 1));
+            index++;
+        }
+
+        return true;
+    }
+
+    private static bool IsDefaultBlockHeader(IReadOnlyList<string> lines, int startIndex, out int consumedLineCount)
+    {
+        consumedLineCount = 0;
+        if (!TryCollectHeaderText(lines, startIndex, out string combinedHeader, out consumedLineCount))
+        {
+            return false;
+        }
+
+        var withoutBrace = combinedHeader[..^1].TrimEnd();
+        return string.Equals(withoutBrace, "default", StringComparison.Ordinal);
+    }
+
     private static bool TryCompileLogStatement(
         StringBuilder builder,
         string trimmed,
@@ -491,6 +704,633 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(expression, locals));
         builder.AppendLine(");");
         return true;
+    }
+
+    private static bool TryCompileExtractLetStatement(
+        StringBuilder builder,
+        string trimmed,
+        HashSet<string> locals)
+    {
+        if (!TryReadKeywordRemainder(trimmed, "let", out var remainder))
+        {
+            return false;
+        }
+
+        if (!TrySplitAssignment(remainder, out var name, out var extractExpression))
+        {
+            return false;
+        }
+
+        if (!TryReadKeywordRemainder(extractExpression, "extract", out var extractBody))
+        {
+            return false;
+        }
+
+        var fromIndex = extractBody.LastIndexOf(" from ", StringComparison.Ordinal);
+        if (fromIndex < 0)
+        {
+            return false;
+        }
+
+        var typeAndSelector = extractBody[..fromIndex].Trim();
+        var source = extractBody[(fromIndex + 6)..].Trim();
+        var translatedSource = TranslateExpression(source, locals);
+
+        if (TryReadKeywordRemainder(typeAndSelector, "json", out var jsonSelector))
+        {
+            var selectorValue = StripQuotes(jsonSelector);
+            builder.Append("dynamic ");
+            builder.Append(name);
+            builder.Append(" = json.Select(");
+            builder.Append(translatedSource);
+            builder.Append(".Json(), ");
+            builder.Append(RenderString(selectorValue));
+            builder.AppendLine(");");
+        }
+        else if (TryReadKeywordRemainder(typeAndSelector, "header", out var headerName))
+        {
+            var headerValue = StripQuotes(headerName);
+            builder.Append("dynamic ");
+            builder.Append(name);
+            builder.Append(" = ");
+            builder.Append(translatedSource);
+            builder.Append(".Headers[");
+            builder.Append(RenderString(headerValue));
+            builder.AppendLine("];");
+        }
+        else if (TryReadKeywordRemainder(typeAndSelector, "regex", out var regexPattern))
+        {
+            var patternValue = StripQuotes(regexPattern);
+            builder.Append("dynamic ");
+            builder.Append(name);
+            builder.Append(" = regex.Match(");
+            builder.Append(translatedSource);
+            builder.Append(", ");
+            builder.Append(RenderString(patternValue));
+            builder.AppendLine(");");
+        }
+        else
+        {
+            return false;
+        }
+
+        locals.Add(name);
+        return true;
+    }
+
+    private static bool TryCompileRetryStatement(
+        StringBuilder builder,
+        IReadOnlyList<string> lines,
+        ref int index,
+        List<ForRestScriptDiagnostic> diagnostics,
+        HashSet<string> locals,
+        IReadOnlySet<string> templateBoundIdentifiers,
+        ref int tempCounter)
+    {
+        if (!TryReadBlockHeader(lines, index, "retry", out var expression, out var consumedLineCount))
+        {
+            return false;
+        }
+
+        tempCounter++;
+        var retryVar = $"__retryIdx{tempCounter}";
+
+        var parts = expression.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0 || !int.TryParse(parts[0], out var maxRetries))
+        {
+            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "retry requires a numeric count, e.g. 'retry 3 { }'.", index + 1, 1));
+            index += consumedLineCount;
+            return true;
+        }
+
+        builder.Append("for (int ");
+        builder.Append(retryVar);
+        builder.Append(" = 0; ");
+        builder.Append(retryVar);
+        builder.Append(" < ");
+        builder.Append(maxRetries);
+        builder.Append("; ");
+        builder.Append(retryVar);
+        builder.AppendLine("++) {");
+
+        if (parts.Length >= 3 && string.Equals(parts[1], "with", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(parts[2], "backoff", StringComparison.OrdinalIgnoreCase))
+            {
+                builder.Append("if (");
+                builder.Append(retryVar);
+                builder.Append(" > 0) { await Task.Delay((int)(100 * Math.Pow(2, ");
+                builder.Append(retryVar);
+                builder.AppendLine(" - 1))); }");
+            }
+            else if (string.Equals(parts[2], "delay", StringComparison.OrdinalIgnoreCase)
+                     && parts.Length >= 4
+                     && int.TryParse(parts[3], out var delayMs))
+            {
+                builder.Append("if (");
+                builder.Append(retryVar);
+                builder.Append(" > 0) { await Task.Delay(");
+                builder.Append(delayMs);
+                builder.AppendLine("); }");
+            }
+        }
+
+        index += consumedLineCount;
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        builder.AppendLine("}");
+        return true;
+    }
+
+    private static bool TryCompileStashColumnsStatement(
+        StringBuilder builder,
+        string trimmed)
+    {
+        if (!TryReadKeywordRemainder(trimmed, "stash", out var remainder))
+        {
+            return false;
+        }
+
+        if (!TryReadKeywordRemainder(remainder, "columns", out var columnList))
+        {
+            return false;
+        }
+
+        columnList = columnList.Trim();
+        if (!columnList.StartsWith('[') || !columnList.EndsWith(']'))
+        {
+            return false;
+        }
+
+        var inner = columnList[1..^1].Trim();
+        if (string.IsNullOrWhiteSpace(inner))
+        {
+            return false;
+        }
+
+        var columnNames = new List<string>();
+        foreach (var part in SplitTopLevelCommas(inner))
+        {
+            var col = StripQuotes(part.Trim());
+            if (!string.IsNullOrWhiteSpace(col))
+            {
+                columnNames.Add(col);
+            }
+        }
+
+        if (columnNames.Count == 0)
+        {
+            return false;
+        }
+
+        builder.Append("stash.DeclareColumns(");
+        builder.Append(string.Join(", ", columnNames.Select(static column => JsonSerializer.Serialize(column))));
+        builder.AppendLine(");");
+        return true;
+    }
+
+    private static bool TryCompileDefineStatement(
+        StringBuilder builder,
+        IReadOnlyList<string> lines,
+        ref int index,
+        List<ForRestScriptDiagnostic> diagnostics,
+        HashSet<string> locals,
+        IReadOnlySet<string> templateBoundIdentifiers,
+        ref int tempCounter)
+    {
+        if (!TryCollectHeaderText(lines, index, out string combinedHeader, out int consumedLineCount))
+        {
+            return false;
+        }
+
+        var withoutBrace = combinedHeader[..^1].TrimEnd();
+        if (!withoutBrace.StartsWith("define", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var afterDefine = withoutBrace["define".Length..];
+        if (afterDefine.Length == 0 || !char.IsWhiteSpace(afterDefine[0]))
+        {
+            return false;
+        }
+
+        afterDefine = afterDefine.Trim();
+
+        string defineName;
+        var parameterNames = new List<string>();
+
+        var withIndex = afterDefine.IndexOf(" with ", StringComparison.OrdinalIgnoreCase);
+        if (withIndex >= 0)
+        {
+            defineName = afterDefine[..withIndex].Trim();
+            var paramList = afterDefine[(withIndex + 6)..].Trim();
+            foreach (var param in paramList.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (IsFlowIdentifier(param))
+                {
+                    parameterNames.Add(param);
+                }
+            }
+        }
+        else
+        {
+            defineName = afterDefine.Trim();
+        }
+
+        if (!IsFlowIdentifier(defineName))
+        {
+            return false;
+        }
+
+        builder.Append("async Task __define_");
+        builder.Append(defineName);
+        builder.Append('(');
+        builder.Append(string.Join(", ", parameterNames.Select(static parameter => $"dynamic {parameter}")));
+        builder.AppendLine(") {");
+
+        var nestedLocals = new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase);
+        foreach (var param in parameterNames)
+        {
+            nestedLocals.Add(param);
+        }
+
+        index += consumedLineCount;
+        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        builder.AppendLine("}");
+        return true;
+    }
+
+    private static bool TryCompileCallStatement(
+        StringBuilder builder,
+        string trimmed,
+        HashSet<string> locals)
+    {
+        if (!TryReadKeywordRemainder(trimmed, "call", out var remainder))
+        {
+            return false;
+        }
+
+        string callName;
+        var arguments = new List<string>();
+
+        var withIndex = remainder.IndexOf(" with ", StringComparison.OrdinalIgnoreCase);
+        if (withIndex >= 0)
+        {
+            callName = remainder[..withIndex].Trim();
+            var argList = remainder[(withIndex + 6)..].Trim();
+            foreach (var arg in SplitTopLevelCommas(argList))
+            {
+                arguments.Add(TranslateExpression(arg.Trim(), locals));
+            }
+        }
+        else
+        {
+            callName = TrimStatement(remainder);
+        }
+
+        if (!IsFlowIdentifier(callName))
+        {
+            return false;
+        }
+
+        builder.Append("await __define_");
+        builder.Append(callName);
+        builder.Append('(');
+        builder.Append(string.Join(", ", arguments));
+        builder.AppendLine(");");
+        return true;
+    }
+
+    private static bool TryCompileParallelStatement(
+        StringBuilder builder,
+        IReadOnlyList<string> lines,
+        ref int index,
+        List<ForRestScriptDiagnostic> diagnostics,
+        HashSet<string> locals,
+        ref int tempCounter)
+    {
+        if (!TryCollectHeaderText(lines, index, out string combinedHeader, out int consumedLineCount))
+        {
+            return false;
+        }
+
+        var withoutBrace = combinedHeader[..^1].TrimEnd();
+        var destructuredNames = new List<string>();
+
+        if (withoutBrace.StartsWith("let", StringComparison.Ordinal))
+        {
+            var afterLet = withoutBrace["let".Length..].Trim();
+            if (!afterLet.StartsWith('['))
+            {
+                return false;
+            }
+
+            var bracketEnd = afterLet.IndexOf(']');
+            if (bracketEnd < 0)
+            {
+                return false;
+            }
+
+            var nameList = afterLet[1..bracketEnd];
+            foreach (var name in nameList.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (IsFlowIdentifier(name))
+                {
+                    destructuredNames.Add(name);
+                }
+            }
+
+            var afterBracket = afterLet[(bracketEnd + 1)..].Trim();
+            if (!afterBracket.StartsWith('='))
+            {
+                return false;
+            }
+
+            afterBracket = afterBracket[1..].Trim();
+            if (!string.Equals(afterBracket, "parallel", StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+        else if (!string.Equals(withoutBrace, "parallel", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        index += consumedLineCount;
+        tempCounter++;
+        var batchId = tempCounter;
+        var taskNames = new List<string>();
+        var requestIdx = 0;
+
+        while (index < lines.Count)
+        {
+            var line = lines[index].Trim();
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            {
+                index++;
+                continue;
+            }
+
+            if (line == "}")
+            {
+                index++;
+                break;
+            }
+
+            requestIdx++;
+            var cloneVar = $"__par{batchId}_{requestIdx}";
+            var taskVar = $"__parTask{batchId}_{requestIdx}";
+            taskNames.Add(taskVar);
+
+            var parts = line.Split([' '], 2, StringSplitOptions.RemoveEmptyEntries);
+            var method = parts[0].ToUpperInvariant();
+            var url = parts.Length > 1 ? StripQuotes(parts[1].Trim()) : string.Empty;
+
+            builder.Append("var ");
+            builder.Append(cloneVar);
+            builder.AppendLine(" = request.Clone();");
+            builder.Append(cloneVar);
+            builder.Append(".Method = ");
+            builder.Append(RenderString(method));
+            builder.AppendLine(";");
+
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                builder.Append(cloneVar);
+                builder.Append(".Url = ");
+                builder.Append(TranslateExpression(RenderString(url), locals));
+                builder.AppendLine(";");
+            }
+
+            builder.Append("var ");
+            builder.Append(taskVar);
+            builder.Append(" = ");
+            builder.Append(cloneVar);
+            builder.AppendLine(".SendAsync();");
+
+            index++;
+        }
+
+        if (taskNames.Count > 0)
+        {
+            builder.Append("await Task.WhenAll(");
+            builder.Append(string.Join(", ", taskNames));
+            builder.AppendLine(");");
+
+            for (int i = 0; i < destructuredNames.Count && i < taskNames.Count; i++)
+            {
+                builder.Append("dynamic ");
+                builder.Append(destructuredNames[i]);
+                builder.Append(" = ");
+                builder.Append(taskNames[i]);
+                builder.AppendLine(".Result;");
+                locals.Add(destructuredNames[i]);
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryCompilePipeStatement(
+        StringBuilder builder,
+        IReadOnlyList<string> lines,
+        ref int index,
+        List<ForRestScriptDiagnostic> diagnostics,
+        HashSet<string> locals,
+        ref int tempCounter)
+    {
+        if (!TryCollectHeaderText(lines, index, out string combinedHeader, out int consumedLineCount))
+        {
+            return false;
+        }
+
+        var withoutBrace = combinedHeader[..^1].TrimEnd();
+        if (!string.Equals(withoutBrace, "pipe", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        index += consumedLineCount;
+
+        while (index < lines.Count)
+        {
+            var line = lines[index].Trim();
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            {
+                index++;
+                continue;
+            }
+
+            if (line == "}")
+            {
+                index++;
+                break;
+            }
+
+            string? captureName = null;
+            var arrowIndex = line.LastIndexOf("->", StringComparison.Ordinal);
+            if (arrowIndex >= 0)
+            {
+                var afterArrow = line[(arrowIndex + 2)..].Trim();
+                if (afterArrow.StartsWith("let ", StringComparison.Ordinal))
+                {
+                    captureName = afterArrow[4..].Trim();
+                }
+
+                line = line[..arrowIndex].Trim();
+            }
+
+            var parts = line.Split([' '], 2, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
+            {
+                index++;
+                continue;
+            }
+
+            var method = parts[0].ToUpperInvariant();
+            var rest = parts.Length > 1 ? parts[1].Trim() : string.Empty;
+
+            builder.Append("request.Method = ");
+            builder.Append(RenderString(method));
+            builder.AppendLine(";");
+
+            string? bodyContent = null;
+            string? bodyContentType = null;
+            var bodyJsonIdx = rest.IndexOf("body json", StringComparison.OrdinalIgnoreCase);
+            if (bodyJsonIdx >= 0)
+            {
+                var urlPart = rest[..bodyJsonIdx].Trim();
+                var bodyPart = rest[(bodyJsonIdx + 9)..].Trim();
+                rest = urlPart;
+                bodyContent = StripQuotes(bodyPart);
+                bodyContentType = "application/json";
+            }
+
+            if (!string.IsNullOrWhiteSpace(rest))
+            {
+                var url = StripQuotes(rest);
+                builder.Append("request.Url = ");
+                builder.Append(TranslateExpression(RenderString(url), locals));
+                builder.AppendLine(";");
+            }
+
+            if (bodyContent is not null)
+            {
+                builder.Append("request.ContentType = ");
+                builder.Append(RenderString(bodyContentType!));
+                builder.AppendLine(";");
+                builder.Append("request.Body = ");
+                builder.Append(TranslateExpression(RenderString(bodyContent), locals));
+                builder.AppendLine(";");
+            }
+
+            if (captureName is not null && IsFlowIdentifier(captureName))
+            {
+                builder.Append("dynamic ");
+                builder.Append(captureName);
+                builder.AppendLine(" = (await request.SendAsync());");
+                locals.Add(captureName);
+            }
+            else
+            {
+                builder.AppendLine("await request.SendAsync();");
+            }
+
+            index++;
+        }
+
+        return true;
+    }
+
+    private static bool TryCompileSnapshotStatement(
+        StringBuilder builder,
+        string trimmed,
+        HashSet<string> locals)
+    {
+        if (!TryReadKeywordRemainder(trimmed, "snapshot", out var remainder))
+        {
+            return false;
+        }
+
+        var fromIndex = remainder.IndexOf(" from ", StringComparison.Ordinal);
+        if (fromIndex < 0)
+        {
+            return false;
+        }
+
+        var snapshotName = StripQuotes(remainder[..fromIndex].Trim());
+        var source = remainder[(fromIndex + 6)..].Trim();
+
+        if (string.IsNullOrWhiteSpace(snapshotName) || string.IsNullOrWhiteSpace(source))
+        {
+            return false;
+        }
+
+        builder.Append("await snapshot.Save(");
+        builder.Append(RenderString(snapshotName));
+        builder.Append(", ");
+        builder.Append(TranslateExpression(source, locals));
+        builder.AppendLine(");");
+        return true;
+    }
+
+    private static string StripQuotes(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length >= 2
+            && ((trimmed[0] == '"' && trimmed[^1] == '"')
+                || (trimmed[0] == '\'' && trimmed[^1] == '\'')))
+        {
+            return trimmed[1..^1];
+        }
+
+        return trimmed;
+    }
+
+    private static IReadOnlyList<string> SplitTopLevelCommas(string source)
+    {
+        var results = new List<string>();
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        var start = 0;
+
+        for (int i = 0; i < source.Length; i++)
+        {
+            var character = source[i];
+            if (inString)
+            {
+                if (character == '\\' && !escaped) { escaped = true; continue; }
+                if ((character == '"' || character == '\'') && !escaped) { inString = false; }
+                escaped = false;
+                continue;
+            }
+
+            switch (character)
+            {
+                case '"' or '\'':
+                    inString = true;
+                    break;
+                case '(' or '[' or '{':
+                    depth++;
+                    break;
+                case ')' or ']' or '}':
+                    depth--;
+                    break;
+                case ',' when depth == 0:
+                    results.Add(source[start..i]);
+                    start = i + 1;
+                    break;
+            }
+        }
+
+        if (start < source.Length)
+        {
+            results.Add(source[start..]);
+        }
+
+        return results;
     }
 
     private static string TranslateRawStatement(string statement, HashSet<string> locals)
@@ -747,7 +1587,257 @@ internal static class ForRestFlowScriptCompiler
             builder.Append(character);
         }
 
-        return builder.ToString();
+        return RewriteCollectionMethodChains(builder.ToString());
+    }
+
+    private static readonly HashSet<string> CollectionMethods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "where", "select", "first", "firstOrDefault", "last", "any", "all",
+        "count", "orderBy", "orderByDesc", "take", "skip", "distinct",
+        "flatten", "groupBy", "sum", "min", "max", "average", "toList",
+        "reverse", "contains",
+    };
+
+    private static readonly Dictionary<string, string> CollectionMethodNameMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["where"] = "Where",
+        ["select"] = "Select",
+        ["first"] = "First",
+        ["firstOrDefault"] = "FirstOrDefault",
+        ["firstordefault"] = "FirstOrDefault",
+        ["last"] = "Last",
+        ["any"] = "Any",
+        ["all"] = "All",
+        ["count"] = "Count",
+        ["orderBy"] = "OrderBy",
+        ["orderby"] = "OrderBy",
+        ["orderByDesc"] = "OrderByDesc",
+        ["orderbydesc"] = "OrderByDesc",
+        ["take"] = "Take",
+        ["skip"] = "Skip",
+        ["distinct"] = "Distinct",
+        ["flatten"] = "Flatten",
+        ["groupBy"] = "GroupBy",
+        ["groupby"] = "GroupBy",
+        ["sum"] = "Sum",
+        ["min"] = "Min",
+        ["max"] = "Max",
+        ["average"] = "Average",
+        ["toList"] = "ToList",
+        ["tolist"] = "ToList",
+        ["reverse"] = "Reverse",
+        ["contains"] = "Contains",
+    };
+
+    private static readonly HashSet<string> BuiltInApiNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "request", "response", "variables", "tests", "console",
+        "time", "strings", "convert", "json", "encoding", "crypto",
+        "regex", "random", "workspace", "stash", "snapshot",
+        "CollectionApi", "Math", "Task", "string", "int", "double",
+        "__flow", "__onErrorEx",
+    };
+
+    private static string RewriteCollectionMethodChains(string expression)
+    {
+        var result = expression;
+        bool rewritten;
+        do
+        {
+            rewritten = false;
+            foreach (var method in CollectionMethods)
+            {
+                var pattern = $".{method}(";
+                var idx = FindCollectionMethodCall(result, pattern);
+                if (idx < 0)
+                {
+                    continue;
+                }
+
+                var receiver = ExtractReceiver(result, idx);
+                if (string.IsNullOrWhiteSpace(receiver))
+                {
+                    continue;
+                }
+
+                // Don't rewrite method calls on known built-in API objects
+                if (BuiltInApiNames.Contains(receiver))
+                {
+                    continue;
+                }
+
+                var argsStart = idx + pattern.Length;
+                var argsEnd = FindMatchingCloseParen(result, argsStart - 1);
+                if (argsEnd < 0)
+                {
+                    continue;
+                }
+
+                var args = result[argsStart..argsEnd].Trim();
+                var methodName = CollectionMethodNameMap.GetValueOrDefault(method, method);
+
+                string replacement;
+                if (string.IsNullOrWhiteSpace(args))
+                {
+                    replacement = $"CollectionApi.{methodName}({receiver})";
+                }
+                else if (args.Contains("=>"))
+                {
+                    replacement = $"CollectionApi.{methodName}({receiver}, (Func<object?,object?>)({args}))";
+                }
+                else
+                {
+                    replacement = $"CollectionApi.{methodName}({receiver}, {args})";
+                }
+
+                var receiverStart = idx - receiver.Length;
+                result = string.Concat(result.AsSpan(0, receiverStart), replacement, result.AsSpan(argsEnd + 1));
+                rewritten = true;
+                break;
+            }
+        } while (rewritten);
+
+        return result;
+    }
+
+    private static int FindCollectionMethodCall(string text, string pattern)
+    {
+        const string alreadyRewritten = "CollectionApi";
+        var index = 0;
+        while (index < text.Length)
+        {
+            if (text[index] == '"' || text[index] == '\'')
+            {
+                SkipQuotedString(text, ref index);
+                continue;
+            }
+
+            if (index + pattern.Length <= text.Length &&
+                text.AsSpan(index, pattern.Length).Equals(pattern.AsSpan(), StringComparison.OrdinalIgnoreCase))
+            {
+                // Skip matches that are already rewritten (e.g., CollectionApi.Contains(...))
+                // Pattern starts with '.', so index points at the dot. Check if "CollectionApi" precedes it.
+                if (index >= alreadyRewritten.Length &&
+                    text.AsSpan(index - alreadyRewritten.Length, alreadyRewritten.Length)
+                        .Equals(alreadyRewritten.AsSpan(), StringComparison.Ordinal))
+                {
+                    index++;
+                    continue;
+                }
+
+                return index;
+            }
+
+            index++;
+        }
+
+        return -1;
+    }
+
+    private static string ExtractReceiver(string text, int dotIndex)
+    {
+        var depth = 0;
+        var end = dotIndex;
+        var pos = end - 1;
+
+        while (pos >= 0)
+        {
+            var c = text[pos];
+            if (c == ')' || c == ']')
+            {
+                depth++;
+                pos--;
+                continue;
+            }
+
+            if (c == '(' || c == '[')
+            {
+                depth--;
+                if (depth < 0)
+                {
+                    break;
+                }
+
+                pos--;
+                continue;
+            }
+
+            if (depth == 0)
+            {
+                if (c is ',' or '=' or ';' or '{' or '}' or '|' or '&' or '!' or '?')
+                {
+                    break;
+                }
+
+                if (char.IsWhiteSpace(c))
+                {
+                    var before = pos - 1;
+                    while (before >= 0 && char.IsWhiteSpace(text[before]))
+                    {
+                        before--;
+                    }
+
+                    if (before < 0 || text[before] == ',' || text[before] == '=' || text[before] == ';' || text[before] == '(' || text[before] == '{')
+                    {
+                        break;
+                    }
+                }
+            }
+
+            pos--;
+        }
+
+        return text[(pos + 1)..end].Trim();
+    }
+
+    private static int FindMatchingCloseParen(string text, int openParenIndex)
+    {
+        var depth = 0;
+        for (var i = openParenIndex; i < text.Length; i++)
+        {
+            if (text[i] == '"' || text[i] == '\'')
+            {
+                SkipQuotedString(text, ref i);
+                continue;
+            }
+
+            if (text[i] == '(')
+            {
+                depth++;
+            }
+            else if (text[i] == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    private static void SkipQuotedString(string text, ref int index)
+    {
+        var quote = text[index];
+        index++;
+        while (index < text.Length)
+        {
+            if (text[index] == '\\')
+            {
+                index += 2;
+                continue;
+            }
+
+            if (text[index] == quote)
+            {
+                index++;
+                return;
+            }
+
+            index++;
+        }
     }
 
     private static void AppendInterpolatedString(StringBuilder builder, string source, ref int index, HashSet<string> locals)
@@ -906,9 +1996,23 @@ internal static class ForRestFlowScriptCompiler
 
     private static string NormalizeSendCalls(string expression)
     {
-        var normalized = NormalizeAwaitableCall(expression, "request.send");
+        var normalized = NormalizeLabeledSendCalls(expression);
+        normalized = NormalizeAwaitableCall(normalized, "request.send");
         normalized = NormalizeAwaitableCall(normalized, "workspace.execute");
         return NormalizeAwaitableCall(normalized, "workspace.run");
+    }
+
+    private static string NormalizeLabeledSendCalls(string expression)
+    {
+        var pattern = new Regex(
+            @"request\.send\(\)\s+as\s+""([^""]+)""",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return pattern.Replace(expression, match =>
+        {
+            var label = match.Groups[1].Value;
+            return $"request.SendAsync({JsonSerializer.Serialize(label)})";
+        });
     }
 
     private static string NormalizeAwaitableCall(string expression, string invocationName)

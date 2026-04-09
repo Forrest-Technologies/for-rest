@@ -55,6 +55,15 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
 
                     runtimeSeeds.Add(runtimeSeed!);
                     break;
+                case ForRestScriptVariableScope.Secret:
+                    if (!TryBuildRuntimeSeed(variable, out var secretSeed, out var secretDiagnostic))
+                    {
+                        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, secretDiagnostic ?? $"Could not compile secret seed '{variable.Key}'.", 0, 0));
+                        continue;
+                    }
+
+                    runtimeSeeds.Add(secretSeed! with { IsSecret = true });
+                    break;
             }
         }
 
@@ -98,8 +107,15 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             };
         }
 
+        if (document.Imports.Count > 0 && options.ResolveImport is not null)
+        {
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            ResolveImports(document, options.ResolveImport, visited, document.Variables, runtimeSeeds, flowVariableNames, diagnostics);
+        }
+
         var templateBoundVariableNames = CollectTemplateBoundVariableNames(urlTemplate ?? string.Empty, headers, queryParameters, body, auth);
         var flowScript = ForRestFlowScriptCompiler.Compile(document.Flow, flowVariableNames, templateBoundVariableNames, diagnostics);
+        flowScript = WrapWithHandlers(flowScript, document.Handlers, flowVariableNames, templateBoundVariableNames, diagnostics);
 
         var request = new RequestDefinition
         {
@@ -122,12 +138,16 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             ValidateSsl = TryReadOptionalBoolean(document.Request, "ssl") ?? true,
             SaveResponseToHistory = TryReadOptionalBoolean(document.Request, "history") ?? true,
             MaxSendIterations = Math.Max(0, TryReadOptionalNumber(document.Request, "max_send_iterations") ?? 3),
+            UserAgent = TryParseUserAgentKind(TryReadOptionalString(document.Request, "user_agent")),
+            CustomUserAgent = TryReadOptionalString(document.Request, "custom_user_agent") ?? string.Empty,
         };
 
         if (diagnostics.Any(static diagnostic => diagnostic.Severity == ForRestScriptDiagnosticSeverity.Error))
         {
             return new(document, null, diagnostics);
         }
+
+        var scenarioPayloads = BuildScenarioPayloads(document, request, runtimeSeeds, source, options, flowVariableNames, templateBoundVariableNames, diagnostics);
 
         return new(
             document,
@@ -137,7 +157,10 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                 Request = request,
                 RuntimeSeeds = runtimeSeeds,
             },
-            diagnostics);
+            diagnostics)
+        {
+            ScenarioPayloads = scenarioPayloads,
+        };
     }
 
     #endregion
@@ -446,6 +469,12 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
 
         foreach (var assertion in assertions)
         {
+            if (assertion.IsDescriptionOnly)
+            {
+                builder.AppendLine($"// Test: {assertion.Message}");
+                continue;
+            }
+
             testIndex++;
             switch (assertion.Target)
             {
@@ -590,6 +619,160 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
         return $"@\"{value.Replace("\"", "\"\"")}\"";
     }
 
+    private static string WrapWithHandlers(
+        string flowScript,
+        List<ForRestScriptHandler> handlers,
+        List<string> flowVariableNames,
+        IReadOnlyCollection<string>? templateBoundVariableNames,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (handlers.Count == 0 || string.IsNullOrWhiteSpace(flowScript))
+        {
+            return flowScript;
+        }
+
+        var builder = new StringBuilder();
+
+        var onErrorHandlers = handlers.Where(static handler => handler.Kind == ForRestScriptHandlerKind.OnError).ToList();
+        var onStatusHandlers = handlers.Where(static handler => handler.Kind == ForRestScriptHandlerKind.OnStatus).ToList();
+
+        if (onErrorHandlers.Count > 0)
+        {
+            builder.AppendLine("try {");
+        }
+
+        builder.AppendLine(flowScript);
+
+        foreach (var statusHandler in onStatusHandlers)
+        {
+            var handlerScript = ForRestFlowScriptCompiler.Compile(statusHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics);
+            builder.Append("if (response.Status == ");
+            builder.Append(statusHandler.StatusCode);
+            builder.AppendLine(") {");
+            builder.AppendLine(handlerScript);
+            builder.AppendLine("}");
+        }
+
+        if (onErrorHandlers.Count > 0)
+        {
+            builder.AppendLine("} catch (Exception __onErrorEx) {");
+            builder.AppendLine("var __errorMessage = __onErrorEx.Message;");
+            foreach (var errorHandler in onErrorHandlers)
+            {
+                var handlerScript = ForRestFlowScriptCompiler.Compile(errorHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics);
+                builder.AppendLine(handlerScript);
+            }
+
+            builder.AppendLine("}");
+        }
+
+        return builder.ToString();
+    }
+
+    private static List<ForRestExecutionPayload> BuildScenarioPayloads(
+        ForRestScriptDocument document,
+        RequestDefinition baseRequest,
+        List<ForRestRuntimeVariableSeed> runtimeSeeds,
+        string source,
+        ForRestScriptCompilationOptions options,
+        List<string> flowVariableNames,
+        IReadOnlyCollection<string>? templateBoundVariableNames,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (document.Scenarios.Count == 0)
+        {
+            return [];
+        }
+
+        var payloads = new List<ForRestExecutionPayload>();
+        foreach (var scenario in document.Scenarios)
+        {
+            var scenarioAuth = scenario.Auth.Count > 0
+                ? BuildAuth(new ForRestScriptDocument { Auth = scenario.Auth }, diagnostics)
+                : baseRequest.Auth;
+
+            var scenarioHeaders = scenario.Headers.Count > 0
+                ? BuildEntries(scenario.Headers, diagnostics, "headers")
+                : baseRequest.Headers;
+
+            var scenarioFlowScript = !string.IsNullOrWhiteSpace(scenario.Flow)
+                ? ForRestFlowScriptCompiler.Compile(scenario.Flow, flowVariableNames, templateBoundVariableNames, diagnostics)
+                : baseRequest.PreRequestScript;
+
+            var scenarioTestsScript = scenario.Tests.Count > 0
+                ? BuildTestsScript(scenario.Tests, diagnostics)
+                : baseRequest.TestsScript;
+
+            var scenarioRequest = baseRequest with
+            {
+                Name = $"{baseRequest.Name} — {scenario.Name}",
+                Auth = scenarioAuth,
+                Headers = scenarioHeaders,
+                PreRequestScript = scenarioFlowScript,
+                TestsScript = scenarioTestsScript,
+            };
+
+            payloads.Add(new()
+            {
+                SourceText = source,
+                Request = scenarioRequest,
+                RuntimeSeeds = runtimeSeeds,
+                ScenarioName = scenario.Name,
+            });
+        }
+
+        return payloads;
+    }
+
+    private static void ResolveImports(
+        ForRestScriptDocument document,
+        Func<string, string?> resolveImport,
+        HashSet<string> visited,
+        List<ForRestScriptVariableDeclaration> variables,
+        List<ForRestRuntimeVariableSeed> runtimeSeeds,
+        List<string> flowVariableNames,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        foreach (var importPath in document.Imports)
+        {
+            if (!visited.Add(importPath))
+            {
+                diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Warning, $"Circular import detected for '{importPath}'.", 0, 0));
+                continue;
+            }
+
+            var importedSource = resolveImport(importPath);
+            if (importedSource is null)
+            {
+                diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Warning, $"Could not resolve import '{importPath}'.", 0, 0));
+                continue;
+            }
+
+            var importedParse = new ForRestScriptParser().Parse(importedSource);
+            if (importedParse.Document is null)
+            {
+                diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Warning, $"Failed to parse imported file '{importPath}'.", 0, 0));
+                continue;
+            }
+
+            var importedDocument = importedParse.Document;
+
+            if (importedDocument.Imports.Count > 0)
+            {
+                ResolveImports(importedDocument, resolveImport, visited, variables, runtimeSeeds, flowVariableNames, diagnostics);
+            }
+
+            foreach (var variable in importedDocument.Variables)
+            {
+                if (variables.All(existing => !string.Equals(existing.Key, variable.Key, StringComparison.OrdinalIgnoreCase)))
+                {
+                    variables.Add(variable);
+                    flowVariableNames.Add(variable.Key);
+                }
+            }
+        }
+    }
+
     private static bool TryReadRequiredIdentifier(
         IReadOnlyDictionary<string, ForRestScriptValueExpression> source,
         string key,
@@ -651,6 +834,18 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
         return source.TryGetValue(key, out var expression) && expression is ForRestScriptBooleanExpression booleanExpression
             ? booleanExpression.Value
             : null;
+    }
+
+    private static UserAgentKind TryParseUserAgentKind(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return UserAgentKind.None;
+        }
+
+        return Enum.TryParse<UserAgentKind>(value, ignoreCase: true, out var kind)
+            ? kind
+            : UserAgentKind.Custom;
     }
 
     private static bool TryRenderScalar(ForRestScriptValueExpression? expression, out string? value)

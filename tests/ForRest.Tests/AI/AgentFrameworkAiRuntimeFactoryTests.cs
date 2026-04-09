@@ -140,7 +140,7 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
 
         Assert.IsNotNull(runtime.Agent);
         CollectionAssert.AreEquivalent(
-            new[] { "search_docs", "read_all_docs", "read_active_document", "patch_active_document", "replace_active_document" },
+            new[] { "search_docs", "read_all_docs", "read_active_document", "patch_active_document", "replace_active_document", "create_workspace_script" },
             runtime.PromptManifest.Tools.Select(static tool => tool.Name).ToArray());
         Assert.IsFalse(runtime.PromptManifest.Tools.Any(static tool => tool.Name == "patch_document"));
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Do not ask the user to paste working syntax");
@@ -340,5 +340,9 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
         {
             return AiActiveDocumentUpdateResult.Success();
         }
+
+        public AiWorkspaceContext? GetWorkspaceContext() => null;
+
+        public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
     }
 }

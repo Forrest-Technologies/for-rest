@@ -265,53 +265,128 @@
                 </Grid>
 
                 <Grid Grid.RowSpan="2"
-                      RowDefinitions="Auto,*"
+                      RowDefinitions="Auto,Auto,Auto,*,Auto"
+                      RowSpacing="8"
                       IsVisible="{Binding IsInspectorStashVisible}">
-                    <Grid ColumnDefinitions="*,Auto,Auto"
-                          Padding="0,0,0,8">
-                        <VerticalStackLayout Spacing="0">
-                            <Label Text="Response stash"
-                                   Style="{StaticResource SectionTitleStyle}" />
-                            <Label Text="Captured script rows realized into a table."
-                                   Style="{StaticResource PaneMetaStyle}" />
-                        </VerticalStackLayout>
-                        <Button Grid.Column="1"
+                    <VerticalStackLayout Spacing="0">
+                        <Label Text="Response stash"
+                               Style="{StaticResource SectionTitleStyle}" />
+                        <Label Text="{Binding StashSummaryText}"
+                               Style="{StaticResource PaneMetaStyle}" />
+                        <Label Text="{Binding StashFilterSummaryText}"
+                               Style="{StaticResource PaneMetaStyle}" />
+                    </VerticalStackLayout>
+
+                    <FlexLayout Grid.Row="1"
+                                Direction="Row"
+                                Wrap="Wrap"
+                                AlignItems="Center"
+                                JustifyContent="Start">
+                        <Button Margin="0,0,8,8"
                                 Text="Copy Table"
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnCopyStashClicked"
                                 IsEnabled="{Binding CanCopyStash}" />
-                        <Button Grid.Column="2"
+                        <Button Margin="0,0,8,8"
+                                Text="Copy Row"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnCopySelectedStashClicked"
+                                IsEnabled="{Binding CanCopySelectedStashRow}" />
+                        <Button Margin="0,0,8,8"
                                 Text="Export CSV"
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnExportStashClicked"
                                 IsEnabled="{Binding CanExportStashCsv}" />
-                    </Grid>
+                    </FlexLayout>
 
-                    <Grid Grid.Row="1">
+                    <Border Grid.Row="2"
+                            Style="{StaticResource ToolbarFieldBorderStyle}"
+                            IsVisible="{Binding HasStashData}">
+                        <VerticalStackLayout Spacing="8">
+                            <Grid ColumnDefinitions="Auto,*,Auto"
+                                  ColumnSpacing="8">
+                                <Label Text="Filter"
+                                       VerticalTextAlignment="Center"
+                                       Style="{StaticResource SectionTitleStyle}" />
+                                <Entry Grid.Column="1"
+                                       Text="{Binding StashSearchText}"
+                                       Placeholder="Filter stash rows or columns"
+                                       ClearButtonVisibility="WhileEditing"
+                                       Style="{StaticResource CompactToolbarEntryStyle}" />
+                                <Button Grid.Column="2"
+                                        Text="Clear"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnClearStashFilterClicked"
+                                        IsEnabled="{Binding CanClearStashSearch}" />
+                            </Grid>
+                            <FlexLayout Direction="Row"
+                                        Wrap="Wrap"
+                                        AlignItems="Center"
+                                        JustifyContent="Start">
+                                <Button Margin="0,0,8,8"
+                                        Text="{Binding StashSortButtonText}"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnChangeStashSortClicked" />
+                                <Button Margin="0,0,8,8"
+                                        Text="{Binding StashSortDirectionButtonText}"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnToggleStashSortDirectionClicked" />
+                                <Button Margin="0,0,8,8"
+                                        Text="{Binding HideEmptyStashColumnsButtonText}"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnToggleHideEmptyStashColumnsClicked" />
+                            </FlexLayout>
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Grid Grid.Row="3">
                         <Label Text="{Binding StashEmptyStateText}"
                                Style="{StaticResource PaneMetaStyle}"
                                LineBreakMode="WordWrap"
                                Margin="2,4,2,0"
                                IsVisible="{Binding ShowStashEmptyState}" />
 
-                        <ScrollView IsVisible="{Binding HasStashData}">
+                        <Label Text="{Binding StashFilterEmptyStateText}"
+                               Style="{StaticResource PaneMetaStyle}"
+                               LineBreakMode="WordWrap"
+                               Margin="2,4,2,0"
+                               IsVisible="{Binding ShowStashFilterEmptyState}" />
+
+                        <ScrollView IsVisible="{Binding ShowDesktopStashTable}">
                             <ScrollView Orientation="Horizontal"
                                         HorizontalScrollBarVisibility="Always">
                                 <VerticalStackLayout Padding="2,0,2,0"
                                                      Spacing="0">
                                     <Border Style="{StaticResource NavigationRowBorderStyle}"
-                                            Margin="0,0,0,6">
-                                        <HorizontalStackLayout Spacing="0"
-                                                               BindableLayout.ItemsSource="{Binding StashColumns}">
-                                            <BindableLayout.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Label Text="{Binding Title}"
-                                                           WidthRequest="176"
-                                                           Padding="8,6"
-                                                           Style="{StaticResource SectionTitleStyle}"
-                                                           LineBreakMode="WordWrap" />
-                                                </DataTemplate>
-                                            </BindableLayout.ItemTemplate>
+                                            Margin="0,0,0,6"
+                                            BackgroundColor="{DynamicResource ThemeSurfaceRaisedColor}"
+                                            Stroke="{DynamicResource ThemeDividerColor}"
+                                            StrokeThickness="1">
+                                        <HorizontalStackLayout Spacing="0">
+                                            <VerticalStackLayout WidthRequest="96"
+                                                                 Padding="8,6"
+                                                                 Spacing="1">
+                                                <Label Text="Row"
+                                                       Style="{StaticResource SectionTitleStyle}" />
+                                                <Label Text="Selection"
+                                                       Style="{StaticResource MonoMetaStyle}" />
+                                            </VerticalStackLayout>
+                                            <HorizontalStackLayout Spacing="0"
+                                                                   BindableLayout.ItemsSource="{Binding StashColumns}">
+                                                    <BindableLayout.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <VerticalStackLayout WidthRequest="176"
+                                                                                 Padding="8,6"
+                                                                                 Spacing="1">
+                                                                <Label Text="{Binding Title}"
+                                                                       Style="{StaticResource SectionTitleStyle}"
+                                                                       LineBreakMode="WordWrap" />
+                                                                <Label Text="{Binding SummaryText}"
+                                                                       Style="{StaticResource MonoMetaStyle}" />
+                                                            </VerticalStackLayout>
+                                                        </DataTemplate>
+                                                    </BindableLayout.ItemTemplate>
+                                                </HorizontalStackLayout>
                                         </HorizontalStackLayout>
                                     </Border>
 
@@ -320,22 +395,66 @@
                                         <BindableLayout.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Style="{StaticResource NavigationRowBorderStyle}"
-                                                        Margin="0,0,0,6">
-                                                    <HorizontalStackLayout Spacing="0"
-                                                                           BindableLayout.ItemsSource="{Binding Cells}">
-                                                        <BindableLayout.ItemTemplate>
-                                                            <DataTemplate>
-                                                                <controls:CopyableLabel Text="{Binding Value}"
-                                                                                        CopyText="{Binding Value}"
-                                                                                        CopiedMessage="Copied stash cell."
-                                                                                        Copied="OnInlineCopyCompleted"
-                                                                                        WidthRequest="176"
-                                                                                        Padding="8,6"
-                                                                                        Style="{StaticResource MonoTextStyle}"
-                                                                                        VerticalTextAlignment="Start"
-                                                                                        LineBreakMode="WordWrap" />
-                                                            </DataTemplate>
-                                                        </BindableLayout.ItemTemplate>
+                                                        Margin="0,0,0,6"
+                                                        BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                                                        Stroke="{DynamicResource ThemeDividerColor}"
+                                                        StrokeThickness="1">
+                                                    <Border.GestureRecognizers>
+                                                        <TapGestureRecognizer Tapped="OnStashRowTapped" />
+                                                    </Border.GestureRecognizers>
+                                                    <Border.Triggers>
+                                                        <DataTrigger TargetType="Border"
+                                                                     Binding="{Binding IsAlternate}"
+                                                                     Value="True">
+                                                            <Setter Property="BackgroundColor"
+                                                                    Value="{DynamicResource ThemeSurfaceRaisedColor}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger TargetType="Border"
+                                                                     Binding="{Binding IsSelected}"
+                                                                     Value="True">
+                                                            <Setter Property="BackgroundColor"
+                                                                    Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                                            <Setter Property="Stroke"
+                                                                    Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                                        </DataTrigger>
+                                                    </Border.Triggers>
+                                                    <HorizontalStackLayout Spacing="0">
+                                                        <VerticalStackLayout WidthRequest="96"
+                                                                             Padding="8,6"
+                                                                             Spacing="1">
+                                                            <Label Text="{Binding RowLabel}"
+                                                                   Style="{StaticResource SectionTitleStyle}"
+                                                                   VerticalTextAlignment="Start" />
+                                                            <Label Text="{Binding DetailSummaryText}"
+                                                                   Style="{StaticResource MonoMetaStyle}"
+                                                                   LineBreakMode="WordWrap"
+                                                                   MaxLines="2" />
+                                                        </VerticalStackLayout>
+                                                        <HorizontalStackLayout Spacing="0"
+                                                                               BindableLayout.ItemsSource="{Binding Cells}">
+                                                            <BindableLayout.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <controls:CopyableLabel Text="{Binding DisplayValue}"
+                                                                                            CopyText="{Binding Value}"
+                                                                                            CopiedMessage="Copied stash cell."
+                                                                                            Copied="OnInlineCopyCompleted"
+                                                                                            WidthRequest="176"
+                                                                                            Padding="8,6"
+                                                                                            Style="{StaticResource MonoTextStyle}"
+                                                                                            VerticalTextAlignment="Start"
+                                                                                            LineBreakMode="WordWrap">
+                                                                        <controls:CopyableLabel.Triggers>
+                                                                            <DataTrigger TargetType="controls:CopyableLabel"
+                                                                                         Binding="{Binding IsEmpty}"
+                                                                                         Value="True">
+                                                                                <Setter Property="TextColor"
+                                                                                        Value="{DynamicResource ThemeTextMutedColor}" />
+                                                                            </DataTrigger>
+                                                                        </controls:CopyableLabel.Triggers>
+                                                                    </controls:CopyableLabel>
+                                                                </DataTemplate>
+                                                            </BindableLayout.ItemTemplate>
+                                                        </HorizontalStackLayout>
                                                     </HorizontalStackLayout>
                                                 </Border>
                                             </DataTemplate>
@@ -344,7 +463,129 @@
                                 </VerticalStackLayout>
                             </ScrollView>
                         </ScrollView>
+
+                        <ScrollView IsVisible="{Binding ShowCompactStashCards}">
+                            <VerticalStackLayout Padding="2,0,2,0"
+                                                 Spacing="8"
+                                                 BindableLayout.ItemsSource="{Binding StashRows}">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource SectionBorderStyle}"
+                                                Padding="10,8">
+                                            <Border.GestureRecognizers>
+                                                <TapGestureRecognizer Tapped="OnStashRowTapped" />
+                                            </Border.GestureRecognizers>
+                                            <Border.Triggers>
+                                                <DataTrigger TargetType="Border"
+                                                             Binding="{Binding IsSelected}"
+                                                             Value="True">
+                                                    <Setter Property="BackgroundColor"
+                                                            Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                                    <Setter Property="Stroke"
+                                                            Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                                </DataTrigger>
+                                            </Border.Triggers>
+                                            <VerticalStackLayout Spacing="8">
+                                                <Grid ColumnDefinitions="Auto,*"
+                                                      ColumnSpacing="10">
+                                                    <Label Text="{Binding RowHeadingText}"
+                                                           Style="{StaticResource SectionTitleStyle}" />
+                                                    <Label Grid.Column="1"
+                                                           Text="{Binding DetailSummaryText}"
+                                                           Style="{StaticResource MonoMetaStyle}"
+                                                           HorizontalTextAlignment="End" />
+                                                </Grid>
+                                                <Label Text="{Binding PreviewText}"
+                                                       Style="{StaticResource PaneMetaStyle}"
+                                                       LineBreakMode="WordWrap"
+                                                       MaxLines="3" />
+                                                <VerticalStackLayout Spacing="0"
+                                                                     BindableLayout.ItemsSource="{Binding Details}">
+                                                    <BindableLayout.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Style="{StaticResource NavigationRowBorderStyle}"
+                                                                    Margin="0,0,0,6">
+                                                                <Grid ColumnDefinitions="120,*"
+                                                                      ColumnSpacing="10">
+                                                                    <Label Text="{Binding Name}"
+                                                                           Style="{StaticResource MonoMetaStyle}" />
+                                                                    <controls:CopyableLabel Grid.Column="1"
+                                                                                            Text="{Binding Value}"
+                                                                                            CopyText="{Binding Value}"
+                                                                                            CopiedMessage="Copied stash detail."
+                                                                                            Copied="OnInlineCopyCompleted"
+                                                                                            Style="{StaticResource MonoTextStyle}"
+                                                                                            LineBreakMode="WordWrap" />
+                                                                </Grid>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </BindableLayout.ItemTemplate>
+                                                </VerticalStackLayout>
+                                            </VerticalStackLayout>
+                                        </Border>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </VerticalStackLayout>
+                        </ScrollView>
                     </Grid>
+
+                    <Border Grid.Row="4"
+                            Style="{StaticResource SectionBorderStyle}"
+                            Padding="10,8"
+                            IsVisible="{Binding ShowDesktopSelectedStashPanel}">
+                        <Grid RowDefinitions="Auto,*"
+                              RowSpacing="8">
+                            <Grid ColumnDefinitions="*,Auto"
+                                  ColumnSpacing="8">
+                                <VerticalStackLayout Spacing="0">
+                                    <Label Text="Selected stash row"
+                                           Style="{StaticResource MonoMetaStyle}" />
+                                    <Label Text="{Binding SelectedStashRowTitleText}"
+                                           Style="{StaticResource SectionTitleStyle}" />
+                                    <Label Text="{Binding SelectedStashRowSummaryText}"
+                                           Style="{StaticResource PaneMetaStyle}" />
+                                </VerticalStackLayout>
+                                <Button Grid.Column="1"
+                                        Text="Copy Row"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnCopySelectedStashClicked"
+                                        IsEnabled="{Binding CanCopySelectedStashRow}" />
+                            </Grid>
+
+                            <ScrollView Grid.Row="1"
+                                         HeightRequest="168">
+                                <VerticalStackLayout Spacing="0">
+                                    <Label Text="The selected row has no populated fields."
+                                           Style="{StaticResource PaneMetaStyle}"
+                                           LineBreakMode="WordWrap"
+                                           Margin="0,0,0,8"
+                                           IsVisible="{Binding ShowSelectedStashDetailsEmptyState}" />
+                                    <VerticalStackLayout Spacing="0"
+                                                         BindableLayout.ItemsSource="{Binding SelectedStashDetails}">
+                                        <BindableLayout.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource NavigationRowBorderStyle}"
+                                                        Margin="0">
+                                                    <Grid ColumnDefinitions="130,*"
+                                                          ColumnSpacing="10">
+                                                        <Label Text="{Binding Name}"
+                                                               Style="{StaticResource MonoMetaStyle}" />
+                                                        <controls:CopyableLabel Grid.Column="1"
+                                                                                Text="{Binding Value}"
+                                                                                CopyText="{Binding Value}"
+                                                                                CopiedMessage="Copied stash detail."
+                                                                                Copied="OnInlineCopyCompleted"
+                                                                                Style="{StaticResource MonoTextStyle}"
+                                                                                LineBreakMode="WordWrap" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </BindableLayout.ItemTemplate>
+                                    </VerticalStackLayout>
+                                </VerticalStackLayout>
+                            </ScrollView>
+                        </Grid>
+                    </Border>
                 </Grid>
 
                 <Grid Grid.RowSpan="2"

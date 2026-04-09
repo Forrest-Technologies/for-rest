@@ -5,7 +5,7 @@ using ForRest.Maui.ViewModels;
 using ForRest.Models;
 using ForRest.Services;
 using ForRest.Services.AI;
-using ForRest.Services.Licensing;
+using ForRest.Licensing;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Maui.Graphics;
@@ -38,6 +38,20 @@ public sealed class MainPageViewModelLayoutTests
 
 		Assert.AreEqual(420d, viewModel.RightPaneWidth.Value, 0.001d);
 		Assert.IsTrue(viewModel.RightPaneWidth.Value > 316d);
+	}
+
+	[TestMethod]
+	public async Task InitializeAsync_shows_dismissible_status_banner_for_blocking_activation()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel(appActivationService: new BlockingAppActivationService());
+
+		await viewModel.InitializeAsync();
+
+		Assert.IsTrue(viewModel.IsStatusBannerVisible);
+		Assert.AreEqual("License required", viewModel.StatusBannerTitle);
+		viewModel.DismissStatusBanner();
+		Assert.IsFalse(viewModel.IsStatusBannerVisible);
 	}
 
 	[TestMethod]
@@ -145,9 +159,295 @@ public sealed class MainPageViewModelLayoutTests
 
 		Assert.IsTrue(viewModel.HasStashData);
 		CollectionAssert.AreEqual(new[] { "Method", "Token" }, viewModel.StashColumns.Select(static item => item.Title).ToArray());
+		CollectionAssert.AreEqual(new[] { 2, 1 }, viewModel.StashColumns.Select(static item => item.PopulatedValueCount).ToArray());
 		Assert.HasCount(2, viewModel.StashRows);
 		CollectionAssert.AreEqual(new[] { "GET", "alpha" }, viewModel.StashRows[0].Cells.Select(static item => item.Value).ToArray());
 		CollectionAssert.AreEqual(new[] { "POST", string.Empty }, viewModel.StashRows[1].Cells.Select(static item => item.Value).ToArray());
+	}
+
+	[TestMethod]
+	public async Task SendAsync_selects_first_stash_row_and_populates_selected_details()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token", "Status"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+						["Status"] = "200",
+					},
+				},
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "POST",
+						["Token"] = "beta",
+						["Status"] = "201",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+
+		await viewModel.SendAsync();
+
+		Assert.IsNotNull(viewModel.SelectedStashRow);
+		Assert.AreEqual("1", viewModel.SelectedStashRow.RowLabel);
+		Assert.IsTrue(viewModel.HasSelectedStashRow);
+		Assert.AreEqual("Row 1", viewModel.SelectedStashRowTitleText);
+		Assert.AreEqual("3 populated fields", viewModel.SelectedStashRowSummaryText);
+		Assert.AreEqual("2 rows  3 columns", viewModel.StashSummaryText);
+		Assert.AreEqual("Showing all captured rows.  Sorted by capture asc.", viewModel.StashFilterSummaryText);
+		CollectionAssert.AreEqual(
+			new[] { "Method", "Token", "Status" },
+			viewModel.SelectedStashDetails.Select(static item => item.Name).ToArray());
+		CollectionAssert.AreEqual(
+			new[] { "GET", "alpha", "200" },
+			viewModel.SelectedStashDetails.Select(static item => item.Value).ToArray());
+	}
+
+	[TestMethod]
+	public async Task StashSearchText_filters_rows_and_updates_selected_row()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+					},
+				},
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "POST",
+						["Token"] = "beta",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+
+		await viewModel.SendAsync();
+		viewModel.StashSearchText = "beta";
+
+		Assert.IsTrue(viewModel.HasStashData);
+		Assert.IsTrue(viewModel.HasVisibleStashRows);
+		Assert.IsFalse(viewModel.ShowStashFilterEmptyState);
+		Assert.IsTrue(viewModel.CanClearStashSearch);
+		Assert.HasCount(1, viewModel.StashRows);
+		Assert.IsNotNull(viewModel.SelectedStashRow);
+		Assert.AreEqual("2", viewModel.SelectedStashRow.RowLabel);
+		CollectionAssert.AreEqual(new[] { "POST", "beta" }, viewModel.StashRows[0].Cells.Select(static item => item.Value).ToArray());
+		Assert.AreEqual("Showing 1 row of 2 rows.  Sorted by capture asc.", viewModel.StashFilterSummaryText);
+	}
+
+	[TestMethod]
+	public async Task StashSearchText_with_no_matches_preserves_data_but_shows_filter_empty_state()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+
+		await viewModel.SendAsync();
+		viewModel.StashSearchText = "missing";
+
+		Assert.IsTrue(viewModel.HasStashData);
+		Assert.IsFalse(viewModel.HasVisibleStashRows);
+		Assert.IsFalse(viewModel.ShowStashEmptyState);
+		Assert.IsTrue(viewModel.ShowStashFilterEmptyState);
+		Assert.IsNull(viewModel.SelectedStashRow);
+		Assert.HasCount(0, viewModel.StashRows);
+		Assert.IsFalse(viewModel.CanCopyStash);
+		Assert.IsFalse(viewModel.CanExportStashCsv);
+		Assert.IsFalse(viewModel.CanCopySelectedStashRow);
+		Assert.IsTrue(viewModel.CanClearStashSearch);
+		Assert.AreEqual("No stash rows match \"missing\".", viewModel.StashFilterEmptyStateText);
+	}
+
+	[TestMethod]
+	public async Task ClearStashFilter_restores_all_rows_and_disables_clear_action()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+					},
+				},
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "POST",
+						["Token"] = "beta",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+
+		await viewModel.SendAsync();
+		viewModel.StashSearchText = "beta";
+		viewModel.ClearStashFilter();
+
+		Assert.IsFalse(viewModel.CanClearStashSearch);
+		Assert.AreEqual(string.Empty, viewModel.StashSearchText);
+		Assert.IsTrue(viewModel.HasVisibleStashRows);
+		Assert.HasCount(2, viewModel.StashRows);
+		Assert.AreEqual("Showing all captured rows.  Sorted by capture asc.", viewModel.StashFilterSummaryText);
+	}
+
+	[TestMethod]
+	public async Task ToggleHideEmptyStashColumns_hides_columns_that_are_empty_across_visible_rows()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token", "Unused"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+					},
+				},
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "POST",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+
+		await viewModel.SendAsync();
+		viewModel.ToggleHideEmptyStashColumns();
+
+		CollectionAssert.AreEqual(new[] { "Method", "Token" }, viewModel.StashColumns.Select(static item => item.Title).ToArray());
+		Assert.AreEqual("2 rows  2/3 columns visible", viewModel.StashSummaryText);
+		Assert.AreEqual("Showing all captured rows.  Sorted by capture asc.  Empty columns hidden.", viewModel.StashFilterSummaryText);
+	}
+
+	[TestMethod]
+	public async Task CycleStashSortMode_and_direction_reorders_visible_rows()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token", "Status"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "PATCH",
+					},
+				},
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+						["Status"] = "200",
+					},
+				},
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "POST",
+						["Token"] = "beta",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+
+		await viewModel.SendAsync();
+		viewModel.CycleStashSortMode();
+
+		CollectionAssert.AreEqual(new[] { "1", "3", "2" }, viewModel.StashRows.Select(static item => item.RowLabel).ToArray());
+		Assert.AreEqual("Sort: Filled", viewModel.StashSortButtonText);
+		Assert.AreEqual("Showing all captured rows.  Sorted by filled asc.", viewModel.StashFilterSummaryText);
+
+		viewModel.ToggleStashSortDirection();
+
+		CollectionAssert.AreEqual(new[] { "2", "3", "1" }, viewModel.StashRows.Select(static item => item.RowLabel).ToArray());
+		Assert.AreEqual("Desc", viewModel.StashSortDirectionButtonText);
+		Assert.AreEqual("Showing all captured rows.  Sorted by filled desc.", viewModel.StashFilterSummaryText);
+	}
+
+	[TestMethod]
+	public async Task CompactLayout_uses_stash_cards_instead_of_desktop_table()
+	{
+		using TestHarness harness = new();
+		StashTable stash = new()
+		{
+			Columns = ["Method", "Token"],
+			Rows =
+			[
+				new()
+				{
+					Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+					{
+						["Method"] = "GET",
+						["Token"] = "alpha",
+					},
+				},
+			],
+		};
+		MainPageViewModel viewModel = harness.CreateViewModel(new FakeExecutionService(stash));
+		viewModel.UpdateLayoutMode(360d);
+
+		await viewModel.SendAsync();
+
+		Assert.IsTrue(viewModel.ShowCompactStashCards);
+		Assert.IsFalse(viewModel.ShowDesktopStashTable);
+		Assert.IsFalse(viewModel.ShowDesktopSelectedStashPanel);
+		Assert.AreEqual("2 populated fields  •  Method: GET  |  Token: alpha", viewModel.StashRows[0].CompactSummaryText);
 	}
 
 	[TestMethod]
@@ -780,7 +1080,7 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
-	public async Task ActiveEditorText_refreshes_settings_projection_after_ai_toggle_autosave()
+	public async Task ActiveEditorText_refreshes_settings_projection_after_ai_toggle_autosave_once_editor_is_idle()
 	{
 		using TestHarness harness = new();
 		MainPageViewModel viewModel = harness.CreateViewModel();
@@ -793,11 +1093,41 @@ public sealed class MainPageViewModelLayoutTests
 		string updatedText = viewModel.ActiveEditorText.Replace("enabled = false", "enabled = true", StringComparison.Ordinal);
 
 		viewModel.ActiveEditorText = updatedText;
-		await Task.Delay(900);
+		await Task.Delay(700);
+
+		StringAssert.Contains(viewModel.ActiveEditorText, "enabled = true");
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("provider = ", StringComparison.Ordinal));
+
+		await Task.Delay(700);
 
 		StringAssert.Contains(viewModel.ActiveEditorText, "enabled = true");
 		StringAssert.Contains(viewModel.ActiveEditorText, "provider = \"openai\"");
 		StringAssert.Contains(viewModel.ActiveEditorText, "api_key = \"\"");
+	}
+
+	[TestMethod]
+	public async Task ActiveEditorText_does_not_autosave_or_escape_unterminated_ai_model_strings()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		NavigationItemViewModel settingsItem = viewModel.ExplorerSections
+			.SelectMany(section => section.Items)
+			.First(item => string.Equals(item.DocumentKind, "settings", StringComparison.Ordinal));
+
+		viewModel.SelectExplorerItem(settingsItem);
+		viewModel.ActiveEditorText = viewModel.ActiveEditorText.Replace("enabled = false", "enabled = true", StringComparison.Ordinal);
+		await Task.Delay(1500);
+
+		string incompleteModelText = viewModel.ActiveEditorText.Replace("model = \"\"", "model = \"gpt-5.4-na", StringComparison.Ordinal);
+		viewModel.ActiveEditorText = incompleteModelText;
+
+		await Task.Delay(900);
+
+		Assert.AreEqual(incompleteModelText, viewModel.ActiveEditorText);
+		Assert.IsFalse(viewModel.ActiveEditorText.Contains("\\\"gpt-5.4-na", StringComparison.Ordinal));
+
+		string savedConfig = await File.ReadAllTextAsync(harness.ConfigFilePath);
+		Assert.IsFalse(savedConfig.Contains("gpt-5.4-na", StringComparison.Ordinal));
 	}
 
 	[TestMethod]
@@ -1812,7 +2142,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		public string StateFilePath { get; }
 
-		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null, IAiInlineConversationService? aiInlineConversationService = null, IScriptEngine? scriptEngine = null)
+		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null, IAiInlineConversationService? aiInlineConversationService = null, IScriptEngine? scriptEngine = null, IAppActivationService? appActivationService = null)
 		{
 			ThemeConfigStore themeConfigStore = new();
 			SettingsTomlTemplate template = new();
@@ -1822,9 +2152,7 @@ public sealed class MainPageViewModelLayoutTests
 				themeConfigStore,
 				parser,
 				normalizer,
-				template,
-				new StandardLicenseValidationService(new LicenseValidationOptions("unused-public-key", GracePeriodDays: 30)),
-				new TestBuildMetadataProvider(DateTimeOffset.UtcNow));
+				template);
 			WorkbenchAiSettingsProvider aiSettingsProvider = new(themeConfigStore, parser);
 
 			return new MainPageViewModel(
@@ -1835,7 +2163,7 @@ public sealed class MainPageViewModelLayoutTests
 				scriptEngine ?? new FakeScriptEngine(),
 				new InMemoryExecutionHistoryRepository(),
 				new ForRestScriptDocumentTextService(),
-				new FakeAppActivationService(),
+				appActivationService ?? new FakeAppActivationService(),
 				aiSettingsProvider,
 				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)));
 		}
@@ -1887,7 +2215,32 @@ public sealed class MainPageViewModelLayoutTests
 
 	private sealed class FakeAppActivationService : IAppActivationService
 	{
-		public ActivationSnapshot EvaluateNow() => new("Activated", "Tests", true);
+		public ActivationSnapshot EvaluateNow() => CreateSnapshot();
+
+		public ActivationSnapshot EvaluateNow(string? activationCodeOverride) => CreateSnapshot();
+
+		public ActivationSnapshot EvaluateProjection(string? activationCodeOverride) => CreateSnapshot();
+
+		public Task<ActivationSnapshot> EvaluateNowAsync(CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
+
+		public Task<ActivationSnapshot> EvaluateNowAsync(string? activationCodeOverride, CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
+
+		private static ActivationSnapshot CreateSnapshot() => new(LicenseAccessStatus.Licensed, "Activated", "Tests", true);
+	}
+
+	private sealed class BlockingAppActivationService : IAppActivationService
+	{
+		public ActivationSnapshot EvaluateNow() => CreateSnapshot();
+
+		public ActivationSnapshot EvaluateNow(string? activationCodeOverride) => CreateSnapshot();
+
+		public ActivationSnapshot EvaluateProjection(string? activationCodeOverride) => CreateSnapshot();
+
+		public Task<ActivationSnapshot> EvaluateNowAsync(CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
+
+		public Task<ActivationSnapshot> EvaluateNowAsync(string? activationCodeOverride, CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
+
+		private static ActivationSnapshot CreateSnapshot() => new(LicenseAccessStatus.ActivationRequired, "License required", "Activation is required before requests can run.", false);
 	}
 
 	private sealed class FakeExecutionService : IForRestScriptExecutionService

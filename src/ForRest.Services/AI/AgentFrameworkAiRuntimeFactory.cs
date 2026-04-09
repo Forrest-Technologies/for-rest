@@ -151,18 +151,33 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                 static diagnostic => $"{diagnostic.Severity.ToUpperInvariant()} L{diagnostic.Line}:{diagnostic.Column} {diagnostic.Message}")
         ];
 
+        var redactedSource = AiActiveDocumentToolService.RedactSecrets(activeDocument.SourceText);
+
+        AiWorkspaceContext? workspaceContext = activeDocumentHost?.GetWorkspaceContext();
+        string workspaceBlock = workspaceContext is not null
+            ? string.Join(
+                Environment.NewLine,
+                [
+                    $"Workspace: {workspaceContext.WorkspaceName} (ID: {workspaceContext.WorkspaceId})",
+                    $"Scripts in workspace ({workspaceContext.Scripts.Count}):",
+                    .. workspaceContext.Scripts.Select(
+                        static script => $"  - {script.Name}: {script.Method} {script.UrlTemplate}"),
+                ])
+            : "Workspace: (unknown)";
+
         string content = string.Join(
             Environment.NewLine,
             [
                 $"Document id: {activeDocument.DocumentId}",
                 $"Title: {activeDocument.Title}",
                 $"Language: {activeDocument.Language}",
+                workspaceBlock,
                 diagnostics.Count == 0
                     ? "Diagnostics: none"
                     : $"Diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}",
                 BuildRuntimeContextBlock(activeDocument.RuntimeContext),
                 "Source:",
-                activeDocument.SourceText,
+                redactedSource,
             ]);
 
         topics.Insert(
@@ -732,6 +747,24 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                     ]),
                 () => _activeDocumentToolService.ReplaceActiveDocument(settings, activeDocumentHost, updatedSourceText),
                 maxResultLength: 3200);
+        }
+
+        [Description("Create a new request script in the current workspace.")]
+        string CreateWorkspaceScript(
+            [Description("The name for the new script.")] string name,
+            [Description("The complete ForRest source text for the new script.")] string sourceText)
+        {
+            return TraceToolCall(
+                "create_workspace_script",
+                string.Join(
+                    Environment.NewLine,
+                    [
+                        $"name: {name}",
+                        "sourceText:",
+                        sourceText,
+                    ]),
+                () => _activeDocumentToolService.CreateWorkspaceScript(settings, activeDocumentHost, name, sourceText),
+                maxResultLength: 1600);
         }
 
         string TraceToolCall(string toolName, string arguments, Func<string> action, int maxResultLength = 1600)

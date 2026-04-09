@@ -103,6 +103,79 @@ internal static class SampleDataFactory
                 """,
         };
 
+        var crudWorkflowRequest = new RequestDefinition
+        {
+            WorkspaceId = workspaceId,
+            Name = "CRUD Workflow",
+            Method = HttpMethodKind.Get,
+            UrlTemplate = "{{baseUrl}}/posts/1",
+            Headers =
+            [
+                new()
+                {
+                    Key = "Accept",
+                    Value = "application/json",
+                },
+            ],
+            PreRequestScript = """
+                var __flow = new ForRest.Scripting.ForRestFlowRuntime(variables);
+                // pipe: GET -> POST -> cleanup
+                request.Method = "GET";
+                request.Url = variables.RenderTemplate("{{baseUrl}}/posts/1");
+                dynamic fetched = (await request.SendAsync());
+                console.Log($"GET returned {fetched.Status}");
+
+                request.Method = "POST";
+                request.Url = variables.RenderTemplate("{{baseUrl}}/posts");
+                request.ContentType = "application/json";
+                request.Body = "{\"title\":\"ForRest CRUD\",\"body\":\"Created by pipe workflow\",\"userId\":1}";
+                dynamic created = (await request.SendAsync());
+                console.Log($"POST returned {created.Status}");
+                """,
+            TestsScript = """
+                tests.Assert(response.Status >= 200 && response.Status < 300, "CRUD workflow completed successfully.");
+                """,
+        };
+
+        var parallelHealthRequest = new RequestDefinition
+        {
+            WorkspaceId = workspaceId,
+            Name = "Parallel Health Check",
+            Method = HttpMethodKind.Get,
+            UrlTemplate = "https://httpbin.org/status/200",
+            Headers =
+            [
+                new()
+                {
+                    Key = "Accept",
+                    Value = "application/json",
+                },
+            ],
+            PreRequestScript = """
+                var __flow = new ForRest.Scripting.ForRestFlowRuntime(variables);
+                // parallel health checks
+                var __par1_1 = request.Clone();
+                __par1_1.Method = "GET";
+                __par1_1.Url = "https://httpbin.org/status/200";
+                var __parTask1_1 = __par1_1.SendAsync();
+                var __par1_2 = request.Clone();
+                __par1_2.Method = "GET";
+                __par1_2.Url = "https://httpbin.org/status/200";
+                var __parTask1_2 = __par1_2.SendAsync();
+                await Task.WhenAll(__parTask1_1, __parTask1_2);
+                dynamic health_a = __parTask1_1.Result;
+                dynamic health_b = __parTask1_2.Result;
+                stash.DeclareColumns("Endpoint", "Status");
+                stash.Set("Endpoint", "httpbin-a"); stash.Set("Status", health_a.Status.ToString()); stash.Commit();
+                stash.Set("Endpoint", "httpbin-b"); stash.Set("Status", health_b.Status.ToString()); stash.Commit();
+                console.Log($"Health A: {health_a.Status}, Health B: {health_b.Status}");
+                """,
+            TestsScript = """
+                tests.Pass("Parallel health checks completed.");
+                """,
+            MaxSendIterations = 4,
+        };
+
         return new()
         {
             Profile = new()
@@ -204,6 +277,24 @@ internal static class SampleDataFactory
                             Name = echoRequest.Name,
                             SortOrder = 2,
                             Request = echoRequest,
+                        },
+                        new()
+                        {
+                            WorkspaceId = workspaceId,
+                            ParentId = authFolderId,
+                            Kind = WorkspaceNodeKind.Request,
+                            Name = crudWorkflowRequest.Name,
+                            SortOrder = 3,
+                            Request = crudWorkflowRequest,
+                        },
+                        new()
+                        {
+                            WorkspaceId = workspaceId,
+                            ParentId = authFolderId,
+                            Kind = WorkspaceNodeKind.Request,
+                            Name = parallelHealthRequest.Name,
+                            SortOrder = 4,
+                            Request = parallelHealthRequest,
                         },
                     ],
                     ExecutionPresets =

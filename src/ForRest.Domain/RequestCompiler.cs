@@ -41,6 +41,7 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
 
         uriBuilder.Query = BuildQueryString(uri.Query, queryParameters);
         var body = RenderBody(request.Body, preview.Variables);
+        ApplyUserAgent(request.UserAgent, request.CustomUserAgent, headers, preview.Variables);
 
         return OperationResult<PreparedRequest>.Success(new()
         {
@@ -52,6 +53,8 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
             TimeoutMilliseconds = request.TimeoutMilliseconds,
             FollowRedirects = request.FollowRedirects,
             ValidateSsl = request.ValidateSsl,
+            UserAgent = request.UserAgent,
+            CustomUserAgent = request.CustomUserAgent,
             Variables = preview,
             RawRequest = BuildRawRequest(request.Method, uriBuilder.Uri, headers, body),
         });
@@ -286,6 +289,20 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
                 Key = key,
                 Value = value,
             });
+    }
+
+    private static void ApplyUserAgent(
+        UserAgentKind kind,
+        string customValue,
+        List<KeyValueDefinition> headers,
+        IEnumerable<ResolvedVariable> variables)
+    {
+        var renderer = new VariableResolver();
+        var resolved = UserAgentResolver.Resolve(kind, renderer.RenderTemplate(customValue, variables));
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            UpsertHeader(headers, "User-Agent", resolved);
+        }
     }
 
     private static void UpsertQueryParameter(List<KeyValueDefinition> queryParameters, string key, string value)

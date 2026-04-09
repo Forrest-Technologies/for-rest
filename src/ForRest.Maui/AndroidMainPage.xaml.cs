@@ -1,6 +1,5 @@
 using ForRest.Maui.Services;
 using ForRest.Maui.ViewModels;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace ForRest.Maui;
 
@@ -9,15 +8,26 @@ public partial class AndroidMainPage : ContentPage
 	private bool _isInitialized;
 	private AndroidOutputView _outputView = AndroidOutputView.Response;
 
-	public AndroidMainPage()
+	public AndroidMainPage(MainPageViewModel viewModel)
 	{
 		InitializeComponent();
+		BindingContext = viewModel;
 		Loaded += OnPageLoaded;
 		SizeChanged += OnPageSizeChanged;
 		UpdateOutputView(AndroidOutputView.Response);
 	}
 
 	private MainPageViewModel? ViewModel => BindingContext as MainPageViewModel;
+
+	public async Task PrepareForShutdownAsync()
+	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
+		await ViewModel.PrepareForShutdownAsync();
+	}
 
 	private async void OnPageLoaded(object? sender, EventArgs e)
 	{
@@ -29,14 +39,15 @@ public partial class AndroidMainPage : ContentPage
 		_isInitialized = true;
 		try
 		{
-			EnsureBindingContext();
 			if (ViewModel is null)
 			{
 				throw new InvalidOperationException("AndroidMainPage could not resolve MainPageViewModel.");
 			}
 
+			AppLaunchGuard.RecordMessage("AndroidMainPage startup", "AndroidMainPage loaded; initialization starting.");
 			ViewModel.UpdateLayoutMode(Width);
 			await ViewModel.InitializeAsync();
+			AppLaunchGuard.RecordMessage("AndroidMainPage startup", "AndroidMainPage initialization completed successfully.");
 			AppLaunchGuard.MarkLaunchCompleted();
 		}
 		catch (Exception exception)
@@ -64,6 +75,11 @@ public partial class AndroidMainPage : ContentPage
 		}
 
 		await ExecuteWithLaunchGuard(ViewModel.SendAsync, "Android send failed.");
+	}
+
+	private void OnDismissStatusBannerClicked(object? sender, EventArgs e)
+	{
+		ViewModel?.DismissStatusBanner();
 	}
 
 	private async void OnCopyRequestClicked(object? sender, EventArgs e)
@@ -134,22 +150,6 @@ public partial class AndroidMainPage : ContentPage
 		{
 			AppLaunchGuard.RecordException("Android output copy failed.", exception);
 		}
-	}
-
-	private void EnsureBindingContext()
-	{
-		if (BindingContext is MainPageViewModel)
-		{
-			return;
-		}
-
-		IServiceProvider? services = Handler?.MauiContext?.Services;
-		if (services is null)
-		{
-			return;
-		}
-
-		BindingContext = services.GetService<MainPageViewModel>();
 	}
 
 	private async Task ExecuteWithLaunchGuard(Func<Task> action, string context)

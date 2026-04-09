@@ -91,3 +91,14 @@ public enum ExecutionState
     Failed,
     Cancelled,
 }
+
+public enum UserAgentKind
+{
+    None,
+    Chrome,
+    Firefox,
+    Safari,
+    Edge,
+    Curl,
+    Custom,
+}

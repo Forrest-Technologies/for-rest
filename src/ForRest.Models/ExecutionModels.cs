@@ -55,6 +55,8 @@ public sealed record ResponseSnapshot
     public List<KeyValueDefinition> Cookies { get; init; } = [];
 
     public DateTimeOffset ReceivedUtc { get; init; } = DateTimeOffset.UtcNow;
+
+    public string? Label { get; init; }
 }
 
 public sealed record RequestSnapshot

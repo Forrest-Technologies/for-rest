@@ -194,6 +194,39 @@ public partial class InspectorPane : ContentView
 		await ViewModel.CopyStashAsync();
 	}
 
+	private async void OnCopySelectedStashClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopySelectedStashRowAsync();
+	}
+
+	private void OnClearStashFilterClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ClearStashFilter();
+	}
+
+	private void OnChangeStashSortClicked(object? sender, EventArgs e)
+	{
+		ViewModel.CycleStashSortMode();
+	}
+
+	private void OnToggleStashSortDirectionClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ToggleStashSortDirection();
+	}
+
+	private void OnToggleHideEmptyStashColumnsClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ToggleHideEmptyStashColumns();
+	}
+
+	private void OnStashRowTapped(object? sender, TappedEventArgs e)
+	{
+		if (sender is Border { BindingContext: StashRowViewModel row })
+		{
+			ViewModel.SelectStashRow(row);
+		}
+	}
+
 	private async void OnCopyHeadersClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyHeadersAsync();

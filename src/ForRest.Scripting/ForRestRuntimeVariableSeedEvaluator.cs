@@ -14,6 +14,7 @@ public sealed class ForRestRuntimeVariableSeedEvaluator
                     Key = seed.Key,
                     Value = EvaluateSeed(seed),
                     Scope = VariableScope.Runtime,
+                    IsSecret = seed.IsSecret,
                 }),
         ];
     }

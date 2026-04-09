@@ -77,6 +77,11 @@ public partial class MainPage : ContentPage
 		ViewModel.ToggleRightPane();
 	}
 
+	private void OnDismissStatusBannerClicked(object? sender, EventArgs e)
+	{
+		ViewModel.DismissStatusBanner();
+	}
+
 	private async void OnSendClicked(object? sender, EventArgs e)
 	{
 		await CenterPane.FlushActiveEditorAsync();
@@ -150,7 +155,9 @@ public partial class MainPage : ContentPage
 		_isInitialized = true;
 		try
 		{
+			AppLaunchGuard.RecordMessage("MainPage startup", "MainPage loaded; initialization starting.");
 			await ViewModel.InitializeAsync();
+			AppLaunchGuard.RecordMessage("MainPage startup", "MainPage initialization completed successfully.");
 			AppLaunchGuard.MarkLaunchCompleted();
 		}
 		catch (Exception exception)

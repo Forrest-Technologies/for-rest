@@ -311,14 +311,35 @@ public partial class WorkbenchCenterPane : ContentView
 			{
 				CornerRadius = new CornerRadius(8)
 			},
-			Content = new Label
-			{
-				Text = recoveryMessage,
-				LineBreakMode = LineBreakMode.WordWrap,
-				FontSize = 12,
-				TextColor = Color.FromArgb("#6A5034")
-			}
 		};
+		Grid bannerContent = new()
+		{
+			ColumnDefinitions =
+			{
+				new ColumnDefinition(GridLength.Star),
+				new ColumnDefinition(GridLength.Auto)
+			},
+			ColumnSpacing = 8
+		};
+		Label bannerLabel = new()
+		{
+			Text = recoveryMessage,
+			LineBreakMode = LineBreakMode.WordWrap,
+			FontSize = 12,
+			TextColor = Color.FromArgb("#6A5034")
+		};
+		Button dismissButton = new()
+		{
+			Text = "✕",
+			Padding = new Thickness(8, 2),
+			VerticalOptions = LayoutOptions.Start,
+			HorizontalOptions = LayoutOptions.End
+		};
+		dismissButton.Clicked += (_, _) => banner.IsVisible = false;
+		bannerContent.Children.Add(bannerLabel);
+		bannerContent.Children.Add(dismissButton);
+		Grid.SetColumn(dismissButton, 1);
+		banner.Content = bannerContent;
 
 		Editor editor = new()
 		{

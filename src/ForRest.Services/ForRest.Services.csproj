@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+
     <ProjectReference Include="..\ForRest.Shared\ForRest.Shared.csproj" />
     <ProjectReference Include="..\ForRest.Models\ForRest.Models.csproj" />
     <ProjectReference Include="..\ForRest.Domain\ForRest.Domain.csproj" />
@@ -18,7 +19,6 @@
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-rc4" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.83.1" />
     <PackageReference Include="OpenAI" Version="2.8.0" />
-    <PackageReference Include="Standard.Licensing" Version="1.2.2" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -12,6 +12,7 @@ public enum ForRestScriptVariableScope
 {
     Request,
     Runtime,
+    Secret,
 }
 
 public enum ForRestScriptValueKind
@@ -60,6 +61,24 @@ public enum ForRestRuntimeSeedKind
     RandomNumber,
 }
 
+public enum ForRestScriptHandlerKind
+{
+    OnError,
+    OnStatus,
+}
+
+public sealed record ForRestScriptHandler(
+    ForRestScriptHandlerKind Kind,
+    int? StatusCode,
+    string Body);
+
+public sealed record ForRestScriptScenario(
+    string Name,
+    Dictionary<string, ForRestScriptValueExpression> Auth,
+    List<ForRestScriptNamedValue> Headers,
+    List<ForRestScriptAssertion> Tests,
+    string Flow);
+
 public sealed record ForRestScriptDiagnostic(
     ForRestScriptDiagnosticSeverity Severity,
     string Message,
@@ -78,6 +97,8 @@ public sealed record ForRestScriptCompilationOptions
     public Guid WorkspaceId { get; init; }
 
     public string DefaultRequestName { get; init; } = "Untitled Request";
+
+    public Func<string, string?>? ResolveImport { get; init; }
 }
 
 public sealed record ForRestScriptCompilationResult(
@@ -86,6 +107,8 @@ public sealed record ForRestScriptCompilationResult(
     IReadOnlyList<ForRestScriptDiagnostic> Diagnostics)
 {
     public bool Succeeded => Payload is not null && Diagnostics.All(static diagnostic => diagnostic.Severity != ForRestScriptDiagnosticSeverity.Error);
+
+    public List<ForRestExecutionPayload> ScenarioPayloads { get; init; } = [];
 }
 
 public sealed record ForRestExecutionPayload
@@ -95,6 +118,8 @@ public sealed record ForRestExecutionPayload
     public RequestDefinition Request { get; init; } = new();
 
     public List<ForRestRuntimeVariableSeed> RuntimeSeeds { get; init; } = [];
+
+    public string? ScenarioName { get; init; }
 }
 
 public sealed record ForRestRuntimeVariableSeed(
@@ -102,7 +127,8 @@ public sealed record ForRestRuntimeVariableSeed(
     ForRestRuntimeSeedKind Kind,
     string LiteralValue,
     int? MinimumInclusive = null,
-    int? MaximumExclusive = null);
+    int? MaximumExclusive = null,
+    bool IsSecret = false);
 
 public sealed record ForRestScriptDocument
 {
@@ -133,6 +159,12 @@ public sealed record ForRestScriptDocument
     public Dictionary<string, ForRestScriptValueExpression> Repeat { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<string, ForRestScriptValueExpression> Retry { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<ForRestScriptHandler> Handlers { get; init; } = [];
+
+    public List<ForRestScriptScenario> Scenarios { get; init; } = [];
+
+    public List<string> Imports { get; init; } = [];
 }
 
 public abstract record ForRestScriptValueExpression(ForRestScriptValueKind Kind)
@@ -189,4 +221,5 @@ public sealed record ForRestScriptAssertion(
     string Message,
     string? HeaderName = null,
     string? Selector = null,
-    ForRestScriptValueExpression? Value = null);
+    ForRestScriptValueExpression? Value = null,
+    bool IsDescriptionOnly = false);

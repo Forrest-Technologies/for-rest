@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ForRest.Licensing;
 using ForRest.Domain;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
@@ -33,8 +35,16 @@ public sealed class MainPageViewModel : ObservableObject
 	private const double CompactPaneMinWidth = 300d;
 	private const double CompactPaneMaxWidth = 440d;
 	private const int MaxDocumentHistoryEntries = 200;
+	private static readonly TimeSpan SettingsEditorProjectionRefreshQuietPeriod = TimeSpan.FromMilliseconds(1000);
 	private const string RequestDocumentKind = "request";
 	private const string SettingsDocumentKind = "settings";
+
+	private enum StashSortMode
+	{
+		Captured,
+		PopulatedFields,
+		Preview
+	}
 
 	private Color _methodGet = Color.FromArgb("#167C65");
 	private Color _methodPost = Color.FromArgb("#176AB8");
@@ -104,6 +114,12 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _activationStatus;
 	private string _activationDetail;
 	private bool _canExecuteRequests = true;
+	private bool _isStatusBannerVisible;
+	private string _statusBannerTitle = string.Empty;
+	private string _statusBannerDetail = string.Empty;
+	private Color _statusBannerBackgroundColor = Color.FromArgb("#FDECEC");
+	private Color _statusBannerBorderColor = Color.FromArgb("#D97A75");
+	private Color _statusBannerTextColor = Color.FromArgb("#6F2723");
 	private string _editorThemeKey;
 	private ShellThemeName _currentThemeName;
 	private double _activeEditorFontSize = ForRestStyleSettings.DefaultEditorFontSize;
@@ -123,9 +139,11 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _editorDebugDetailText;
 	private Color _editorDebugAccentColor;
 	private CancellationTokenSource? _settingsSaveSource;
+	private CancellationTokenSource? _settingsProjectionRefreshSource;
 	private CancellationTokenSource? _requestSaveSource;
 	private CancellationTokenSource? _requestMetadataRefreshSource;
 	private int _requestMetadataRefreshVersion;
+	private DateTimeOffset _lastSettingsEditUtc = DateTimeOffset.MinValue;
 	private bool _suppressSettingsAutosave;
 	private bool _suppressRequestAutosave;
 	private bool _suppressDocumentSynchronization;
@@ -139,6 +157,13 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _languageHelpCatalogJson;
 	private bool _isLanguageHelpOpen;
 	private string _languageHelpSearchText;
+	private readonly List<string> _allStashColumnTitles = [];
+	private readonly List<StashRowViewModel> _allStashRows = [];
+	private string _stashSearchText = string.Empty;
+	private bool _hideEmptyStashColumns;
+	private StashSortMode _stashSortMode = StashSortMode.Captured;
+	private bool _isStashSortDescending;
+	private StashRowViewModel? _selectedStashRow;
 	private string _selectedLanguageHelpKey;
 	private string _selectedLanguageHelpTitle;
 	private string _selectedLanguageHelpCategory;
@@ -152,6 +177,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private int _activeEditorRequestedCursorLineNumber;
 	private int _activeEditorRequestedCursorColumn;
 	private int _activeEditorRequestedCursorVersion;
+	private ActivationSnapshot _latestActivationSnapshot = CreatePendingActivationSnapshot();
 
 	public MainPageViewModel(
 		IThemeService themeService,
@@ -219,7 +245,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_editorThemeKey = themeService.CurrentTheme.MonacoThemeKey;
 		_activeEditorFontSize = themeService.CurrentSettings.Style.EditorFontSize;
 		_resultPaneTabFontSize = themeService.CurrentSettings.Style.ResultPaneTabFontSize;
-		_themeConfigText = ReadSettingsText(_currentThemeName);
+		_themeConfigText = ReadSettingsText(_currentThemeName, _latestActivationSnapshot);
 		_activeEditorText = _requestEditorText;
 		_activeEditorLanguage = "forrest";
 		_activeDocumentKind = RequestDocumentKind;
@@ -300,6 +326,9 @@ public sealed class MainPageViewModel : ObservableObject
 		StashRows =
 		[];
 
+		SelectedStashDetails =
+		[];
+
 		TraceEntries =
 		[
 			new TraceEntryViewModel("ready", "request workbench initialized", DateTime.Now.ToString("T"), _methodNeutral)
@@ -359,6 +388,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public ObservableCollection<StashColumnViewModel> StashColumns { get; }
 
 	public ObservableCollection<StashRowViewModel> StashRows { get; }
+
+	public ObservableCollection<NameValueRowViewModel> SelectedStashDetails { get; }
 
 	public ObservableCollection<LanguageHelpEntryViewModel> LanguageHelpEntries { get; }
 
@@ -631,6 +662,8 @@ public sealed class MainPageViewModel : ObservableObject
 
 			if (IsActiveSettingsEditor)
 			{
+				_lastSettingsEditUtc = DateTimeOffset.UtcNow;
+				CancelPendingSettingsProjectionRefresh();
 				_themeConfigText = value;
 				ActiveEditorEditableRangesJson = BuildEditableRangesJson(_themeConfigText);
 				if (!_suppressSettingsAutosave)
@@ -738,6 +771,36 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 		}
 	}
+
+	public string StashSearchText
+	{
+		get => _stashSearchText;
+		set
+		{
+			if (SetProperty(ref _stashSearchText, value))
+			{
+				OnPropertyChanged(nameof(HasStashFilter));
+				OnPropertyChanged(nameof(CanClearStashSearch));
+				RefreshVisibleStashRows();
+			}
+		}
+	}
+
+	public bool CanClearStashSearch => !string.IsNullOrWhiteSpace(StashSearchText);
+
+	public bool HideEmptyStashColumns => _hideEmptyStashColumns;
+
+	public string HideEmptyStashColumnsButtonText => HideEmptyStashColumns ? "Show Empty Cols" : "Hide Empty Cols";
+
+	public string StashSortButtonText => _stashSortMode switch
+	{
+		StashSortMode.Captured => "Sort: Capture",
+		StashSortMode.PopulatedFields => "Sort: Filled",
+		StashSortMode.Preview => "Sort: A-Z",
+		_ => "Sort"
+	};
+
+	public string StashSortDirectionButtonText => _isStashSortDescending ? "Desc" : "Asc";
 
 	public string SelectedLanguageHelpTitle
 	{
@@ -886,6 +949,31 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
+	public StashRowViewModel? SelectedStashRow
+	{
+		get => _selectedStashRow;
+		set
+		{
+			if (!SetProperty(ref _selectedStashRow, value))
+			{
+				return;
+			}
+
+			foreach (StashRowViewModel row in StashRows)
+			{
+				row.IsSelected = ReferenceEquals(row, value);
+			}
+
+			RefreshSelectedStashDetails();
+			OnPropertyChanged(nameof(HasSelectedStashRow));
+			OnPropertyChanged(nameof(CanCopySelectedStashRow));
+			OnPropertyChanged(nameof(SelectedStashRowTitleText));
+			OnPropertyChanged(nameof(SelectedStashRowSummaryText));
+			OnPropertyChanged(nameof(ShowSelectedStashRowEmptyState));
+			OnPropertyChanged(nameof(ShowSelectedStashDetailsEmptyState));
+		}
+	}
+
 	public bool IsCompactLayout => _isCompactLayout;
 
 	public bool IsDesktopLayout => !_isCompactLayout;
@@ -970,6 +1058,42 @@ public sealed class MainPageViewModel : ObservableObject
 		set => SetProperty(ref _activationDetail, value);
 	}
 
+	public bool IsStatusBannerVisible
+	{
+		get => _isStatusBannerVisible;
+		private set => SetProperty(ref _isStatusBannerVisible, value);
+	}
+
+	public string StatusBannerTitle
+	{
+		get => _statusBannerTitle;
+		private set => SetProperty(ref _statusBannerTitle, value);
+	}
+
+	public string StatusBannerDetail
+	{
+		get => _statusBannerDetail;
+		private set => SetProperty(ref _statusBannerDetail, value);
+	}
+
+	public Color StatusBannerBackgroundColor
+	{
+		get => _statusBannerBackgroundColor;
+		private set => SetProperty(ref _statusBannerBackgroundColor, value);
+	}
+
+	public Color StatusBannerBorderColor
+	{
+		get => _statusBannerBorderColor;
+		private set => SetProperty(ref _statusBannerBorderColor, value);
+	}
+
+	public Color StatusBannerTextColor
+	{
+		get => _statusBannerTextColor;
+		private set => SetProperty(ref _statusBannerTextColor, value);
+	}
+
 	public string ResponseSizeStatus => _responseSizeStatus;
 
 	public string ResponseTimeStatus => _responseTimeStatus;
@@ -1033,7 +1157,9 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool CanDeleteRequest => IsActiveRequestEditor && GetSelectedRequestIndex() >= 0;
 
-	public bool HasStashData => StashColumns.Count > 0 && StashRows.Count > 0;
+	public bool HasStashData => StashColumns.Count > 0 && _allStashRows.Count > 0;
+
+	public bool HasVisibleStashRows => StashColumns.Count > 0 && StashRows.Count > 0;
 
 	public bool ShowResponseSnapshotSelector => ResponseSnapshotEntries.Count > 1;
 
@@ -1053,6 +1179,10 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool ShowStashEmptyState => !HasStashData;
 
+	public bool ShowStashFilterEmptyState => HasStashData && !HasVisibleStashRows;
+
+	public bool HasStashFilter => !string.IsNullOrWhiteSpace(StashSearchText);
+
 	public bool CanCopyResponseBody => !string.IsNullOrWhiteSpace(ResponseBodyText);
 
 	public bool CanCopyRawResponse => !string.IsNullOrWhiteSpace(ResponseRawText);
@@ -1067,11 +1197,84 @@ public sealed class MainPageViewModel : ObservableObject
 
 	public bool CanCopyTrace => TraceEntries.Count > 0;
 
-	public bool CanCopyStash => HasStashData;
+	public bool CanCopyStash => HasVisibleStashRows;
 
-	public bool CanExportStashCsv => HasStashData;
+	public bool CanExportStashCsv => HasVisibleStashRows;
+
+	public bool HasSelectedStashRow => SelectedStashRow is not null;
+
+	public bool CanCopySelectedStashRow => SelectedStashRow is not null;
+
+	public bool ShowSelectedStashRowEmptyState => HasVisibleStashRows && !HasSelectedStashRow;
+
+	public bool ShowSelectedStashDetailsEmptyState => HasSelectedStashRow && SelectedStashDetails.Count == 0;
+
+	public bool ShowDesktopStashTable => HasVisibleStashRows && IsDesktopLayout;
+
+	public bool ShowCompactStashCards => HasVisibleStashRows && IsCompactLayout;
+
+	public bool ShowDesktopSelectedStashPanel => HasSelectedStashRow && IsDesktopLayout;
 
 	public string StashEmptyStateText => "No stash rows were captured for the current run. Flow code must execute stash writes before the run ends; lines skipped by break, continue, or return do not contribute rows.";
+
+	public string StashFilterEmptyStateText => string.IsNullOrWhiteSpace(StashSearchText)
+		? "No visible stash rows."
+		: $"No stash rows match \"{StashSearchText}\".";
+
+	public string StashSummaryText
+	{
+		get
+		{
+			int totalRowCount = _allStashRows.Count;
+			int visibleColumnCount = StashColumns.Count;
+			int totalColumnCount = _allStashColumnTitles.Count;
+			if (totalRowCount == 0 || totalColumnCount == 0)
+			{
+				return "No rows captured";
+			}
+
+			string rowLabel = totalRowCount == 1 ? "row" : "rows";
+			string columnText = HideEmptyStashColumns && visibleColumnCount != totalColumnCount
+				? $"{visibleColumnCount}/{totalColumnCount} columns visible"
+				: $"{visibleColumnCount} {(visibleColumnCount == 1 ? "column" : "columns")}";
+			return $"{totalRowCount} {rowLabel}  {columnText}";
+		}
+	}
+
+	public string StashFilterSummaryText
+	{
+		get
+		{
+			if (!HasStashData)
+			{
+				return "Run a script that commits stash rows to populate this table.";
+			}
+
+			string sortText = _stashSortMode switch
+			{
+				StashSortMode.Captured => _isStashSortDescending ? "capture desc" : "capture asc",
+				StashSortMode.PopulatedFields => _isStashSortDescending ? "filled desc" : "filled asc",
+				StashSortMode.Preview => _isStashSortDescending ? "A-Z desc" : "A-Z asc",
+				_ => "capture asc"
+			};
+
+			string emptyColumnText = HideEmptyStashColumns ? "  Empty columns hidden." : string.Empty;
+			if (string.IsNullOrWhiteSpace(StashSearchText))
+			{
+				return $"Showing all captured rows.  Sorted by {sortText}.{emptyColumnText}";
+			}
+
+			string visibleLabel = StashRows.Count == 1 ? "row" : "rows";
+			string totalLabel = _allStashRows.Count == 1 ? "row" : "rows";
+			return $"Showing {StashRows.Count} {visibleLabel} of {_allStashRows.Count} {totalLabel}.  Sorted by {sortText}.{emptyColumnText}";
+		}
+	}
+
+	public string SelectedStashRowTitleText => SelectedStashRow is null
+		? "No row selected"
+		: $"Row {SelectedStashRow.RowLabel}";
+
+	public string SelectedStashRowSummaryText => SelectedStashRow?.DetailSummaryText ?? string.Empty;
 
 	public string SelectedResponseSnapshotSummaryText
 	{
@@ -1273,7 +1476,7 @@ public sealed class MainPageViewModel : ObservableObject
 
 		ApplyWorkspaceSelection(selectedWorkspaceId);
 		await ReloadHistoryAsync();
-		RefreshActivationStatus();
+		await RefreshActivationStatusAsync();
 		_isInitialized = true;
 	}
 
@@ -1288,6 +1491,7 @@ public sealed class MainPageViewModel : ObservableObject
 		CancelPendingRequestMetadataRefresh();
 		CancelPendingRequestAutosave();
 		CancelPendingSettingsAutosave();
+		CancelPendingSettingsProjectionRefresh();
 
 		try
 		{
@@ -1321,7 +1525,7 @@ public sealed class MainPageViewModel : ObservableObject
 			return;
 		}
 
-		RefreshActivationStatus();
+		await RefreshActivationStatusAsync();
 		if (!_canExecuteRequests)
 		{
 			ApplyActivationBlock();
@@ -1579,6 +1783,9 @@ public sealed class MainPageViewModel : ObservableObject
 		OnPropertyChanged(nameof(ShowInlineLanguageHelpDrawer));
 		OnPropertyChanged(nameof(ShowCompactLanguageHelpDrawer));
 		OnPropertyChanged(nameof(TimingStatus));
+		OnPropertyChanged(nameof(ShowDesktopStashTable));
+		OnPropertyChanged(nameof(ShowCompactStashCards));
+		OnPropertyChanged(nameof(ShowDesktopSelectedStashPanel));
 
 		if (!_isCompactLayout)
 		{
@@ -2120,9 +2327,22 @@ public sealed class MainPageViewModel : ObservableObject
 		ExecutionStatus = "Copied stash table.";
 	}
 
+	public async Task CopySelectedStashRowAsync()
+	{
+		if (!CanCopySelectedStashRow || SelectedStashRow is null)
+		{
+			ExecutionStatus = "No stash row selected to copy.";
+			return;
+		}
+
+		string text = ResponsePaneCopyFormatter.BuildStashRowText(StashColumns, SelectedStashRow);
+		await Clipboard.Default.SetTextAsync(text);
+		ExecutionStatus = $"Copied stash row {SelectedStashRow.RowLabel}.";
+	}
+
 	public async Task ExportStashCsvAsync()
 	{
-		if (!HasStashData)
+		if (!CanExportStashCsv)
 		{
 			ExecutionStatus = "No stash data available to export.";
 			return;
@@ -2139,6 +2359,54 @@ public sealed class MainPageViewModel : ObservableObject
 				File = new ShareFile(filePath),
 			});
 		ExecutionStatus = $"Shared stash CSV: {fileName}";
+	}
+
+	public void SelectStashRow(StashRowViewModel? row)
+	{
+		if (row is not null && !_allStashRows.Contains(row))
+		{
+			return;
+		}
+
+		SelectedStashRow = row;
+	}
+
+	public void ClearStashFilter()
+	{
+		if (string.IsNullOrEmpty(StashSearchText))
+		{
+			return;
+		}
+
+		StashSearchText = string.Empty;
+	}
+
+	public void CycleStashSortMode()
+	{
+		_stashSortMode = _stashSortMode switch
+		{
+			StashSortMode.Captured => StashSortMode.PopulatedFields,
+			StashSortMode.PopulatedFields => StashSortMode.Preview,
+			_ => StashSortMode.Captured,
+		};
+
+		OnPropertyChanged(nameof(StashSortButtonText));
+		RefreshVisibleStashRows();
+	}
+
+	public void ToggleStashSortDirection()
+	{
+		_isStashSortDescending = !_isStashSortDescending;
+		OnPropertyChanged(nameof(StashSortDirectionButtonText));
+		RefreshVisibleStashRows();
+	}
+
+	public void ToggleHideEmptyStashColumns()
+	{
+		_hideEmptyStashColumns = !_hideEmptyStashColumns;
+		OnPropertyChanged(nameof(HideEmptyStashColumns));
+		OnPropertyChanged(nameof(HideEmptyStashColumnsButtonText));
+		RefreshVisibleStashRows();
 	}
 
 	private void ApplyStashTable(StashTable stash)
@@ -2169,31 +2437,76 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 		}
 
-		StashColumns.Clear();
-		foreach (string column in orderedColumns)
+		_allStashColumnTitles.Clear();
+		_allStashColumnTitles.AddRange(orderedColumns);
+
+		if (!string.IsNullOrEmpty(_stashSearchText))
 		{
-			StashColumns.Add(new StashColumnViewModel(column));
+			_stashSearchText = string.Empty;
+			OnPropertyChanged(nameof(StashSearchText));
+			OnPropertyChanged(nameof(HasStashFilter));
+			OnPropertyChanged(nameof(CanClearStashSearch));
 		}
 
-		StashRows.Clear();
+		_stashSortMode = StashSortMode.Captured;
+		_isStashSortDescending = false;
+		OnPropertyChanged(nameof(StashSortButtonText));
+		OnPropertyChanged(nameof(StashSortDirectionButtonText));
+
+		_allStashRows.Clear();
+		int rowNumber = 1;
 		foreach (StashRow row in stash.Rows)
 		{
-			StashRows.Add(
+			List<StashCellViewModel> cells = [];
+			List<NameValueRowViewModel> details = [];
+			StringBuilder searchBuilder = new();
+			searchBuilder.Append(rowNumber.ToString(CultureInfo.InvariantCulture));
+
+			foreach (string column in orderedColumns)
+			{
+				string value = row.Values.TryGetValue(column, out string? rawValue)
+					? rawValue
+					: string.Empty;
+				StashCellViewModel cell = new(value, column);
+				cells.Add(cell);
+
+				searchBuilder.Append(' ').Append(column);
+				if (!cell.IsEmpty)
+				{
+					searchBuilder.Append(' ').Append(value);
+					details.Add(new NameValueRowViewModel(column, value, "stash"));
+				}
+			}
+
+			_allStashRows.Add(
 				new StashRowViewModel(
-					orderedColumns.Select(
-						column => new StashCellViewModel(
-							row.Values.TryGetValue(column, out string? value)
-								? value
-								: string.Empty))));
+					rowNumber,
+					cells,
+					details,
+					isAlternate: rowNumber % 2 == 0,
+					searchBuilder.ToString()));
+			rowNumber++;
 		}
 
-		NotifyStashStateChanged();
+		RefreshVisibleStashRows();
 	}
 
 	private void ClearStashTable()
 	{
+		_allStashColumnTitles.Clear();
+		_allStashRows.Clear();
 		StashColumns.Clear();
 		StashRows.Clear();
+		SelectedStashDetails.Clear();
+		if (!string.IsNullOrEmpty(_stashSearchText))
+		{
+			_stashSearchText = string.Empty;
+			OnPropertyChanged(nameof(StashSearchText));
+			OnPropertyChanged(nameof(HasStashFilter));
+			OnPropertyChanged(nameof(CanClearStashSearch));
+		}
+
+		SelectedStashRow = null;
 		NotifyStashStateChanged();
 	}
 
@@ -2215,12 +2528,150 @@ public sealed class MainPageViewModel : ObservableObject
 		return builder.ToString();
 	}
 
+	private void RefreshVisibleStashRows()
+	{
+		string query = StashSearchText.Trim();
+		List<StashRowViewModel> visibleSourceRows =
+		[
+			.. (string.IsNullOrWhiteSpace(query)
+			? _allStashRows
+			: _allStashRows.Where(
+				row => row.SearchText.Contains(query, StringComparison.OrdinalIgnoreCase)))
+		];
+
+		IReadOnlyList<int> visibleColumnIndexes = ResolveVisibleStashColumnIndexes(visibleSourceRows);
+
+		IEnumerable<StashRowViewModel> orderedRows = ApplyStashSorting(visibleSourceRows);
+
+		int? selectedRowNumber = SelectedStashRow?.RowNumber;
+
+		StashColumns.Clear();
+		foreach (int columnIndex in visibleColumnIndexes)
+		{
+			string columnTitle = _allStashColumnTitles[columnIndex];
+			int populatedValueCount = visibleSourceRows.Count(row => columnIndex < row.Cells.Count && !row.Cells[columnIndex].IsEmpty);
+			StashColumns.Add(new StashColumnViewModel(columnTitle, populatedValueCount));
+		}
+
+		StashRows.Clear();
+		int visibleRowIndex = 0;
+		foreach (StashRowViewModel sourceRow in orderedRows)
+		{
+			List<StashCellViewModel> cells = [];
+			List<NameValueRowViewModel> details = [];
+			foreach (int columnIndex in visibleColumnIndexes)
+			{
+				StashCellViewModel sourceCell = sourceRow.Cells[columnIndex];
+				string columnTitle = _allStashColumnTitles[columnIndex];
+				cells.Add(new StashCellViewModel(sourceCell.Value, columnTitle));
+				if (!sourceCell.IsEmpty)
+				{
+					details.Add(new NameValueRowViewModel(columnTitle, sourceCell.Value, "stash"));
+				}
+			}
+
+			StashRows.Add(
+				new StashRowViewModel(
+					sourceRow.RowNumber,
+					cells,
+					details,
+					isAlternate: visibleRowIndex % 2 == 1,
+					sourceRow.SearchText));
+			visibleRowIndex++;
+		}
+
+		if (selectedRowNumber is int rowNumber &&
+			StashRows.FirstOrDefault(row => row.RowNumber == rowNumber) is { } matchedRow)
+		{
+			SelectedStashRow = matchedRow;
+		}
+		else if (SelectedStashRow is null || !StashRows.Contains(SelectedStashRow))
+		{
+			SelectedStashRow = StashRows.FirstOrDefault();
+		}
+		else
+		{
+			RefreshSelectedStashDetails();
+		}
+
+		NotifyStashStateChanged();
+	}
+
+	private void RefreshSelectedStashDetails()
+	{
+		SelectedStashDetails.Clear();
+		if (SelectedStashRow is null)
+		{
+			OnPropertyChanged(nameof(ShowSelectedStashDetailsEmptyState));
+			return;
+		}
+
+		foreach (NameValueRowViewModel detail in SelectedStashRow.Details)
+		{
+			SelectedStashDetails.Add(detail);
+		}
+
+		OnPropertyChanged(nameof(ShowSelectedStashDetailsEmptyState));
+	}
+
 	private void NotifyStashStateChanged()
 	{
 		OnPropertyChanged(nameof(HasStashData));
+		OnPropertyChanged(nameof(HasVisibleStashRows));
 		OnPropertyChanged(nameof(ShowStashEmptyState));
+		OnPropertyChanged(nameof(ShowStashFilterEmptyState));
+		OnPropertyChanged(nameof(ShowSelectedStashRowEmptyState));
+		OnPropertyChanged(nameof(ShowSelectedStashDetailsEmptyState));
+		OnPropertyChanged(nameof(StashFilterEmptyStateText));
 		OnPropertyChanged(nameof(CanCopyStash));
 		OnPropertyChanged(nameof(CanExportStashCsv));
+		OnPropertyChanged(nameof(CanCopySelectedStashRow));
+		OnPropertyChanged(nameof(HasSelectedStashRow));
+		OnPropertyChanged(nameof(SelectedStashRowTitleText));
+		OnPropertyChanged(nameof(SelectedStashRowSummaryText));
+		OnPropertyChanged(nameof(ShowDesktopStashTable));
+		OnPropertyChanged(nameof(ShowCompactStashCards));
+		OnPropertyChanged(nameof(ShowDesktopSelectedStashPanel));
+		OnPropertyChanged(nameof(HideEmptyStashColumnsButtonText));
+		OnPropertyChanged(nameof(StashSortButtonText));
+		OnPropertyChanged(nameof(StashSortDirectionButtonText));
+		OnPropertyChanged(nameof(StashSummaryText));
+		OnPropertyChanged(nameof(StashFilterSummaryText));
+	}
+
+	private IReadOnlyList<int> ResolveVisibleStashColumnIndexes(IReadOnlyList<StashRowViewModel> visibleRows)
+	{
+		List<int> indexes = [];
+		for (int index = 0; index < _allStashColumnTitles.Count; index++)
+		{
+			bool hasVisibleValue = visibleRows.Any(row => index < row.Cells.Count && !row.Cells[index].IsEmpty);
+			if (!_hideEmptyStashColumns || hasVisibleValue)
+			{
+				indexes.Add(index);
+			}
+		}
+
+		if (indexes.Count == 0)
+		{
+			indexes.AddRange(Enumerable.Range(0, _allStashColumnTitles.Count));
+		}
+
+		return indexes;
+	}
+
+	private IEnumerable<StashRowViewModel> ApplyStashSorting(IEnumerable<StashRowViewModel> rows)
+	{
+		Func<StashRowViewModel, object> keySelector = _stashSortMode switch
+		{
+			StashSortMode.Captured => static row => row.RowNumber,
+			StashSortMode.PopulatedFields => static row => row.PopulatedCellCount,
+			StashSortMode.Preview => static row => row.PreviewText,
+			_ => static row => row.RowNumber,
+		};
+
+		return _isStashSortDescending
+			? rows.OrderByDescending(keySelector).ThenByDescending(static row => row.RowNumber)
+			: rows.OrderBy(keySelector).ThenBy(static row => row.RowNumber);
 	}
 
 	private static string EscapeCsv(string value)
@@ -2816,12 +3267,12 @@ public sealed class MainPageViewModel : ObservableObject
 		ApplyStyleSettings(e.Settings.Style);
 		ExecutionStatus = e.StatusMessage;
 		ApplyThemePalette(e.Theme);
-		if (!(e.IsPreview && IsActiveSettingsEditor))
+		if (!e.IsPreview)
 		{
-			UpdateSettingsTextFromDisk(_currentThemeName);
+			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
 		}
 
-		RefreshActivationStatus();
+		_ = RefreshActivationStatusAsync();
 	}
 
 	private void ApplyStyleSettings(ForRestStyleSettings style)
@@ -2830,21 +3281,56 @@ public sealed class MainPageViewModel : ObservableObject
 		ResultPaneTabFontSize = style.ResultPaneTabFontSize;
 	}
 
-	private void RefreshActivationStatus()
+	public void DismissStatusBanner()
+	{
+		IsStatusBannerVisible = false;
+	}
+
+	private void ShowStatusBanner(string title, string detail, bool isWarning)
+	{
+		StatusBannerTitle = string.IsNullOrWhiteSpace(title) ? "Notice" : title.Trim();
+		StatusBannerDetail = string.IsNullOrWhiteSpace(detail) ? string.Empty : detail.Trim();
+		if (isWarning)
+		{
+			StatusBannerBackgroundColor = Color.FromArgb("#FFF6E6");
+			StatusBannerBorderColor = Color.FromArgb("#D8B46E");
+			StatusBannerTextColor = Color.FromArgb("#6A5034");
+		}
+		else
+		{
+			StatusBannerBackgroundColor = Color.FromArgb("#FDECEC");
+			StatusBannerBorderColor = Color.FromArgb("#D97A75");
+			StatusBannerTextColor = Color.FromArgb("#6F2723");
+		}
+
+		IsStatusBannerVisible = true;
+	}
+
+	private async Task RefreshActivationStatusAsync()
 	{
 		try
 		{
-			ActivationSnapshot snapshot = _appActivationService.EvaluateNow();
+			ActivationSnapshot snapshot = await _appActivationService.EvaluateNowAsync();
+			_latestActivationSnapshot = snapshot;
 			ActivationStatus = snapshot.StatusText;
 			ActivationDetail = snapshot.DetailText;
 			_canExecuteRequests = snapshot.CanExecuteRequests;
+			if (!snapshot.CanExecuteRequests ||
+				snapshot.State is LicenseAccessStatus.ActivationRequired or LicenseAccessStatus.LeaseExpired or LicenseAccessStatus.Revoked or LicenseAccessStatus.Invalid or LicenseAccessStatus.ClockTampering)
+			{
+				ShowStatusBanner(snapshot.StatusText, snapshot.DetailText, isWarning: false);
+			}
+			RequestSettingsProjectionRefresh(_currentThemeName, snapshot);
 		}
 		catch (Exception exception)
 		{
 			ActivationStatus = "Activation unavailable";
 			ActivationDetail = exception.Message;
 			_canExecuteRequests = true;
+			_latestActivationSnapshot = CreateUnavailableActivationSnapshot(exception.Message);
+			ShowStatusBanner("Activation unavailable", exception.Message, isWarning: false);
 			AppLaunchGuard.RecordException("Activation status refresh failed.", exception);
+			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
 		}
 
 		OnPropertyChanged(nameof(CanSend));
@@ -2854,6 +3340,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		ResponseState = "Blocked";
 		ExecutionStatus = ActivationStatus;
+		ShowStatusBanner(ActivationStatus, ActivationDetail, isWarning: false);
 		DebugOutputText = string.Join(
 			Environment.NewLine,
 			[
@@ -3081,7 +3568,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private void ActivateSettingsEditor(NavigationItemViewModel item)
 	{
 		_activeDocumentKind = SettingsDocumentKind;
-		_themeConfigText = ReadSettingsText(_currentThemeName);
+		_themeConfigText = ReadSettingsText(_currentThemeName, _latestActivationSnapshot);
 		ActiveDocumentKindLabel = item.Kind;
 		ActiveDocumentKindColor = item.AccentColor;
 		ActiveDocumentLabel = item.Title;
@@ -3252,6 +3739,13 @@ public sealed class MainPageViewModel : ObservableObject
 	private void CancelPendingSettingsAutosave()
 	{
 		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _settingsSaveSource, null);
+		pendingSource?.Cancel();
+		pendingSource?.Dispose();
+	}
+
+	private void CancelPendingSettingsProjectionRefresh()
+	{
+		CancellationTokenSource? pendingSource = Interlocked.Exchange(ref _settingsProjectionRefreshSource, null);
 		pendingSource?.Cancel();
 		pendingSource?.Dispose();
 	}
@@ -4509,12 +5003,12 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		void refresh()
 		{
-			if (_isShuttingDown || !IsActiveSettingsEditor)
+			if (_isShuttingDown)
 			{
 				return;
 			}
 
-			UpdateSettingsTextFromDisk(_currentThemeName);
+			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
 		}
 
 		try
@@ -4534,9 +5028,69 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
-	private void UpdateSettingsTextFromDisk(ShellThemeName currentTheme)
+	private void RequestSettingsProjectionRefresh(ShellThemeName currentTheme, ActivationSnapshot activation)
 	{
-		string latestText = ReadSettingsText(currentTheme);
+		if (_isShuttingDown)
+		{
+			return;
+		}
+
+		if (!IsActiveSettingsEditor)
+		{
+			CancelPendingSettingsProjectionRefresh();
+			UpdateSettingsTextFromDisk(currentTheme, activation);
+			return;
+		}
+
+		TimeSpan elapsedSinceEdit = DateTimeOffset.UtcNow - _lastSettingsEditUtc;
+		if (_lastSettingsEditUtc == DateTimeOffset.MinValue || elapsedSinceEdit >= SettingsEditorProjectionRefreshQuietPeriod)
+		{
+			CancelPendingSettingsProjectionRefresh();
+			UpdateSettingsTextFromDisk(currentTheme, activation);
+			return;
+		}
+
+		TimeSpan delay = SettingsEditorProjectionRefreshQuietPeriod - elapsedSinceEdit;
+		CancellationTokenSource refreshSource = new();
+		CancellationTokenSource? previousSource = Interlocked.Exchange(ref _settingsProjectionRefreshSource, refreshSource);
+		previousSource?.Cancel();
+		previousSource?.Dispose();
+
+		_ = Task.Run(
+			async () =>
+			{
+				try
+				{
+					await Task.Delay(delay, refreshSource.Token);
+					await InvokeOnViewModelThreadAsync(
+						() =>
+						{
+							if (refreshSource.IsCancellationRequested || _isShuttingDown)
+							{
+								return;
+							}
+
+							UpdateSettingsTextFromDisk(currentTheme, activation);
+						});
+				}
+				catch (OperationCanceledException)
+				{
+				}
+				finally
+				{
+					if (ReferenceEquals(Volatile.Read(ref _settingsProjectionRefreshSource), refreshSource))
+					{
+						Interlocked.CompareExchange(ref _settingsProjectionRefreshSource, null, refreshSource);
+					}
+
+					refreshSource.Dispose();
+				}
+			});
+	}
+
+	private void UpdateSettingsTextFromDisk(ShellThemeName currentTheme, ActivationSnapshot activation)
+	{
+		string latestText = ReadSettingsText(currentTheme, activation);
 		_themeConfigText = latestText;
 
 		if (!IsActiveSettingsEditor)
@@ -4548,7 +5102,10 @@ public sealed class MainPageViewModel : ObservableObject
 		try
 		{
 			ActiveEditorEditableRangesJson = BuildEditableRangesJson(latestText);
-			SetActiveEditorTextInternal(latestText);
+			if (!string.Equals(_activeEditorText, latestText, StringComparison.Ordinal))
+			{
+				SetActiveEditorTextInternal(latestText);
+			}
 		}
 		finally
 		{
@@ -4556,17 +5113,35 @@ public sealed class MainPageViewModel : ObservableObject
 		}
 	}
 
-	private string ReadSettingsText(ShellThemeName currentTheme)
+	private string ReadSettingsText(ShellThemeName currentTheme, ActivationSnapshot activation)
 	{
 		try
 		{
-			return NormalizeLineEndings(_settingsTomlDocumentService.LoadOrCreate(_themeService.CurrentSettings with { Theme = currentTheme }));
+			return NormalizeLineEndings(_settingsTomlDocumentService.LoadOrCreate(_themeService.CurrentSettings with { Theme = currentTheme }, activation));
 		}
 		catch (Exception exception)
 		{
 			AppLaunchGuard.RecordException("Settings text load failed.", exception);
 			return string.Empty;
 		}
+	}
+
+	private static ActivationSnapshot CreatePendingActivationSnapshot()
+	{
+		return new(
+			LicenseAccessStatus.Pending,
+			"Activation pending",
+			"License state has not been evaluated yet.",
+			true);
+	}
+
+	private static ActivationSnapshot CreateUnavailableActivationSnapshot(string detail)
+	{
+		return new(
+			LicenseAccessStatus.Pending,
+			"Activation unavailable",
+			detail,
+			true);
 	}
 
 	private string BuildEditableRangesJson(string text)
@@ -5960,6 +6535,33 @@ public sealed class MainPageViewModel : ObservableObject
 				BuildDiagnosticsFromCompilation(compilation, string.Empty));
 			WriteUpdateDebug("Applied replacement source", normalizedText);
 			return AiActiveDocumentUpdateResult.Success(normalizedText);
+		}
+
+		public AiWorkspaceContext? GetWorkspaceContext()
+		{
+			RequestWorkbenchWorkspaceState? workspace = _owner.GetSelectedWorkspaceState();
+			if (workspace is null)
+			{
+				return null;
+			}
+
+			List<AiWorkspaceScriptSummary> scripts = workspace.Documents
+				.Select(static document => new AiWorkspaceScriptSummary(
+					document.Location,
+					document.Title,
+					document.Method,
+					document.Summary))
+				.ToList();
+
+			return new AiWorkspaceContext(
+				workspace.Id.ToString(),
+				workspace.Name,
+				scripts);
+		}
+
+		public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText)
+		{
+			return AiActiveDocumentUpdateResult.Success();
 		}
 
 		private static void WriteUpdateDebug(string title, string detail)

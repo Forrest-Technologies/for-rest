@@ -3,9 +3,35 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="ForRest.Maui.AndroidMainPage">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto,*"
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,*"
           RowSpacing="0">
-        <Border Style="{StaticResource ChromeBorderStyle}">
+        <Border IsVisible="{Binding IsStatusBannerVisible}"
+                BackgroundColor="{Binding StatusBannerBackgroundColor}"
+                Stroke="{Binding StatusBannerBorderColor}"
+                StrokeThickness="1"
+                Padding="12,10"
+                Margin="8,8,8,0">
+            <Grid ColumnDefinitions="*,Auto"
+                  ColumnSpacing="10">
+                <VerticalStackLayout Spacing="2">
+                    <Label Text="{Binding StatusBannerTitle}"
+                           FontAttributes="Bold"
+                           TextColor="{Binding StatusBannerTextColor}" />
+                    <Label Text="{Binding StatusBannerDetail}"
+                           LineBreakMode="WordWrap"
+                           TextColor="{Binding StatusBannerTextColor}" />
+                </VerticalStackLayout>
+                <Button Grid.Column="1"
+                        Text="✕"
+                        Clicked="OnDismissStatusBannerClicked"
+                        Padding="8,2"
+                        VerticalOptions="Start"
+                        HorizontalOptions="End" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Style="{StaticResource ChromeBorderStyle}">
             <Grid ColumnDefinitions="*,Auto"
                   ColumnSpacing="12">
                 <VerticalStackLayout Spacing="2">
@@ -28,7 +54,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 Style="{StaticResource ToolbarBorderStyle}">
             <Grid ColumnDefinitions="Auto,Auto,*"
                   ColumnSpacing="6">
@@ -48,7 +74,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Style="{StaticResource SectionBorderStyle}">
             <Grid RowDefinitions="Auto,*">
                 <Grid Padding="12,8"
@@ -75,7 +101,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Style="{StaticResource StatusBarBorderStyle}">
             <Grid RowDefinitions="Auto,Auto"
                   ColumnDefinitions="Auto,Auto,Auto,*"
@@ -123,7 +149,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 Style="{StaticResource SectionBorderStyle}">
             <Grid RowDefinitions="Auto,*">
                 <Grid Padding="12,8"

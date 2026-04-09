@@ -87,6 +87,20 @@ internal static class ForRestLanguageReference
             "timeout ${1:15000}",
             true),
         new(
+            "user_agent",
+            "user_agent",
+            "Request",
+            "Set the User-Agent header from a preset or custom value.",
+            "Available presets: `None`, `Chrome`, `Firefox`, `Safari`, `Edge`, `Curl`, `Custom`. When set to `Custom`, provide a `custom_user_agent` value. The header is applied automatically during request compilation.",
+            """
+            user_agent Chrome
+            """,
+            ["user agent", "browser", "ua", "chrome", "firefox", "safari", "edge", "curl"],
+            ["user_agent"],
+            "Keyword",
+            "user_agent ${1|None,Chrome,Firefox,Safari,Edge,Curl,Custom|}",
+            true),
+        new(
             "redirects",
             "redirects",
             "Request",
@@ -329,6 +343,63 @@ internal static class ForRestLanguageReference
             ["foreach", "for"],
             "Snippet",
             "foreach ${1:item} in ${2:[0..2]} {\n  $0\n}",
+            true),
+        new(
+            "switch",
+            "switch / case / default",
+            "Flow",
+            "Branch on a value with multiple cases.",
+            "Use `switch expression { case value { ... } default { ... } }` to match a value against multiple cases. Compiles to an if/else chain. Each `case` tests equality against the switch expression. The `default` block runs when no case matches.",
+            """
+            switch response.status {
+              case 200 {
+                log "OK"
+              }
+              case 404 {
+                warn "Not found"
+              }
+              default {
+                error "Unexpected status"
+              }
+            }
+            """,
+            ["switch", "case", "default", "branch", "match"],
+            ["switch", "case", "default"],
+            "Snippet",
+            "switch ${1:expression} {\n  case ${2:value} {\n    $0\n  }\n  default {\n    \n  }\n}",
+            true),
+        new(
+            "secret",
+            "secret",
+            "Flow",
+            "Declare a secret variable that is encrypted at rest and hidden from AI.",
+            "Use `secret` in the vars section or flow code to store sensitive values like tokens and API keys. Secrets are encrypted with DPAPI, marked `IsSecret` on the variable, and redacted from AI context. In flow code, `secret name = expression` compiles like `runtime` but with secret protection.",
+            """
+            secret api_key = "bearer sk-abc123"
+            secret token = response.json().access_token
+            """,
+            ["secret", "sensitive", "encrypt", "hidden", "token", "credential"],
+            ["secret"],
+            "Snippet",
+            "secret ${1:name} = ${2:value}",
+            true),
+        new(
+            "collection-methods",
+            "collection methods",
+            "Flow",
+            "Chain LINQ-like operations on arrays and lists.",
+            "Use dot-chained methods on collections returned from JSON responses, ranges, or variables. Available methods: `.where(x => condition)`, `.select(x => x.field)`, `.first()`, `.firstOrDefault()`, `.last()`, `.any()`, `.all(x => condition)`, `.count()`, `.orderBy(x => x.field)`, `.orderByDesc(x => x.field)`, `.take(n)`, `.skip(n)`, `.distinct()`, `.flatten()`, `.groupBy(x => x.field)`, `.sum()`, `.min()`, `.max()`, `.average()`, `.toList()`, `.reverse()`, `.contains(value)`. Lambda expressions use `x => expr` syntax.",
+            """
+            let users = response.json().data
+            let active = users.where(x => x.active).select(x => x.name)
+            let total = users.count()
+            let first = users.first(x => x.role == "admin")
+            let sorted = users.orderBy(x => x.created_at).take(5)
+            """,
+            ["where", "select", "first", "last", "any", "all", "count", "orderBy", "take", "skip", "distinct", "flatten", "groupBy", "sum", "min", "max", "average", "toList", "reverse", "contains", "linq", "filter", "map", "lambda", "collection", "chain"],
+            ["where", "select", "first", "last", "any", "all", "orderBy", "take", "skip", "distinct", "flatten", "groupBy", "toList"],
+            "Snippet",
+            "${1:items}.where(${2:x} => ${3:condition})",
             true),
         new(
             "request-send",
@@ -818,6 +889,245 @@ internal static class ForRestLanguageReference
             "Function",
             "time.Parse(\"${1:2026-03-29T10:15:00Z}\")",
             true),
+        new(
+            "retry-flow",
+            "retry N with backoff { ... }",
+            "Flow",
+            "Retry a block of flow code with optional backoff or fixed delay.",
+            "Use `retry` to wrap sends in automatic retry logic. `retry N { }` retries up to N times. `retry N with backoff { }` adds exponential backoff (100ms, 200ms, 400ms, ...). `retry N with delay M { }` waits M milliseconds between retries. Use `break` inside the block to exit early on success.",
+            """
+            retry 3 with backoff {
+              let sent = request.send()
+              if sent.status >= 200 and sent.status < 500 { break }
+              warn $"Attempt returned {sent.status}, retrying..."
+            }
+            """,
+            ["retry", "backoff", "delay", "resilience", "transient", "retry loop"],
+            ["retry"],
+            "Snippet",
+            "retry ${1:3} with backoff {\n  let sent = request.send()\n  if sent.status >= 200 and sent.status < 500 { break }\n  warn $\"Attempt returned {sent.status}, retrying...\"\n}",
+            true),
+        new(
+            "on-error",
+            "on error { ... }",
+            "Flow",
+            "Declare a handler that runs when the request flow throws an exception.",
+            "Place `on error { }` at the top level of your script. If any unhandled exception occurs during flow execution, the handler block runs instead of crashing the script. You can log, set stash values, or perform cleanup inside the handler.",
+            """
+            on error {
+              error "Request failed unexpectedly"
+              stash.Error = "true"
+              stash.Commit()
+            }
+            """,
+            ["on error", "error handler", "exception", "catch", "try"],
+            ["on"],
+            "Snippet",
+            "on error {\n  error \"${1:Request failed}\"\n}",
+            true),
+        new(
+            "on-status",
+            "on status N { ... }",
+            "Flow",
+            "Declare a handler that runs when the response returns a specific HTTP status code.",
+            "Place `on status <code> { }` at the top level. After the main flow completes, if the response status matches, the handler block runs. Useful for 401 re-auth, 429 rate-limit backoff, or custom error reporting.",
+            """
+            on status 429 {
+              warn "Rate limited — backing off"
+              retry 2 with backoff {
+                request.send()
+                if response.status != 429 { break }
+              }
+            }
+
+            on status 401 {
+              error "Unauthorized — check your token"
+            }
+            """,
+            ["on status", "status handler", "429", "401", "rate limit", "unauthorized"],
+            ["on"],
+            "Snippet",
+            "on status ${1:429} {\n  warn \"${2:Rate limited}\"\n}",
+            true),
+        new(
+            "extract-flow",
+            "extract json / header / regex",
+            "Flow",
+            "Extract values from a response using JSON path, header name, or regex pattern.",
+            "Use `let x = extract json \"$.path\" from source` to pull a JSON value, `let x = extract header \"Name\" from source` for a response header, or `let x = extract regex \"pattern\" from source.body` for regex matching. The `from` keyword specifies which response variable to extract from.",
+            """
+            let sent = request.send()
+            let token = extract json "$.access_token" from sent
+            let reqId = extract header "X-Request-Id" from sent
+            let orderId = extract regex "order-(\d+)" from sent.body
+            """,
+            ["extract", "json path", "header", "regex", "from", "response extraction"],
+            ["extract", "from"],
+            "Snippet",
+            "let ${1:value} = extract json \"${2:\\$.data}\" from ${3:sent}",
+            true),
+        new(
+            "parallel-sends",
+            "parallel { GET ... }",
+            "Flow",
+            "Send multiple requests concurrently and collect their responses.",
+            "Use `let [a, b] = parallel { }` to fire multiple requests at the same time. Inside the block, each line is a request shorthand: `METHOD \"url\"`. All requests run concurrently via `Task.WhenAll`. Destructure the results into named variables for downstream use. You can also use a bare `parallel { }` without destructuring.",
+            """
+            let [users, posts] = parallel {
+              GET "https://api.example.test/users"
+              GET "https://api.example.test/posts"
+            }
+            log $"Users: {users.status}, Posts: {posts.status}"
+            """,
+            ["parallel", "concurrent", "simultaneous", "Task.WhenAll", "fan out"],
+            ["parallel"],
+            "Snippet",
+            "let [${1:a}, ${2:b}] = parallel {\n  GET \"${3:/endpoint-a}\"\n  GET \"${4:/endpoint-b}\"\n}",
+            true),
+        new(
+            "pipe-syntax",
+            "pipe { METHOD \"url\" -> let name }",
+            "Flow",
+            "Chain sequential requests in a concise pipeline syntax.",
+            "Use `pipe { }` to express a multi-step request workflow. Each line specifies a method, URL, optional body, and optional result binding with `-> let name`. Requests execute sequentially, and each step can reference variables from previous steps. Use `body json \"...\"` to set a JSON payload.",
+            """
+            pipe {
+              GET "{{baseUrl}}/users" -> let users
+              POST "{{baseUrl}}/report" body json "{ \"count\": 10 }" -> let report
+              DELETE "{{baseUrl}}/cleanup/{{report.id}}"
+            }
+            """,
+            ["pipe", "pipeline", "chain", "sequential", "multi-step", "workflow"],
+            ["pipe"],
+            "Snippet",
+            "pipe {\n  GET \"${1:/endpoint}\" -> let ${2:result}\n  POST \"${3:/next}\" body json \"${4:{}}\" -> let ${5:created}\n}",
+            true),
+        new(
+            "define-call",
+            "define / call",
+            "Flow",
+            "Define reusable subroutines with parameters and call them by name.",
+            "Use `define name with param1, param2 { }` to create a named subroutine. Call it with `call name with arg1, arg2`. Parameters are passed as dynamic values. Subroutines can contain any flow code including sends, conditionals, and loops. Define without parameters using just `define name { }`.",
+            """
+            define setup_auth with token_url, client_id {
+              request.method = "POST"
+              request.url = token_url
+              let sent = request.send()
+              secret access_token = sent.json().access_token
+            }
+
+            call setup_auth with "https://login.example.test/token", "{{client_id}}"
+            """,
+            ["define", "call", "subroutine", "function", "reuse", "parameterized"],
+            ["define", "call"],
+            "Snippet",
+            "define ${1:name} with ${2:param1}, ${3:param2} {\n  ${4:// body}\n}\n\ncall ${1:name} with ${5:arg1}, ${6:arg2}",
+            true),
+        new(
+            "named-send",
+            "request.send() as \"label\"",
+            "Flow",
+            "Label a send call to tag the response snapshot with a meaningful name.",
+            "Append `as \"label\"` after `request.send()` to attach a label to the response snapshot. Labels make it easy to identify specific sends in history and snapshot views. Combine with `snapshot` for persistent response storage.",
+            """
+            let baseline = request.send() as "baseline"
+            log $"Baseline status: {baseline.status}"
+            """,
+            ["as", "label", "named send", "send label", "snapshot"],
+            ["as"],
+            "Snippet",
+            "let ${1:result} = request.send() as \"${2:label}\"",
+            true),
+        new(
+            "snapshot-save",
+            "snapshot \"name\" from source",
+            "Flow",
+            "Save a response snapshot for later comparison or inspection.",
+            "Use `snapshot \"name\" from variable` to persist a labeled copy of a response. Snapshots can be retrieved later for diff, regression testing, or audit trails. Combine with named sends for a complete response archival workflow.",
+            """
+            let sent = request.send() as "v1"
+            snapshot "user-list-v1" from sent
+            """,
+            ["snapshot", "save", "persist", "archive", "response"],
+            ["snapshot"],
+            "Snippet",
+            "snapshot \"${1:name}\" from ${2:sent}",
+            true),
+        new(
+            "stash-columns",
+            "stash columns [...]",
+            "Flow",
+            "Pre-declare the column layout for stash table output.",
+            "Use `stash columns [\"Col1\", \"Col2\", ...]` to define the table structure before committing rows. This ensures consistent column ordering in the stash output grid, especially useful when building comparison tables across multiple requests or loop iterations.",
+            """
+            stash columns ["Endpoint", "Status", "Duration"]
+            stash.Endpoint = "users"
+            stash.Status = response.status
+            stash.Duration = response.elapsed
+            stash.Commit()
+            """,
+            ["stash", "columns", "table", "declare", "grid"],
+            ["stash"],
+            "Snippet",
+            "stash columns [\"${1:Column1}\", \"${2:Column2}\", \"${3:Column3}\"]",
+            true),
+        new(
+            "import-use",
+            "import / use",
+            "Flow",
+            "Include definitions and variables from external .frs files.",
+            "Use `import \"path.frs\"` to merge variables, subroutines (defines), and headers from another file. Use `use \"path.frs\"` for a lighter-weight inclusion that merges only variables. Both directives detect and prevent circular imports.",
+            """
+            import "shared/auth-helpers.frs"
+            use "shared/variables.frs"
+            """,
+            ["import", "use", "include", "shared", "reuse", "module"],
+            ["import", "use"],
+            "Snippet",
+            "import \"${1:shared/helpers.frs}\"",
+            true),
+        new(
+            "scenario-block",
+            "scenario \"name\" { ... }",
+            "Flow",
+            "Define named test scenarios that share the base request configuration.",
+            "Use `scenario \"name\" { }` to define a named variant of the base request. Each scenario inherits the parent auth, headers, and URL, but can override them. Inside a scenario, use `auth { }`, headers, flow code, and `expect` assertions. Scenarios compile to independent execution payloads, enabling one script to test multiple cases.",
+            """
+            url "https://api.example.test/users"
+            auth { mode = bearer; token = "{{valid_token}}" }
+
+            scenario "happy path" {
+              expect status == 200
+              expect json "$.data" != null "returns data"
+            }
+
+            scenario "expired token" {
+              auth { mode = bearer; token = "{{expired_token}}" }
+              expect status == 401
+            }
+            """,
+            ["scenario", "test case", "variant", "parameterized test", "matrix"],
+            ["scenario"],
+            "Snippet",
+            "scenario \"${1:happy path}\" {\n  expect status == ${2:200} \"${3:returns expected status}\"\n}",
+            true),
+        new(
+            "test-description",
+            "tests { \"description\" }",
+            "Assertions",
+            "Add plain-text test descriptions alongside expect assertions.",
+            "Inside a `tests { }` section, you can write bare quoted strings as human-readable test descriptions. These are emitted as comments in the compiled output and serve as documentation or future AI-generated assertion placeholders.",
+            """
+            tests {
+              "user list returns 200 with at least one active user"
+              expect status == 200 "returns 200"
+            }
+            """,
+            ["test description", "plain text test", "documentation", "test spec"],
+            ["tests"],
+            "Snippet",
+            "tests {\n  \"${1:description of expected behavior}\"\n  expect status == ${2:200} \"${3:assertion label}\"\n}",
+            true),
     ];
 
     public static IReadOnlyList<ForRestLanguageHelpEntry> GetEntries()
@@ -871,10 +1181,6 @@ internal static class ForRestLanguageReference
         builder.AppendLine("## Catalog Entries");
         builder.AppendLine();
         AppendEntriesByCategory(builder);
-        builder.AppendLine();
-        builder.AppendLine("## Current Gap");
-        builder.AppendLine();
-        builder.AppendLine("- `switch` / `case` / `default` are not currently part of the flow compiler. Use `if`, `while`, `foreach`, and `range(...)` instead.");
         return builder.ToString().Trim();
     }
 

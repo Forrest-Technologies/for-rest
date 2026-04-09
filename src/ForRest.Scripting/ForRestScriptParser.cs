@@ -26,6 +26,9 @@ public sealed class ForRestScriptParser
         var extractions = new List<ForRestScriptExtraction>();
         var tests = new List<ForRestScriptAssertion>();
         var flowLines = new List<string>();
+        var handlers = new List<ForRestScriptHandler>();
+        var scenarios = new List<ForRestScriptScenario>();
+        var imports = new List<string>();
         ForRestScriptBodySection? body = null;
 
         var index = 0;
@@ -48,6 +51,13 @@ public sealed class ForRestScriptParser
                 continue;
             }
 
+            if (TryParseImportDirective(trimmed, out var importPath))
+            {
+                imports.Add(importPath);
+                index++;
+                continue;
+            }
+
             if (TryParseBody(lines, ref index, diagnostics, out var parsedBody))
             {
                 body = parsedBody;
@@ -57,6 +67,18 @@ public sealed class ForRestScriptParser
             if (TryParseFlow(lines, ref index, diagnostics, out var parsedFlow))
             {
                 AppendFlowLines(flowLines, parsedFlow);
+                continue;
+            }
+
+            if (TryParseOnHandler(lines, ref index, trimmed, diagnostics, out var handler))
+            {
+                handlers.Add(handler!);
+                continue;
+            }
+
+            if (TryParseScenarioSection(lines, ref index, trimmed, diagnostics, out var scenario))
+            {
+                scenarios.Add(scenario!);
                 continue;
             }
 
@@ -118,7 +140,7 @@ public sealed class ForRestScriptParser
                 || TryParseTopLevelExtraction(trimmed, index + 1, line, extractions, diagnostics)
                 || TryParseTopLevelAssertion(trimmed, index + 1, line, tests, diagnostics)
                 || TryParseTopLevelKeyValue(trimmed, index + 1, line, "repeat", repeat, diagnostics)
-                || TryParseTopLevelKeyValue(trimmed, index + 1, line, "retry", retry, diagnostics))
+                || (!IsFlowRetryLine(trimmed) && TryParseTopLevelKeyValue(trimmed, index + 1, line, "retry", retry, diagnostics)))
             {
                 index++;
                 continue;
@@ -151,6 +173,9 @@ public sealed class ForRestScriptParser
                 Tests = tests,
                 Repeat = repeat,
                 Retry = retry,
+                Handlers = handlers,
+                Scenarios = scenarios,
+                Imports = imports,
             },
             diagnostics);
     }
@@ -167,6 +192,206 @@ public sealed class ForRestScriptParser
         }
 
         flowLines.AddRange(Normalize(flow).Split('\n'));
+    }
+
+    private static bool TryParseImportDirective(string trimmed, out string path)
+    {
+        path = string.Empty;
+        string? remainder = null;
+
+        if (trimmed.StartsWith("import ", StringComparison.Ordinal))
+        {
+            remainder = trimmed["import ".Length..].Trim();
+        }
+        else if (trimmed.StartsWith("use ", StringComparison.Ordinal))
+        {
+            remainder = trimmed["use ".Length..].Trim();
+        }
+
+        if (remainder is null)
+        {
+            return false;
+        }
+
+        if (remainder.Length >= 2 && remainder[0] == '"' && remainder[^1] == '"')
+        {
+            path = remainder[1..^1];
+            return !string.IsNullOrWhiteSpace(path);
+        }
+
+        return false;
+    }
+
+    private static bool TryParseOnHandler(
+        string[] lines,
+        ref int index,
+        string trimmed,
+        List<ForRestScriptDiagnostic> diagnostics,
+        out ForRestScriptHandler? handler)
+    {
+        handler = null;
+        if (!trimmed.StartsWith("on ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var afterOn = trimmed["on ".Length..].Trim();
+        ForRestScriptHandlerKind kind;
+        int? statusCode = null;
+
+        if (afterOn.StartsWith("error", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = afterOn["error".Length..].Trim();
+            if (rest != "{")
+            {
+                return false;
+            }
+
+            kind = ForRestScriptHandlerKind.OnError;
+        }
+        else if (afterOn.StartsWith("status", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = afterOn["status".Length..].Trim();
+            var braceIdx = rest.IndexOf('{');
+            if (braceIdx < 0)
+            {
+                return false;
+            }
+
+            var codeText = rest[..braceIdx].Trim();
+            if (!int.TryParse(codeText, out var code))
+            {
+                diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"Invalid status code '{codeText}' in on status handler.", index + 1, 1));
+                return false;
+            }
+
+            statusCode = code;
+            kind = ForRestScriptHandlerKind.OnStatus;
+        }
+        else
+        {
+            return false;
+        }
+
+        index++;
+        var bodyLines = new List<string>();
+        var depth = 1;
+        while (index < lines.Length && depth > 0)
+        {
+            var line = lines[index];
+            var lineTrimmed = line.Trim();
+            depth += CountBraceDelta(line);
+            if (depth <= 0)
+            {
+                index++;
+                break;
+            }
+
+            bodyLines.Add(line);
+            index++;
+        }
+
+        handler = new(kind, statusCode, string.Join(Environment.NewLine, bodyLines).Trim());
+        return true;
+    }
+
+    private static bool TryParseScenarioSection(
+        string[] lines,
+        ref int index,
+        string trimmed,
+        List<ForRestScriptDiagnostic> diagnostics,
+        out ForRestScriptScenario? scenario)
+    {
+        scenario = null;
+        if (!trimmed.StartsWith("scenario ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var afterScenario = trimmed["scenario ".Length..].Trim();
+        var nameEndIdx = afterScenario.IndexOf('"', 1);
+        if (!afterScenario.StartsWith('"') || nameEndIdx < 0)
+        {
+            return false;
+        }
+
+        var name = afterScenario[1..nameEndIdx];
+        var rest = afterScenario[(nameEndIdx + 1)..].Trim();
+        if (rest != "{")
+        {
+            return false;
+        }
+
+        index++;
+
+        var scenarioAuth = new Dictionary<string, ForRestScriptValueExpression>(StringComparer.OrdinalIgnoreCase);
+        var scenarioHeaders = new List<ForRestScriptNamedValue>();
+        var scenarioTests = new List<ForRestScriptAssertion>();
+        var scenarioFlowLines = new List<string>();
+        var depth = 1;
+
+        while (index < lines.Length && depth > 0)
+        {
+            var line = lines[index];
+            var lineTrimmed = line.Trim();
+
+            if (string.IsNullOrWhiteSpace(lineTrimmed) || IsComment(lineTrimmed))
+            {
+                index++;
+                continue;
+            }
+
+            depth += CountBraceDelta(line);
+            if (depth <= 0)
+            {
+                index++;
+                break;
+            }
+
+            if (TryGetKnownSectionName(lineTrimmed, out var sectionName) && sectionName == "auth")
+            {
+                index++;
+                ParseKeyValueSection(lines, ref index, scenarioAuth, diagnostics, "auth");
+                continue;
+            }
+
+            if (TryGetKnownSectionName(lineTrimmed, out sectionName) && sectionName == "headers")
+            {
+                index++;
+                ParseNamedValueSection(lines, ref index, scenarioHeaders, diagnostics, "headers");
+                continue;
+            }
+
+            if (TryParseTopLevelKeyValue(lineTrimmed, index + 1, line, "auth", scenarioAuth, diagnostics))
+            {
+                index++;
+                continue;
+            }
+
+            if (TryParseTopLevelNamedValue(lineTrimmed, index + 1, line, "header", scenarioHeaders, diagnostics))
+            {
+                index++;
+                continue;
+            }
+
+            if (TryParseTopLevelAssertion(lineTrimmed, index + 1, line, scenarioTests, diagnostics))
+            {
+                index++;
+                continue;
+            }
+
+            scenarioFlowLines.Add(line);
+            index++;
+        }
+
+        scenario = new(
+            name,
+            scenarioAuth,
+            scenarioHeaders,
+            scenarioTests,
+            string.Join(Environment.NewLine, scenarioFlowLines).Trim());
+
+        return true;
     }
 
     private static string Normalize(string source)
@@ -224,6 +449,9 @@ public sealed class ForRestScriptParser
                      ("ssl", "ssl"),
                      ("history", "history"),
                      ("content_type", "content_type"),
+                     ("user_agent", "user_agent"),
+                     ("custom_user_agent", "custom_user_agent"),
+                     ("request.user_agent", "user_agent"),
                      ("request.timeout", "timeout"),
                      ("request.max_send_iterations", "max_send_iterations"),
                      ("request.redirects", "redirects"),
@@ -391,6 +619,17 @@ public sealed class ForRestScriptParser
 
         target[key] = expression!;
         return true;
+    }
+
+    private static bool IsFlowRetryLine(string trimmed)
+    {
+        if (!trimmed.StartsWith("retry ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string remainder = trimmed[6..].TrimStart();
+        return remainder.Length > 0 && char.IsDigit(remainder[0]);
     }
 
     private static bool TryReadDirectiveValue(string trimmed, string directive, out string rawValue)
@@ -902,12 +1141,28 @@ public sealed class ForRestScriptParser
                 return;
             }
 
-            if (TryParseStatusAssertion(trimmed, out var parsedAssertion)
-                || TryParseBodyAssertion(trimmed, out parsedAssertion)
-                || TryParseHeaderAssertion(trimmed, out parsedAssertion)
-                || TryParseJsonAssertion(trimmed, out parsedAssertion))
+            string assertionInput = trimmed.StartsWith("expect ", StringComparison.OrdinalIgnoreCase)
+                ? trimmed[7..].Trim()
+                : trimmed;
+
+            if (TryParseStatusAssertion(assertionInput, out var parsedAssertion)
+                || TryParseBodyAssertion(assertionInput, out parsedAssertion)
+                || TryParseHeaderAssertion(assertionInput, out parsedAssertion)
+                || TryParseJsonAssertion(assertionInput, out parsedAssertion))
             {
                 tests.Add(parsedAssertion!);
+                index++;
+                continue;
+            }
+
+            if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+            {
+                var description = trimmed[1..^1];
+                tests.Add(new(
+                    ForRestScriptAssertionTarget.Status,
+                    ForRestScriptComparisonOperator.Equal,
+                    description,
+                    IsDescriptionOnly: true));
                 index++;
                 continue;
             }
@@ -1584,6 +1839,9 @@ public sealed class ForRestScriptParser
                 return true;
             case "runtime":
                 scope = ForRestScriptVariableScope.Runtime;
+                return true;
+            case "secret":
+                scope = ForRestScriptVariableScope.Secret;
                 return true;
             default:
                 scope = ForRestScriptVariableScope.Request;

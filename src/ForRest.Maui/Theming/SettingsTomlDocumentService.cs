@@ -1,5 +1,4 @@
-using ForRest.Maui.Services;
-using ForRest.Services.Licensing;
+using ForRest.Licensing;
 
 namespace ForRest.Maui.Theming;
 
@@ -9,28 +8,33 @@ public sealed class SettingsTomlDocumentService
 	private readonly ThemeConfigParser _themeConfigParser;
 	private readonly ThemeConfigNormalizer _themeConfigNormalizer;
 	private readonly SettingsTomlTemplate _settingsTomlTemplate;
-	private readonly ILicenseValidationService _licenseValidationService;
-	private readonly IBuildMetadataProvider _buildMetadataProvider;
 
 	public SettingsTomlDocumentService(
 		ThemeConfigStore themeConfigStore,
 		ThemeConfigParser themeConfigParser,
 		ThemeConfigNormalizer themeConfigNormalizer,
-		SettingsTomlTemplate settingsTomlTemplate,
-		ILicenseValidationService licenseValidationService,
-		IBuildMetadataProvider buildMetadataProvider)
+		SettingsTomlTemplate settingsTomlTemplate)
 	{
 		_themeConfigStore = themeConfigStore;
 		_themeConfigParser = themeConfigParser;
 		_themeConfigNormalizer = themeConfigNormalizer;
 		_settingsTomlTemplate = settingsTomlTemplate;
-		_licenseValidationService = licenseValidationService;
-		_buildMetadataProvider = buildMetadataProvider;
 	}
 
 	public string ConfigFilePath => _themeConfigStore.ConfigFilePath;
 
 	public string LoadOrCreate(ForRestSettings settings)
+	{
+		return LoadOrCreate(
+			settings,
+			new ActivationSnapshot(
+				LicenseAccessStatus.Pending,
+				"Activation pending",
+				"License state has not been evaluated yet.",
+				true));
+	}
+
+	public string LoadOrCreate(ForRestSettings settings, ActivationSnapshot activation)
 	{
 		string renderedTemplate = _settingsTomlTemplate.Build(settings);
 		_themeConfigStore.EnsureConfigFile(renderedTemplate);
@@ -45,7 +49,7 @@ public sealed class SettingsTomlDocumentService
 			_themeConfigStore.WriteAllText(normalized.NormalizedText);
 		}
 
-		return BuildEditorProjection(parsedDocument, normalized.Settings);
+		return BuildEditorProjection(parsedDocument, normalized.Settings, activation);
 	}
 
 	public IReadOnlyList<EditorEditableRange> GetEditableRanges(string text)
@@ -89,7 +93,7 @@ public sealed class SettingsTomlDocumentService
 		_themeConfigStore.WriteAllText(nextRawText);
 	}
 
-	private string BuildEditorProjection(ThemeConfigDocument document, ForRestSettings settings)
+	private string BuildEditorProjection(ThemeConfigDocument document, ForRestSettings settings, ActivationSnapshot activation)
 	{
 		ForRestSettings projectedSettings = settings with
 		{
@@ -101,16 +105,12 @@ public sealed class SettingsTomlDocumentService
 		};
 
 		string editorText = _themeConfigNormalizer.Render(document, projectedSettings);
-		LicenseValidationResult validation = _licenseValidationService.Evaluate(
-			settings.LicenseKey,
-			_buildMetadataProvider.GetBuildDateUtc(),
-			DateTimeOffset.UtcNow);
 		return string.Join(
 			Environment.NewLine,
 			[
 				editorText,
 				string.Empty,
-				_settingsTomlTemplate.BuildLicenseInfoBlock(validation)
+				_settingsTomlTemplate.BuildLicenseInfoBlock(activation)
 			]);
 	}
 }

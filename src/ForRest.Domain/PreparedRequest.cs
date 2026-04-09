@@ -22,5 +22,9 @@ public sealed record PreparedRequest
 
     public string RawRequest { get; init; } = string.Empty;
 
+    public UserAgentKind UserAgent { get; init; } = UserAgentKind.None;
+
+    public string CustomUserAgent { get; init; } = string.Empty;
+
     public VariableResolutionPreview Variables { get; init; } = new();
 }
