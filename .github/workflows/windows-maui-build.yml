@@ -186,7 +186,7 @@ jobs:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}
           path: artifacts/release/${{ matrix.arch }}/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
       - name: Upload obfuscation mapping
         if: needs.prepare.outputs.build_configuration == 'Release'
@@ -195,7 +195,7 @@ jobs:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}-obfuscation-map
           path: artifacts/obfuscation-maps/${{ matrix.arch }}/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   release:
     if: github.ref_name == 'master'

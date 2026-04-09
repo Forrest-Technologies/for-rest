@@ -201,7 +201,7 @@ jobs:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-android
           path: artifacts/release/android/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   release:
     if: github.ref_name == 'master'
