@@ -340,6 +340,10 @@ public sealed class AgentFrameworkAiTurnExecutorTests
             SourceText = updatedText;
             return AiActiveDocumentUpdateResult.Success(updatedText);
         }
+
+        public AiWorkspaceContext? GetWorkspaceContext() => null;
+
+        public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
     }
 
     private sealed record CallInfo(IEnumerable<string> MessageTexts, bool HasContinuationToken)

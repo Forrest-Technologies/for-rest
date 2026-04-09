@@ -1144,4 +1144,584 @@ public sealed class ForRestScriptCompilerTests
         StringAssert.Contains(messages, "expect status == 200");
         StringAssert.Contains(messages, "expect header \"Content-Type\" contains \"json\"");
     }
+
+    [TestMethod]
+    public void Compile_retry_flow_construct_generates_retry_loop()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Retry Test"
+            method GET
+            url "https://api.example.test/health"
+
+            retry 3 with backoff {
+              let sent = request.send()
+              if sent.status == 200 { break }
+            }
+
+            expect status == 200 "healthy"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "for (int __retryIdx");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "Math.Pow(2,");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "Task.Delay");
+    }
+
+    [TestMethod]
+    public void Compile_retry_with_fixed_delay_generates_constant_wait()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Retry Delay"
+            method GET
+            url "https://api.example.test/health"
+
+            retry 5 with delay 500 {
+              let sent = request.send()
+              if sent.status == 200 { break }
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "for (int __retryIdx");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "Task.Delay(500)");
+    }
+
+    [TestMethod]
+    public void Compile_on_error_handler_wraps_flow_in_try_catch()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Error Handler"
+            method GET
+            url "https://api.example.test/items"
+
+            on error {
+              error "Request failed"
+            }
+
+            log "Sending request"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "try");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "catch");
+    }
+
+    [TestMethod]
+    public void Compile_on_status_handler_appends_status_check()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Status Handler"
+            method GET
+            url "https://api.example.test/items"
+
+            on status 429 {
+              warn "Rate limited"
+            }
+
+            log "Sending request"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "response.Status == 429");
+    }
+
+    [TestMethod]
+    public void Compile_extract_json_generates_json_select()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Extract Test"
+            method GET
+            url "https://api.example.test/auth"
+
+            let sent = request.send()
+            let token = extract json "$.access_token" from sent
+            log $"Token: {token}"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "json.Select(");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "$.access_token");
+    }
+
+    [TestMethod]
+    public void Compile_extract_header_generates_header_access()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Extract Header"
+            method GET
+            url "https://api.example.test/echo"
+
+            let sent = request.send()
+            let reqId = extract header "X-Request-Id" from sent
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "Headers[\"X-Request-Id\"]");
+    }
+
+    [TestMethod]
+    public void Compile_extract_regex_generates_regex_match()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Extract Regex"
+            method GET
+            url "https://api.example.test/echo"
+
+            let sent = request.send()
+            let orderId = extract regex "order-(\d+)" from sent.body
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "regex.Match(");
+    }
+
+    [TestMethod]
+    public void Compile_stash_columns_generates_declare_columns()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Stash Columns"
+            method GET
+            url "https://api.example.test/items"
+
+            stash columns ["Endpoint", "Status", "Duration"]
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "stash.DeclareColumns(");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "\"Endpoint\"");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "\"Status\"");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "\"Duration\"");
+    }
+
+    [TestMethod]
+    public void Compile_define_and_call_generates_subroutine()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Subroutine Test"
+            method GET
+            url "https://api.example.test/items"
+
+            define greet with name {
+              log $"Hello {name}"
+            }
+
+            call greet with "World"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "async Task __define_greet(");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "await __define_greet(");
+    }
+
+    [TestMethod]
+    public void Compile_parallel_sends_generates_task_whenall()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Parallel Test"
+            method GET
+            url "https://api.example.test/items"
+
+            let [a, b] = parallel {
+              GET "https://api.example.test/users"
+              GET "https://api.example.test/posts"
+            }
+
+            log $"Users: {a.status}, Posts: {b.status}"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Clone()");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "Task.WhenAll(");
+    }
+
+    [TestMethod]
+    public void Compile_pipe_generates_sequential_sends()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Pipe Test"
+            method GET
+            url "https://api.example.test/items"
+
+            pipe {
+              GET "https://api.example.test/users" -> let users
+              POST "https://api.example.test/report" -> let report
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Method = \"GET\"");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "request.Method = \"POST\"");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "SendAsync()");
+    }
+
+    [TestMethod]
+    public void Compile_named_send_rewrites_to_labeled_send()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Named Send"
+            method GET
+            url "https://api.example.test/items"
+
+            let baseline = request.send() as "baseline"
+            log $"Status: {baseline.status}"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "SendAsync(\"baseline\")");
+    }
+
+    [TestMethod]
+    public void Compile_snapshot_generates_snapshot_save()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Snapshot Test"
+            method GET
+            url "https://api.example.test/items"
+
+            let sent = request.send()
+            snapshot "v1-baseline" from sent
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "snapshot.Save(\"v1-baseline\"");
+    }
+
+    [TestMethod]
+    public void Compile_import_directive_adds_to_imports_list()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            import "shared/auth-helpers.frs"
+            use "shared/variables.frs"
+
+            name "Import Test"
+            method GET
+            url "https://api.example.test/items"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+                ResolveImport = static _ => null,
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+    }
+
+    [TestMethod]
+    public void Compile_scenario_blocks_produce_scenario_payloads()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Scenario Test"
+            method GET
+            url "https://api.example.test/users"
+
+            scenario "happy path" {
+              expect status == 200 "returns 200"
+            }
+
+            scenario "not found" {
+              expect status == 404 "returns 404"
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        Assert.IsNotNull(result.ScenarioPayloads);
+        Assert.AreEqual(2, result.ScenarioPayloads.Count);
+        Assert.AreEqual("happy path", result.ScenarioPayloads[0].ScenarioName);
+        Assert.AreEqual("not found", result.ScenarioPayloads[1].ScenarioName);
+    }
+
+    [TestMethod]
+    public void Compile_description_only_test_emits_comment()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Desc Test"
+            method GET
+            url "https://api.example.test/items"
+
+            tests {
+              "user list returns data with at least one active user"
+              expect status == 200 "returns 200"
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.TestsScript, "// Test: user list returns data with at least one active user");
+    }
+
+    [TestMethod]
+    public void Compile_multiple_on_status_handlers_all_appended()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Multi Status"
+            method GET
+            url "https://api.example.test/items"
+
+            on status 401 {
+              error "Unauthorized"
+            }
+
+            on status 429 {
+              warn "Rate limited"
+            }
+
+            log "Sending"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "response.Status == 401");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "response.Status == 429");
+    }
+
+    [TestMethod]
+    public void Compile_define_without_params_compiles()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "No Params Define"
+            method GET
+            url "https://api.example.test/items"
+
+            define setup {
+              log "Setting up"
+            }
+
+            call setup
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "async Task __define_setup()");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "await __define_setup()");
+    }
+
+    [TestMethod]
+    public void Compile_bare_parallel_without_destructuring_compiles()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Bare Parallel"
+            method GET
+            url "https://api.example.test/items"
+
+            parallel {
+              GET "https://api.example.test/a"
+              GET "https://api.example.test/b"
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "Task.WhenAll(");
+    }
+
+    [TestMethod]
+    public void Compile_retry_without_strategy_generates_simple_loop()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Simple Retry"
+            method GET
+            url "https://api.example.test/items"
+
+            retry 3 {
+              let sent = request.send()
+              if sent.status == 200 { break }
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "for (int __retryIdx");
+        Assert.IsFalse(result.Payload.Request.PreRequestScript.Contains("Task.Delay"));
+    }
 }

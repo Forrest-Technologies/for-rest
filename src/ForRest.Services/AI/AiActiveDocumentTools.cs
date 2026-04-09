@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ForRest.Services.AI;
 
@@ -20,7 +21,19 @@ public sealed record AiActiveDocumentSnapshot(
     string Language,
     string SourceText,
     IReadOnlyList<AiActiveDocumentDiagnostic> Diagnostics,
-    AiActiveDocumentRuntimeContext? RuntimeContext = null);
+    AiActiveDocumentRuntimeContext? RuntimeContext = null,
+    AiWorkspaceContext? WorkspaceContext = null);
+
+public sealed record AiWorkspaceContext(
+    string WorkspaceId,
+    string WorkspaceName,
+    IReadOnlyList<AiWorkspaceScriptSummary> Scripts);
+
+public sealed record AiWorkspaceScriptSummary(
+    string ScriptId,
+    string Name,
+    string Method,
+    string UrlTemplate);
 
 public sealed record AiActiveDocumentUpdateResult(
     bool Succeeded,
@@ -49,6 +62,10 @@ public interface IAiActiveDocumentHost
     AiActiveDocumentSnapshot? GetActiveDocument();
 
     AiActiveDocumentUpdateResult UpdateActiveDocument(AiActiveDocumentSnapshot document, string updatedText);
+
+    AiWorkspaceContext? GetWorkspaceContext();
+
+    AiActiveDocumentUpdateResult CreateScript(string name, string sourceText);
 }
 
 public interface IAiActiveDocumentToolCatalog
@@ -86,6 +103,11 @@ public sealed class AiActiveDocumentToolCatalog : IAiActiveDocumentToolCatalog
                 "Replace the entire active document with new source text.",
                 "Use this when the user asked to rewrite the whole request or when the current structure is broken enough that targeted edits are more error-prone than a full replacement. This is the default fallback when patch_active_document fails.",
                 MutatesDocument: true),
+            new(
+                "create_workspace_script",
+                "Create a new request script in the current workspace.",
+                "Use when the user asks to create a new request or add a script to the workspace. Provide the script name and full ForRest source text. The script is added to the workspace tree as a new request node.",
+                MutatesDocument: true),
         ];
     }
 }
@@ -97,22 +119,27 @@ public interface IAiActiveDocumentToolService
     string PatchActiveDocument(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost, string editsJson);
 
     string ReplaceActiveDocument(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost, string updatedSourceText);
+
+    string CreateWorkspaceScript(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost, string name, string sourceText);
 }
 
-public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
+public sealed class AiActiveDocumentToolService(IAiDocumentPatchService documentPatchService) : IAiActiveDocumentToolService
 {
+    #region Private Fields
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly IAiDocumentPatchService _documentPatchService;
+    private static readonly Regex SecretRedactionPattern = new(
+        @"(?<=\bsecret\s+\w+\s*=\s*)""[^""]*""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public AiActiveDocumentToolService(IAiDocumentPatchService documentPatchService)
-    {
-        _documentPatchService = documentPatchService;
-    }
+    #endregion
+
+    #region Public Methods
 
     public string ReadActiveDocument(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost)
     {
@@ -146,10 +173,12 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             });
         }
 
+        var redacted = document with { SourceText = RedactSecrets(document.SourceText) };
+
         return Serialize(new
         {
             succeeded = true,
-            document,
+            document = redacted,
             errors = Array.Empty<string>(),
         });
     }
@@ -194,7 +223,7 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             return SerializeFailure($"The patch exceeds the configured maximum of {settings.Tools.MaxPatchCharacters} replacement characters.");
         }
 
-        AiDocumentPatchResult patchResult = _documentPatchService.Apply(
+        AiDocumentPatchResult patchResult = documentPatchService.Apply(
             new(document.DocumentId, document.SourceText, edits));
 
         if (!patchResult.Succeeded)
@@ -284,6 +313,62 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             patchedText = updatedSourceText ?? string.Empty,
             errors = Array.Empty<string>(),
         });
+    }
+
+    public string CreateWorkspaceScript(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost, string name, string sourceText)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (!settings.Enabled)
+        {
+            return SerializeFailure("AI is disabled.");
+        }
+
+        if (activeDocumentHost is null)
+        {
+            return SerializeFailure("No active document host is available.");
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return SerializeFailure("Script name is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(sourceText))
+        {
+            return SerializeFailure("Script source text is required.");
+        }
+
+        AiActiveDocumentUpdateResult result = activeDocumentHost.CreateScript(name, sourceText);
+        if (!result.Succeeded)
+        {
+            return Serialize(new
+            {
+                succeeded = false,
+                errors = new[] { result.Message },
+            });
+        }
+
+        return Serialize(new
+        {
+            succeeded = true,
+            scriptName = name,
+            errors = Array.Empty<string>(),
+        });
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    internal static string RedactSecrets(string sourceText)
+    {
+        if (string.IsNullOrEmpty(sourceText))
+        {
+            return sourceText;
+        }
+
+        return SecretRedactionPattern.Replace(sourceText, "\"***\"");
     }
 
     private static string Serialize(object value)
@@ -429,4 +514,6 @@ public sealed class AiActiveDocumentToolService : IAiActiveDocumentToolService
             .Trim()
             .ToLowerInvariant();
     }
+
+    #endregion
 }

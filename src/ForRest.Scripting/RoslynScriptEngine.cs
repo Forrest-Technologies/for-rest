@@ -38,6 +38,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         var random = global::ForRest.Scripting.ScriptRuntimeContext.Globals.random;
         var workspace = global::ForRest.Scripting.ScriptRuntimeContext.Globals.workspace;
         dynamic stash = global::ForRest.Scripting.ScriptRuntimeContext.Globals.stash;
+        var snapshot = global::ForRest.Scripting.ScriptRuntimeContext.Globals.snapshot;
 
         """;
     private static readonly string[] DefaultImports =
@@ -161,6 +162,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                     stashApi,
                     request.ExecuteWorkspaceRequestAsync),
                 stash = stashApi,
+                snapshot = new SnapshotApi(),
             };
 
             ScriptCompilationResult compilation = CompileScript(request.Script);

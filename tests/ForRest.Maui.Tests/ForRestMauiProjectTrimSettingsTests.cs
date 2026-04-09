@@ -37,6 +37,27 @@ public sealed class ForRestMauiProjectTrimSettingsTests
 		StringAssert.Contains(project, "<MauiAsset Include=\"..\\ForRest.Scripting\\bin\\$(Configuration)\\net10.0\\ForRest.Scripting.dll\" LogicalName=\"roslyn-runtime/ForRest.Scripting.dll\" />");
 		StringAssert.Contains(project, "<MauiAsset Include=\"..\\ForRest.Services\\bin\\$(Configuration)\\net10.0\\ForRest.Services.dll\" LogicalName=\"roslyn-runtime/ForRest.Services.dll\" />");
 		StringAssert.Contains(project, "<MauiAsset Include=\"$(TargetDir)ForRest.Maui.dll\" LogicalName=\"roslyn-runtime/ForRest.Maui.dll\" />");
+		StringAssert.Contains(project, "<Target Name=\"ValidateRoslynRuntimeSnapshots\"");
+		StringAssert.Contains(project, "Checked-in roslyn-runtime\\\\ForRest.*.dll snapshots are not allowed");
+	}
+
+	[TestMethod]
+	public void Android_project_has_no_checked_in_ForRest_runtime_snapshots()
+	{
+		string runtimeDirectory = Path.GetFullPath(
+			Path.Combine(
+				AppContext.BaseDirectory,
+				"..",
+				"..",
+				"..",
+				"..",
+				"..",
+				"src",
+				"ForRest.Maui",
+				"roslyn-runtime"));
+		string[] staleAssemblies = Directory.GetFiles(runtimeDirectory, "ForRest.*.dll", SearchOption.TopDirectoryOnly);
+
+		Assert.AreEqual(0, staleAssemblies.Length, $"Unexpected checked-in runtime snapshots: {string.Join(", ", staleAssemblies.Select(Path.GetFileName))}");
 	}
 
 	[TestMethod]

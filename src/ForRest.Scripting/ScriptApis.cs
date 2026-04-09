@@ -32,6 +32,8 @@ public sealed class ScriptRequestApi
         Url = request.Uri.ToString();
         Body = request.Body.RawContent;
         ContentType = request.Body.ContentType;
+        UserAgent = request.UserAgent.ToString();
+        CustomUserAgent = request.CustomUserAgent;
         Headers = new ScriptHeaderCollection(request.Headers);
     }
 
@@ -64,6 +66,10 @@ public sealed class ScriptRequestApi
     public string Body { get; set; }
 
     public string ContentType { get; set; }
+
+    public string UserAgent { get; set; }
+
+    public string CustomUserAgent { get; set; }
 
     public ScriptHeaderCollection Headers { get; }
 
@@ -123,6 +129,42 @@ public sealed class ScriptRequestApi
 
     public async Task<dynamic> SendAsync()
     {
+        return await SendAsyncCore(null);
+    }
+
+    public async Task<dynamic> SendAsync(string? label)
+    {
+        return await SendAsyncCore(label);
+    }
+
+    public ScriptRequestApi Clone()
+    {
+        var clonedResponse = new ScriptResponseApi(null);
+        var clone = new ScriptRequestApi(
+            originalRequest,
+            clonedResponse,
+            variablesApi,
+            sendAsync,
+            maxSendIterations)
+        {
+            Method = Method,
+            Url = Url,
+            Body = Body,
+            ContentType = ContentType,
+            UserAgent = UserAgent,
+            CustomUserAgent = CustomUserAgent,
+        };
+
+        foreach (var header in Headers.All())
+        {
+            clone.Headers[header.Key] = header.Value;
+        }
+
+        return clone;
+    }
+
+    private async Task<dynamic> SendAsyncCore(string? label)
+    {
         if (sendAsync is null || maxSendIterations <= 0)
         {
             throw new InvalidOperationException("request.send() is disabled for this request. Increase max_send_iterations to enable it.");
@@ -137,6 +179,11 @@ public sealed class ScriptRequestApi
         }
 
         ResponseSnapshot? response = await sendAsync(preparedRequest);
+        if (response is not null && !string.IsNullOrWhiteSpace(label))
+        {
+            response = response with { Label = label };
+        }
+
         lastSentResponse = response;
         if (response is not null)
         {
@@ -1128,6 +1175,18 @@ public sealed class StashApi : DynamicObject
         return false;
     }
 
+    public void DeclareColumns(params string[] declaredColumns)
+    {
+        foreach (var column in declaredColumns)
+        {
+            string normalized = NormalizeKey(column);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                RegisterColumn(normalized);
+            }
+        }
+    }
+
     private void RegisterColumn(string key)
     {
         if (columns.Any(existing => string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)))
@@ -1154,6 +1213,36 @@ public sealed class StashApi : DynamicObject
             IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
             _ => value.ToString() ?? string.Empty,
         };
+    }
+}
+
+public sealed class SnapshotApi
+{
+    private readonly Dictionary<string, object> snapshots = new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task Save(string name, object? source)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new InvalidOperationException("snapshot name cannot be empty.");
+        }
+
+        if (source is not null)
+        {
+            snapshots[name] = source;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    public object? Get(string name)
+    {
+        return snapshots.TryGetValue(name, out var value) ? value : null;
+    }
+
+    public IReadOnlyDictionary<string, object> All()
+    {
+        return snapshots;
     }
 }
 
@@ -1789,6 +1878,230 @@ public sealed class ScriptGlobals
     public required WorkspaceApi workspace { get; init; }
 
     public required dynamic stash { get; init; }
+
+    public required SnapshotApi snapshot { get; init; }
+}
+
+public static class CollectionApi
+{
+    #region Public Methods
+
+    public static List<object?> Where(object source, Func<object?, object?> predicate)
+    {
+        return Materialize(source).Where(item => (bool)predicate(item)).ToList();
+    }
+
+    public static List<object?> Select(object source, Func<object?, object?> selector)
+    {
+        return Materialize(source).Select(item => (object?)selector(item)).ToList();
+    }
+
+    public static object? First(object source)
+    {
+        return Materialize(source).First();
+    }
+
+    public static object? First(object source, Func<object?, object?> predicate)
+    {
+        return Materialize(source).First(item => (bool)predicate(item));
+    }
+
+    public static object? FirstOrDefault(object source)
+    {
+        return Materialize(source).FirstOrDefault() ?? string.Empty;
+    }
+
+    public static object? FirstOrDefault(object source, Func<object?, object?> predicate)
+    {
+        return Materialize(source).FirstOrDefault(item => (bool)predicate(item)) ?? string.Empty;
+    }
+
+    public static object? Last(object source)
+    {
+        return Materialize(source).Last();
+    }
+
+    public static object? Last(object source, Func<object?, object?> predicate)
+    {
+        return Materialize(source).Last(item => (bool)predicate(item));
+    }
+
+    public static bool Any(object source)
+    {
+        return Materialize(source).Any();
+    }
+
+    public static bool Any(object source, Func<object?, object?> predicate)
+    {
+        return Materialize(source).Any(item => (bool)predicate(item));
+    }
+
+    public static bool All(object source, Func<object?, object?> predicate)
+    {
+        return Materialize(source).All(item => (bool)predicate(item));
+    }
+
+    public static int Count(object source)
+    {
+        return Materialize(source).Count();
+    }
+
+    public static int Count(object source, Func<object?, object?> predicate)
+    {
+        return Materialize(source).Count(item => (bool)predicate(item));
+    }
+
+    public static List<object?> OrderBy(object source, Func<object?, object?> keySelector)
+    {
+        return Materialize(source).OrderBy(item => (object?)keySelector(item)).ToList();
+    }
+
+    public static List<object?> OrderByDesc(object source, Func<object?, object?> keySelector)
+    {
+        return Materialize(source).OrderByDescending(item => (object?)keySelector(item)).ToList();
+    }
+
+    public static List<object?> Take(object source, int count)
+    {
+        return Materialize(source).Take(count).ToList();
+    }
+
+    public static List<object?> Skip(object source, int count)
+    {
+        return Materialize(source).Skip(count).ToList();
+    }
+
+    public static List<object?> Distinct(object source)
+    {
+        return Materialize(source).Distinct().ToList();
+    }
+
+    public static List<object?> Flatten(object source)
+    {
+        var result = new List<object?>();
+        foreach (var item in Materialize(source))
+        {
+            if (item is IEnumerable<object?> inner)
+            {
+                result.AddRange(inner);
+            }
+            else if (item is IList innerList)
+            {
+                foreach (var element in innerList)
+                {
+                    result.Add(element);
+                }
+            }
+            else
+            {
+                result.Add(item);
+            }
+        }
+
+        return result;
+    }
+
+    public static List<object?> GroupBy(object source, Func<object?, object?> keySelector)
+    {
+        return Materialize(source)
+            .GroupBy(item => (object?)keySelector(item))
+            .Select(group => (object?)new List<object?> { group.Key, group.ToList() })
+            .ToList();
+    }
+
+    public static decimal Sum(object source)
+    {
+        return Materialize(source).Sum(item => Convert.ToDecimal(item, CultureInfo.InvariantCulture));
+    }
+
+    public static decimal Sum(object source, Func<object?, object?> selector)
+    {
+        return Materialize(source).Sum(item => Convert.ToDecimal(selector(item), CultureInfo.InvariantCulture));
+    }
+
+    public static object? Min(object source)
+    {
+        return Materialize(source).Min();
+    }
+
+    public static object? Min(object source, Func<object?, object?> selector)
+    {
+        return Materialize(source).Min(item => (object?)selector(item));
+    }
+
+    public static object? Max(object source)
+    {
+        return Materialize(source).Max();
+    }
+
+    public static object? Max(object source, Func<object?, object?> selector)
+    {
+        return Materialize(source).Max(item => (object?)selector(item));
+    }
+
+    public static decimal Average(object source)
+    {
+        return Materialize(source).Average(item => Convert.ToDecimal(item, CultureInfo.InvariantCulture));
+    }
+
+    public static decimal Average(object source, Func<object?, object?> selector)
+    {
+        return Materialize(source).Average(item => Convert.ToDecimal(selector(item), CultureInfo.InvariantCulture));
+    }
+
+    public static List<object?> ToList(object source)
+    {
+        return Materialize(source);
+    }
+
+    public static List<object?> Reverse(object source)
+    {
+        var list = Materialize(source);
+        list.Reverse();
+        return list;
+    }
+
+    public static bool Contains(object source, object? value)
+    {
+        return Materialize(source).Contains(value);
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    private static List<object?> Materialize(object source)
+    {
+        if (source is List<object?> objectList)
+        {
+            return objectList;
+        }
+
+        if (source is IEnumerable<object?> enumerable)
+        {
+            return enumerable.ToList();
+        }
+
+        if (source is IList list)
+        {
+            return list.Cast<object?>().ToList();
+        }
+
+        if (source is IEnumerable nonGeneric and not string)
+        {
+            var result = new List<object?>();
+            foreach (var item in nonGeneric)
+            {
+                result.Add(item);
+            }
+
+            return result;
+        }
+
+        throw new InvalidOperationException($"Cannot iterate a value of type '{source?.GetType().Name ?? "null"}'. Collection methods require an array or list.");
+    }
+
+    #endregion
 }
 
 public static class ScriptRuntimeContext

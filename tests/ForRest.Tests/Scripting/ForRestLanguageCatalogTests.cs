@@ -87,7 +87,7 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(markdown, "strings.Replace / strings.Split");
         StringAssert.Contains(markdown, "convert.ToBool / convert.ToInt");
         StringAssert.Contains(markdown, "time.Parse / time.Format");
-        StringAssert.Contains(markdown, "`switch` / `case` / `default` are not currently part of the flow compiler");
+        StringAssert.Contains(markdown, "switch / case / default");
     }
 
     [TestMethod]

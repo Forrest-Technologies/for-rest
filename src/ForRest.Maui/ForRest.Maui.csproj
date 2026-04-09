@@ -103,6 +103,7 @@
 		<MauiImage Update="Resources\Images\dotnet_bot.png" Resize="True" BaseSize="300,185" />
 		<MauiFont Include="Resources\Fonts\*" />
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+		<!-- Package generic runtime dependencies from the checked-in cache, but never package app assemblies from snapshots. -->
 		<MauiAsset Include="roslyn-runtime\*.dll" Exclude="roslyn-runtime\ForRest.*.dll" LogicalName="roslyn-runtime/%(Filename)%(Extension)" />
 		<MauiAsset Include="..\ForRest.Domain\bin\$(Configuration)\net10.0\ForRest.Domain.dll" LogicalName="roslyn-runtime/ForRest.Domain.dll" />
 		<MauiAsset Include="..\ForRest.Licensing\bin\$(Configuration)\net10.0\ForRest.Licensing.dll" LogicalName="roslyn-runtime/ForRest.Licensing.dll" />
@@ -112,7 +113,7 @@
 		<MauiAsset Include="..\ForRest.Scripting\bin\$(Configuration)\net10.0\ForRest.Scripting.dll" LogicalName="roslyn-runtime/ForRest.Scripting.dll" />
 		<MauiAsset Include="..\ForRest.Services\bin\$(Configuration)\net10.0\ForRest.Services.dll" LogicalName="roslyn-runtime/ForRest.Services.dll" />
 		<MauiAsset Include="..\ForRest.Shared\bin\$(Configuration)\net10.0\ForRest.Shared.dll" LogicalName="roslyn-runtime/ForRest.Shared.dll" />
-		<MauiAsset Include="$(TargetDir)ForRest.Maui.dll" LogicalName="roslyn-runtime/ForRest.Maui.dll" />
+		<MauiAsset Include="$(IntermediateOutputPath)ForRest.Maui.dll" LogicalName="roslyn-runtime/ForRest.Maui.dll" />
 	</ItemGroup>
 
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
@@ -158,6 +159,13 @@
 
 	<Target Name="ValidateMonacoAssets" BeforeTargets="PrepareForBuild">
 		<Error Condition="!Exists('$(MSBuildProjectDirectory)\Resources\Raw\monaco\vs\loader.js')" Text="Packaged Monaco assets are missing from Resources\Raw\monaco. Run scripts\Update-Monaco.ps1 to restore the local editor bundle." />
+	</Target>
+
+	<Target Name="ValidateRoslynRuntimeSnapshots" BeforeTargets="PrepareForBuild">
+		<ItemGroup>
+			<StaleRoslynRuntimeAssemblies Include="$(MSBuildProjectDirectory)\roslyn-runtime\ForRest.*.dll" />
+		</ItemGroup>
+		<Error Condition="'@(StaleRoslynRuntimeAssemblies)' != ''" Text="Checked-in roslyn-runtime\\ForRest.*.dll snapshots are not allowed. Package current project outputs instead so Android cannot regress to stale app assemblies." />
 	</Target>
 
 	<Target Name="ValidateAndroidScriptingBuildSettings" BeforeTargets="PrepareForBuild" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">

@@ -177,6 +177,11 @@ public sealed record RequestDefinition
 
     public int MaxSendIterations { get; init; } = 3;
 
+    [JsonConverter(typeof(JsonStringEnumConverter<UserAgentKind>))]
+    public UserAgentKind UserAgent { get; init; } = UserAgentKind.None;
+
+    public string CustomUserAgent { get; init; } = string.Empty;
+
     public DateTimeOffset CreatedUtc { get; init; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedUtc { get; init; } = DateTimeOffset.UtcNow;

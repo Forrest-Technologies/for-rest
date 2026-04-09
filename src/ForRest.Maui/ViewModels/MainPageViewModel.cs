@@ -6537,6 +6537,33 @@ public sealed class MainPageViewModel : ObservableObject
 			return AiActiveDocumentUpdateResult.Success(normalizedText);
 		}
 
+		public AiWorkspaceContext? GetWorkspaceContext()
+		{
+			RequestWorkbenchWorkspaceState? workspace = _owner.GetSelectedWorkspaceState();
+			if (workspace is null)
+			{
+				return null;
+			}
+
+			List<AiWorkspaceScriptSummary> scripts = workspace.Documents
+				.Select(static document => new AiWorkspaceScriptSummary(
+					document.Location,
+					document.Title,
+					document.Method,
+					document.Summary))
+				.ToList();
+
+			return new AiWorkspaceContext(
+				workspace.Id.ToString(),
+				workspace.Name,
+				scripts);
+		}
+
+		public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText)
+		{
+			return AiActiveDocumentUpdateResult.Success();
+		}
+
 		private static void WriteUpdateDebug(string title, string detail)
 		{
 			System.Diagnostics.Debug.WriteLine(
