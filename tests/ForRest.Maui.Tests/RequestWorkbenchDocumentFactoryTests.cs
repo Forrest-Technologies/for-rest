@@ -49,14 +49,17 @@ public sealed class RequestWorkbenchDocumentFactoryTests
 		Assert.AreEqual("/requests/echo-lab/new-request-3", created.Location);
 		StringAssert.Contains(created.RequestSource, "name \"New Request 3\"");
 		StringAssert.Contains(created.RequestSource, "method GET");
-		StringAssert.Contains(created.RequestSource, "max_send_iterations 3");
+		StringAssert.Contains(created.RequestSource, "max_send_iterations 5");
 		StringAssert.Contains(created.RequestSource, "https://httpbin.org/anything?source=%2Frequests%2Fecho-lab%2Fnew-request-3");
-		StringAssert.Contains(created.RequestSource, "request.headers[\"X-Request-Source\"] = \"maui\"");
-		StringAssert.Contains(created.RequestSource, "let attempts = [0..2]");
-		StringAssert.Contains(created.RequestSource, "sent = request.send()");
-		StringAssert.Contains(created.RequestSource, "if sent.status == 200 and not (sent.body.length() == 0) {");
-		StringAssert.Contains(created.RequestSource, "if sent == null or sent.status != 200 {");
-		StringAssert.Contains(created.RequestSource, "foreach step in [0..1] {");
+		StringAssert.Contains(created.RequestSource, "runtime trace_id = guid()");
+		StringAssert.Contains(created.RequestSource, "runtime started_at = now()");
+		StringAssert.Contains(created.RequestSource, "on error {");
+		StringAssert.Contains(created.RequestSource, "on status 429 {");
+		StringAssert.Contains(created.RequestSource, "retry 3 with backoff {");
+		StringAssert.Contains(created.RequestSource, "let sent = request.send() as \"primary\"");
+		StringAssert.Contains(created.RequestSource, "stash.Status = response.status");
+		StringAssert.Contains(created.RequestSource, "stash.Body = strings.Substring(response.body, 0, 80)");
+		StringAssert.Contains(created.RequestSource, "stash.Commit()");
 		Assert.AreEqual(string.Empty, created.PreRequestScript);
 	}
 
@@ -76,14 +79,16 @@ public sealed class RequestWorkbenchDocumentFactoryTests
 
 		Assert.AreEqual("New request ready to edit and send", created.Summary);
 		StringAssert.Contains(created.RequestSource, "expect header \"Content-Type\" contains \"json\" \"json response\"");
-		StringAssert.Contains(created.RequestSource, "# ForRest is code-first. request.send() updates response and returns the latest snapshot.");
+		StringAssert.Contains(created.RequestSource, "expect status == 200 \"returns 200\"");
 		StringAssert.Contains(created.RequestSource, "method GET");
-		StringAssert.Contains(created.RequestSource, "request.headers[\"X-Request-Source\"] = \"maui\"");
-		StringAssert.Contains(created.RequestSource, "let attempts = [0..2]");
-		StringAssert.Contains(created.RequestSource, "sent = request.send()");
-		StringAssert.Contains(created.RequestSource, "if sent.status == 200 and not (sent.body.length() == 0) {");
-		StringAssert.Contains(created.RequestSource, "if sent == null or sent.status != 200 {");
-		StringAssert.Contains(created.RequestSource, "foreach step in [0..1] {");
+		StringAssert.Contains(created.RequestSource, "# Declarative error and status handlers run after the main flow.");
+		StringAssert.Contains(created.RequestSource, "on error {");
+		StringAssert.Contains(created.RequestSource, "on status 429 {");
+		StringAssert.Contains(created.RequestSource, "# Send with automatic retry on transient failures.");
+		StringAssert.Contains(created.RequestSource, "retry 3 with backoff {");
+		StringAssert.Contains(created.RequestSource, "let sent = request.send() as \"primary\"");
+		StringAssert.Contains(created.RequestSource, "if response.status == 200 {");
+		StringAssert.Contains(created.RequestSource, "stash.Commit()");
 		Assert.AreEqual(string.Empty, created.PreRequestScript);
 	}
 
