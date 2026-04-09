@@ -74,8 +74,12 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
         prompt.AppendLine("- When rewriting an existing request to a new endpoint or API surface, replace the old endpoint, method, headers, and body as needed instead of leaving the previous target half-intact.");
         prompt.AppendLine("- If the user asks to iterate, enumerate, batch, or stash results, treat that as a request to modify the current active request in place unless they explicitly asked for an additional request.");
         prompt.AppendLine("- For iterate/enumerate/batch/stash transformations, search the local docs for `batch-stash-loop` and `request-url` before asking the user how to structure the script.");
-        prompt.AppendLine("- If the user asks to do a similar request step multiple times, including phrases like `3 times`, `repeat N times`, or `at least N times`, prefer documented `foreach`, range, and `max_send_iterations` flow instead of manually duplicating near-identical request blocks.");
+        prompt.AppendLine("- If the user asks to do a similar request step multiple times, including phrases like `3 times`, `repeat N times`, or `at least N times`, prefer documented `foreach`, range, `retry N with backoff { }`, and `max_send_iterations` flow instead of manually duplicating near-identical request blocks.");
         prompt.AppendLine("- For API-surface or CRUD-style rewrites, search the local docs for `request-send`, `request-method`, `request-url`, `request-headers`, `request-body`, `request-content-type`, `api-surface-crud`, `stash`, and `expect`, then use those exact patterns.");
+        prompt.AppendLine("- For retry, error handling, or resilience patterns, search local docs for `retry-flow`, `on-error`, and `on-status` before guessing syntax.");
+        prompt.AppendLine("- For parallel or concurrent sends, search local docs for `parallel-sends`. For sequential pipelines, search for `pipe-syntax`.");
+        prompt.AppendLine("- For reusable code blocks, search local docs for `define-call`. For labeled sends, search for `named-send`. For response snapshots, search for `snapshot-save`.");
+        prompt.AppendLine("- Use `let` for local variable declarations in flow code. Use `log`, `warn`, and `error` for console output. Use `tests.Assert()` and `tests.Equal()` for programmatic assertions inside loops.");
         prompt.AppendLine("- If the user asks for randomized or unique values, use only documented ForRest helpers found in local docs. Prefer built-ins like `guid()` runtime values plus documented `strings`, `convert`, or `time` helpers; do not invent `Math.*`, instance methods like `.Substring(...)`, or arbitrary C# APIs.");
         prompt.AppendLine("- For normal JSON access, prefer dynamic `response.someField` or `response[0].someField` patterns over `response.json()`.");
         prompt.AppendLine("- When the response body root is an array, iterate `response` directly or use `response[index]` instead of inventing wrapper properties.");
@@ -162,6 +166,8 @@ public sealed class AiPromptManifestBuilder : IAiPromptManifestBuilder
             ? 2000
             : topic.Source.StartsWith("preflight-doc:", StringComparison.OrdinalIgnoreCase)
                 ? 700
+            : topic.Title.Contains("prompt context", StringComparison.OrdinalIgnoreCase)
+                ? 6000
             : 240;
         return text.Length <= limit ? text : text[..limit].TrimEnd();
     }

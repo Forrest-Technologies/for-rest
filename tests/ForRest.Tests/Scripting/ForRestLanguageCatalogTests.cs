@@ -37,6 +37,12 @@ public sealed class ForRestLanguageCatalogTests
         Assert.IsTrue(entries.Any(static entry => entry.Key == "strings-replace"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "convert-to-bool"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "time-parse"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "let"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "log-warn-error"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "tests-api"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "runtime-functions"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "string-interpolation"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "break-continue"));
         Assert.AreEqual(entries.Count, entries.Select(static entry => entry.Key).Distinct(StringComparer.Ordinal).Count());
     }
 
@@ -64,6 +70,10 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(json, "\"label\":\"time.Parse / time.Format\"");
         StringAssert.Contains(json, "\"kind\":\"Method\"");
         StringAssert.Contains(json, "\"example\":\"let attempts = [0..2]");
+        StringAssert.Contains(json, "\"key\":\"let\"");
+        StringAssert.Contains(json, "\"key\":\"log-warn-error\"");
+        StringAssert.Contains(json, "\"key\":\"tests-api\"");
+        StringAssert.Contains(json, "\"key\":\"runtime-functions\"");
     }
 
     [TestMethod]
@@ -88,6 +98,11 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(markdown, "convert.ToBool / convert.ToInt");
         StringAssert.Contains(markdown, "time.Parse / time.Format");
         StringAssert.Contains(markdown, "switch / case / default");
+        StringAssert.Contains(markdown, "| `let` |");
+        StringAssert.Contains(markdown, "log / warn / error");
+        StringAssert.Contains(markdown, "tests.Assert / tests.Equal");
+        StringAssert.Contains(markdown, "guid() / now()");
+        StringAssert.Contains(markdown, "break / continue");
     }
 
     [TestMethod]
@@ -116,6 +131,11 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(prompt, "convert.ToBool / convert.ToInt");
         StringAssert.Contains(prompt, "time.Parse / time.Format");
         StringAssert.Contains(prompt, "loop + stash pattern");
+        StringAssert.Contains(prompt, "`let`: Declare a local variable inside flow code.");
+        StringAssert.Contains(prompt, "`log / warn / error`: Write messages to the execution console.");
+        StringAssert.Contains(prompt, "`tests.Assert / tests.Equal`: Programmatic test assertions inside flow code.");
+        StringAssert.Contains(prompt, "`guid() / now() / utc_now() / random()`: Built-in runtime variable seed functions.");
+        StringAssert.Contains(prompt, "`break / continue`: Exit or skip iterations in loops and retry blocks.");
         StringAssert.Contains(prompt, "If a requested feature is not listed, treat it as unsupported");
     }
 }

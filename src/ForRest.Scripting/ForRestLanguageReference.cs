@@ -1128,6 +1128,99 @@ internal static class ForRestLanguageReference
             "Snippet",
             "tests {\n  \"${1:description of expected behavior}\"\n  expect status == ${2:200} \"${3:assertion label}\"\n}",
             true),
+        new(
+            "let",
+            "let",
+            "Flow",
+            "Declare a local variable inside flow code.",
+            "Use `let` to declare a variable. Assignment can be literal, an expression, or the result of `request.send()`. Re-assignment after the initial declaration omits `let`.",
+            """
+            let sent = request.send()
+            let name = "ForRest Widget"
+            let count = sent.length()
+            sent = request.send()
+            """,
+            ["let", "variable", "assign", "declare", "local"],
+            ["let"],
+            "Keyword"),
+        new(
+            "log-warn-error",
+            "log / warn / error",
+            "Flow",
+            "Write messages to the execution console.",
+            "`log` writes an informational message, `warn` writes a warning, and `error` writes an error. All three accept a literal string or interpolated expression. These are useful for tracing script execution.",
+            """
+            log "Starting request"
+            log $"Status: {sent.status}"
+            warn $"Unexpected status {sent.status}"
+            error "Request failed"
+            """,
+            ["log", "warn", "error", "console", "trace", "debug", "print"],
+            ["log", "warn", "error"],
+            "Keyword"),
+        new(
+            "tests-api",
+            "tests.Assert / tests.Equal",
+            "Assertions",
+            "Programmatic test assertions inside flow code.",
+            "Use `tests.Assert(condition, label)` for boolean assertions and `tests.Equal(expected, actual, label)` for equality assertions. These run inside flow code (not top-level `expect` statements) and are useful in loops or conditional branches.",
+            """
+            tests.Assert(sent.status >= 200 and sent.status < 300, "returns 2xx")
+            tests.Equal(3, sent.length(), "returns 3 items")
+            tests.Equal("silver", convert.ToString(sent.data.color), "color matches")
+            """,
+            ["tests", "assert", "equal", "assertion", "programmatic test"],
+            ["tests.Assert", "tests.Equal"],
+            "Method"),
+        new(
+            "runtime-functions",
+            "guid() / now() / utc_now() / random()",
+            "Variables",
+            "Built-in runtime variable seed functions.",
+            "These functions can only be used in `runtime` variable declarations. `guid()` produces a unique identifier, `now()` and `utc_now()` produce timestamps, and `random(min, max)` produces a random integer.",
+            """
+            runtime trace_id = guid()
+            runtime started_at = now()
+            runtime timestamp = utc_now()
+            runtime attempt = random(1, 100)
+            """,
+            ["guid", "now", "utc_now", "random", "uuid", "timestamp", "unique"],
+            ["guid()", "now()", "utc_now()", "random("],
+            "Function"),
+        new(
+            "string-interpolation",
+            "$\"...{expression}...\"",
+            "Flow",
+            "Interpolated string literals with embedded expressions.",
+            "Use `$\"...\"` to embed variables and expressions inside string literals. Indexer and member access are supported inside `{...}` holes. Available in flow code, `log`/`warn`/`error`, and `request.body` assignments.",
+            """
+            log $"User {sent[0].email}"
+            request.body = $"{{\"name\":\"{created_name}\"}}"
+            log $"Status: {response.status}"
+            """,
+            ["interpolation", "string", "template", "format", "$\""],
+            ["$\""],
+            "Value"),
+        new(
+            "break-continue",
+            "break / continue",
+            "Flow",
+            "Exit or skip iterations in loops and retry blocks.",
+            "Use `break` to exit the nearest enclosing `foreach`, `while`, or `retry` block. Use `continue` to skip to the next iteration. Both are commonly used inside retry blocks to stop retrying on success.",
+            """
+            retry 3 with backoff {
+              let sent = request.send()
+              if sent.status == 200 { break }
+            }
+
+            foreach item in [0..9] {
+              if item == 5 { continue }
+              log item
+            }
+            """,
+            ["break", "continue", "exit loop", "stop", "skip iteration"],
+            ["break", "continue"],
+            "Keyword"),
     ];
 
     public static IReadOnlyList<ForRestLanguageHelpEntry> GetEntries()

@@ -295,8 +295,20 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         bool multiMutationPrompt =
             ContainsAny(normalized, "request.send", "request.method", "request.url", "request.body", "request.content_type", "request.headers", "expect") &&
             (methodCount >= 2 || urlCount >= 2);
+        bool advancedFlowPrompt =
+            ContainsAny(normalized,
+                "retry", "backoff", "on error", "on status", "error handler", "status handler",
+                "parallel", "concurrent", "simultaneously",
+                "pipe", "pipeline", "sequential",
+                "define", "call", "subroutine", "reusable",
+                "switch", "case", "branch",
+                "snapshot", "named send", "as \"",
+                "extract json", "extract header", "extract regex",
+                "stash columns", "declare columns",
+                "import", "scenario",
+                "secret");
 
-        return apiSurfacePrompt || batchPrompt || docHeavyPrompt || multiMutationPrompt;
+        return apiSurfacePrompt || batchPrompt || docHeavyPrompt || multiMutationPrompt || advancedFlowPrompt;
     }
 
     private static IReadOnlyList<string> BuildTargetedDocQueries(
@@ -360,6 +372,20 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             apiSurfacePrompt ||
             batchPrompt;
 
+        bool retryPrompt = ContainsAny(normalized, "retry", "backoff", "delay", "retries");
+        bool errorHandlerPrompt = ContainsAny(normalized, "on error", "error handler", "catch error", "handle error");
+        bool statusHandlerPrompt = ContainsAny(normalized, "on status", "status handler", "429", "401", "rate limit");
+        bool parallelPrompt = ContainsAny(normalized, "parallel", "concurrent", "simultaneously");
+        bool pipePrompt = ContainsAny(normalized, "pipe", "pipeline", "sequential chain");
+        bool defineCallPrompt = ContainsAny(normalized, "define", "call", "subroutine", "reusable");
+        bool namedSendPrompt = ContainsAny(normalized, "named send", "as \"", "labeled send", "label send");
+        bool snapshotPrompt = ContainsAny(normalized, "snapshot", "save snapshot");
+        bool stashColumnsPrompt = ContainsAny(normalized, "stash columns", "declare columns");
+        bool switchPrompt = ContainsAny(normalized, "switch", "case", "branch on");
+        bool extractFlowPrompt = ContainsAny(normalized, "extract json", "extract header", "extract regex", "extract from");
+        bool collectionPrompt = ContainsAny(normalized, ".where(", ".select(", ".first(", ".any(", ".count(", "collection", ".orderby(");
+        bool secretPrompt = ContainsAny(normalized, "secret");
+
         List<string> queries = [];
         AddQuery(queries, "api-surface-crud", apiSurfacePrompt);
         AddQuery(queries, "batch-stash-loop", batchPrompt);
@@ -373,6 +399,19 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         AddQuery(queries, "expect", expectPrompt);
         AddQuery(queries, "request-send", !apiSurfacePrompt || batchPrompt || urlPrompt);
         AddQuery(queries, "max-send-iterations", batchPrompt);
+        AddQuery(queries, "retry-flow", retryPrompt);
+        AddQuery(queries, "on-error", errorHandlerPrompt);
+        AddQuery(queries, "on-status", statusHandlerPrompt);
+        AddQuery(queries, "parallel-sends", parallelPrompt);
+        AddQuery(queries, "pipe-syntax", pipePrompt);
+        AddQuery(queries, "define-call", defineCallPrompt);
+        AddQuery(queries, "named-send", namedSendPrompt);
+        AddQuery(queries, "snapshot-save", snapshotPrompt);
+        AddQuery(queries, "stash-columns", stashColumnsPrompt);
+        AddQuery(queries, "switch", switchPrompt);
+        AddQuery(queries, "extract-flow", extractFlowPrompt);
+        AddQuery(queries, "collection-methods", collectionPrompt);
+        AddQuery(queries, "secret", secretPrompt);
 
         return queries;
     }
