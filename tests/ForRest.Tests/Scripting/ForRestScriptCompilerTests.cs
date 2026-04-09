@@ -1724,4 +1724,114 @@ public sealed class ForRestScriptCompilerTests
         StringAssert.Contains(result.Payload.Request.PreRequestScript, "for (int __retryIdx");
         Assert.IsFalse(result.Payload.Request.PreRequestScript.Contains("Task.Delay"));
     }
+
+    [TestMethod]
+    public void Compile_on_status_handler_with_nested_retry_block()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Handler Nesting"
+            method GET
+            url "https://api.example.test/items"
+
+            on status 429 {
+              warn "Rate limited"
+              retry 2 with backoff {
+                request.send()
+                if response.status != 429 {
+                  break
+                }
+              }
+            }
+
+            retry 3 with backoff {
+              let sent = request.send() as "primary"
+              if sent.status >= 200 and sent.status < 500 {
+                break
+              }
+              warn $"Attempt returned {sent.status}, retrying..."
+            }
+
+            if response.status == 200 {
+              stash.Status = response.status
+              stash.Commit()
+            }
+
+            expect status == 200 "returns 200"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "response.Status == 429");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "for (int __retryIdx");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "Math.Pow(2,");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "stash.Commit();");
+    }
+
+    [TestMethod]
+    public void Compile_on_error_and_on_status_handlers_with_top_level_retry_flow()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Full Template"
+            method GET
+            url "https://api.example.test/items"
+            timeout 15000
+            max_send_iterations 5
+
+            runtime trace_id = guid()
+
+            header "Accept" = "application/json"
+
+            on error {
+              error "Request failed unexpectedly"
+            }
+
+            on status 429 {
+              warn "Rate limited"
+            }
+
+            retry 3 with backoff {
+              let sent = request.send() as "primary"
+              if sent.status >= 200 and sent.status < 500 {
+                break
+              }
+            }
+
+            if response.status == 200 {
+              log $"Success -- status {response.status}"
+              stash.Status = response.status
+              stash.Body = strings.Substring(response.body, 0, 80)
+              stash.Commit()
+            }
+
+            expect status == 200 "returns 200"
+            expect header "Content-Type" contains "json" "json response"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "try {");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "catch");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "response.Status == 429");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "SendAsync(\"primary\")");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "stash.Commit();");
+        StringAssert.Contains(result.Payload.Request.TestsScript, "response.Status == 200");
+    }
 }
