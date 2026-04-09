@@ -55,6 +55,7 @@ public sealed class RequestWorkbenchDocumentFactoryTests
 		StringAssert.Contains(created.RequestSource, "runtime started_at = now()");
 		StringAssert.Contains(created.RequestSource, "on error {");
 		StringAssert.Contains(created.RequestSource, "on status 429 {");
+		StringAssert.Contains(created.RequestSource, "retry 2 with backoff {");
 		StringAssert.Contains(created.RequestSource, "retry 3 with backoff {");
 		StringAssert.Contains(created.RequestSource, "let sent = request.send() as \"primary\"");
 		StringAssert.Contains(created.RequestSource, "stash.Status = response.status");
@@ -84,6 +85,7 @@ public sealed class RequestWorkbenchDocumentFactoryTests
 		StringAssert.Contains(created.RequestSource, "# Declarative error and status handlers run after the main flow.");
 		StringAssert.Contains(created.RequestSource, "on error {");
 		StringAssert.Contains(created.RequestSource, "on status 429 {");
+		StringAssert.Contains(created.RequestSource, "retry 2 with backoff {");
 		StringAssert.Contains(created.RequestSource, "# Send with automatic retry on transient failures.");
 		StringAssert.Contains(created.RequestSource, "retry 3 with backoff {");
 		StringAssert.Contains(created.RequestSource, "let sent = request.send() as \"primary\"");
