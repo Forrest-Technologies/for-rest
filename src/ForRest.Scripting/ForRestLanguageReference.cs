@@ -1142,7 +1142,9 @@ internal static class ForRestLanguageReference
             """,
             ["let", "variable", "assign", "declare", "local"],
             ["let"],
-            "Keyword"),
+            "Keyword",
+            "let ${1:name} = ${0}",
+            true),
         new(
             "log-warn-error",
             "log / warn / error",
@@ -1157,7 +1159,9 @@ internal static class ForRestLanguageReference
             """,
             ["log", "warn", "error", "console", "trace", "debug", "print"],
             ["log", "warn", "error"],
-            "Keyword"),
+            "Keyword",
+            "log ${0}",
+            true),
         new(
             "tests-api",
             "tests.Assert / tests.Equal",
@@ -1171,7 +1175,9 @@ internal static class ForRestLanguageReference
             """,
             ["tests", "assert", "equal", "assertion", "programmatic test"],
             ["tests.Assert", "tests.Equal"],
-            "Method"),
+            "Method",
+            "tests.Assert(${1:condition}, \"${0:label}\")",
+            true),
         new(
             "runtime-functions",
             "guid() / now() / utc_now() / random()",
@@ -1186,7 +1192,9 @@ internal static class ForRestLanguageReference
             """,
             ["guid", "now", "utc_now", "random", "uuid", "timestamp", "unique"],
             ["guid()", "now()", "utc_now()", "random("],
-            "Function"),
+            "Function",
+            "runtime ${1:name} = guid()",
+            true),
         new(
             "string-interpolation",
             "$\"...{expression}...\"",
@@ -1200,7 +1208,9 @@ internal static class ForRestLanguageReference
             """,
             ["interpolation", "string", "template", "format", "$\""],
             ["$\""],
-            "Value"),
+            "Value",
+            "$\"${0}\"",
+            true),
         new(
             "break-continue",
             "break / continue",
@@ -1220,7 +1230,9 @@ internal static class ForRestLanguageReference
             """,
             ["break", "continue", "exit loop", "stop", "skip iteration"],
             ["break", "continue"],
-            "Keyword"),
+            "Keyword",
+            "break",
+            false),
     ];
 
     public static IReadOnlyList<ForRestLanguageHelpEntry> GetEntries()
