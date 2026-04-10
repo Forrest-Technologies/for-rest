@@ -1233,6 +1233,79 @@ internal static class ForRestLanguageReference
             "Keyword",
             "break",
             false),
+        new(
+            "ai-providers",
+            "AI providers",
+            "AI",
+            "Every AI provider For-Rest supports out of the box, with default endpoints and transports.",
+            """
+            For-Rest talks to every AI provider through the OpenAI .NET SDK, so any host that exposes an OpenAI-compatible /chat/completions (and, for some, /responses) endpoint works. Configure under `[ai]` in settings.toml:
+
+            Supported `provider =` values (with aliases):
+            - `openai`                                     default https://api.openai.com/v1, transport responses
+            - `azure_openai` (alias `azure`)               endpoint required, transport responses, needs deployment_name
+            - `grok` (aliases `xai`, `x-ai`, `x_ai`)       default https://api.x.ai/v1, transport responses
+            - `groq`                                       default https://api.groq.com/openai/v1, transport chat
+            - `deepseek`                                   default https://api.deepseek.com/v1, transport chat
+            - `mistral`                                    default https://api.mistral.ai/v1, transport chat
+            - `openrouter`                                 default https://openrouter.ai/api/v1, transport chat
+            - `gemini` (aliases `google`, `google-gemini`) default https://generativelanguage.googleapis.com/v1beta/openai, transport responses
+            - `anthropic` (alias `claude`)                 default https://api.anthropic.com/v1, transport chat
+            - `custom` (alias `openai-compatible`)         endpoint required, transport chat
+
+            Paste-the-full-URL is safe: For-Rest strips trailing `/responses` or `/chat/completions` so a base URI is what the SDK actually gets. `api =` accepts `responses`, `chat`, or `chat_completions`; leave it blank and For-Rest picks the right default for the selected provider. `custom_headers` lets you add provider-specific auth/versioning headers (see the AI custom headers entry).
+            """,
+            """
+            [ai]
+            enabled = true
+            provider = "openrouter"
+            api = "chat"
+            model = "anthropic/claude-3.5-sonnet"
+            api_key = "or-..."
+            custom_headers = "HTTP-Referer: https://for-rest.dev; X-Title: For-Rest"
+            """,
+            [
+                "ai", "provider", "openai", "azure", "azure_openai", "grok", "xai", "x.ai",
+                "groq", "deepseek", "mistral", "openrouter", "gemini", "google", "anthropic",
+                "claude", "custom", "openai-compatible", "settings", "endpoint", "model",
+            ],
+            ["provider", "ai", "openai", "grok", "groq", "deepseek", "mistral", "openrouter", "gemini", "anthropic", "claude", "custom"],
+            "Keyword",
+            "provider = \"${1|openai,azure_openai,grok,groq,deepseek,mistral,openrouter,gemini,anthropic,custom|}\"",
+            true),
+        new(
+            "ai-custom-headers",
+            "ai custom_headers",
+            "AI",
+            "Inject extra HTTP headers into every outbound AI request (OpenRouter, Anthropic, internal gateways).",
+            """
+            `custom_headers` under `[ai]` is a single string of `Name: value` pairs separated by `;` or newlines. For-Rest parses them into a dictionary and installs a per-try pipeline policy on the OpenAIClient that calls `request.Headers.Set(name, value)` on every outbound AI call.
+
+            Use it when a provider or gateway needs headers that are not the bearer token:
+            - OpenRouter ranking credit: `HTTP-Referer: https://your.app; X-Title: Your App`
+            - Anthropic API versioning: `anthropic-version: 2023-06-01`
+            - Internal gateways / tenancy: `X-Tenant: acme; X-Trace: for-rest`
+
+            Header names are case-insensitive; later entries overwrite earlier ones. Empty value strings are allowed for headers that just need to exist.
+            """,
+            """
+            [ai]
+            enabled = true
+            provider = "anthropic"
+            api = "chat"
+            model = "claude-3-5-sonnet-latest"
+            api_key = "sk-ant-..."
+            custom_headers = "anthropic-version: 2023-06-01"
+            """,
+            [
+                "ai", "custom", "headers", "custom_headers", "anthropic-version",
+                "HTTP-Referer", "X-Title", "openrouter", "anthropic", "gateway",
+                "pipeline", "policy",
+            ],
+            ["custom_headers", "headers"],
+            "Keyword",
+            "custom_headers = \"${1:Header-Name}: ${2:value}\"",
+            true),
     ];
 
     public static IReadOnlyList<ForRestLanguageHelpEntry> GetEntries()
@@ -1316,6 +1389,8 @@ internal static class ForRestLanguageReference
         builder.AppendLine();
         AppendPromptSection(builder, "Helpers", Entries.Where(entry => entry.Category is "Data" or "Security" or "Variables"));
         builder.AppendLine();
+        AppendPromptSection(builder, "AI providers", Entries.Where(entry => entry.Category == "AI"));
+        builder.AppendLine();
         builder.AppendLine("If a requested feature is not listed, treat it as unsupported and prefer the documented syntax.");
         return builder.ToString().Trim();
     }
@@ -1333,6 +1408,7 @@ internal static class ForRestLanguageReference
             "Data",
             "Security",
             "Assertions",
+            "AI",
         ];
 
         foreach (string category in categoryOrder)
