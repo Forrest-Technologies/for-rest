@@ -1,5 +1,6 @@
 #pragma warning disable MEAI001
 #pragma warning disable OPENAI001
+using System.ClientModel;
 using System.IO;
 using System.Net.Sockets;
 using Microsoft.Agents.AI;
@@ -142,15 +143,72 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         catch (Exception exception)
         {
             await ResetSessionAsync(request.ConversationId);
+            string providerDetail = TryExtractProviderErrorDetail(exception);
             runtime.DebugTrace.AddSection("Executor exception", exception.ToString());
+            if (!string.IsNullOrWhiteSpace(providerDetail))
+            {
+                runtime.DebugTrace.AddSection("Provider error body", providerDetail);
+            }
+
+            string userMessage = string.IsNullOrWhiteSpace(providerDetail)
+                ? $"AI request failed: {exception.Message}"
+                : $"AI request failed: {exception.Message}{Environment.NewLine}Provider response body:{Environment.NewLine}{providerDetail}";
+
             return new(
                 Succeeded: false,
-                ResponseText: $"AI request failed: {exception.Message}",
+                ResponseText: userMessage,
                 Issues: runtime.Issues,
                 SessionReset: true,
                 AutonomousEditRecoveryAttempts: 0,
                 DebugTrace: runtime.DebugTrace.Snapshot());
         }
+    }
+
+    /// <summary>
+    /// When the underlying OpenAI-compatible transport throws, the real
+    /// failure detail (e.g. xAI / Groq / Anthropic's 400-body explaining
+    /// exactly which field was rejected) lives on
+    /// <see cref="ClientResultException.GetRawResponse"/> — not
+    /// <see cref="Exception.Message"/>, which is always the terse
+    /// "Service request failed. Status: ...". Walk the full inner-exception
+    /// chain because <c>FunctionInvokingChatClient</c> and
+    /// <c>ChatClientAgent</c> wrap the original SDK exception a few layers
+    /// deep before it reaches us.
+    /// </summary>
+    private static string TryExtractProviderErrorDetail(Exception? exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is ClientResultException clientResultException)
+            {
+                try
+                {
+                    var raw = clientResultException.GetRawResponse();
+                    if (raw is null)
+                    {
+                        continue;
+                    }
+
+                    string? body = raw.Content?.ToString();
+                    if (string.IsNullOrWhiteSpace(body))
+                    {
+                        continue;
+                    }
+
+                    // Keep the surfaced detail bounded — some providers
+                    // echo request payloads back in their error responses.
+                    return body.Length > 4_096 ? body[..4_096] + "…" : body;
+                }
+                catch
+                {
+                    // If we can't read the body for any reason (stream
+                    // already consumed, buffer disposed, etc.) fall back
+                    // to the next layer.
+                }
+            }
+        }
+
+        return string.Empty;
     }
 
     private async Task<(AgentSession Session, bool SessionReset)> GetOrCreateSessionAsync(
