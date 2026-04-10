@@ -15,6 +15,7 @@ internal static class ForRestFlowScriptCompiler
         "call",
         "continue",
         "define",
+        "delay",
         "__flow",
         "console",
         "convert",
@@ -30,6 +31,7 @@ internal static class ForRestFlowScriptCompiler
         "extract",
         "false",
         "from",
+        "fuzz",
         "Guid",
         "if",
         "import",
@@ -43,6 +45,7 @@ internal static class ForRestFlowScriptCompiler
         "object",
         "on",
         "parallel",
+        "payloads",
         "pipe",
         "regex",
         "Regex",
@@ -289,6 +292,12 @@ internal static class ForRestFlowScriptCompiler
             }
 
             if (TryCompileLogStatement(builder, statementText, "Error", locals))
+            {
+                index += consumedLineCount;
+                continue;
+            }
+
+            if (TryCompileDelayStatement(builder, statementText, locals))
             {
                 index += consumedLineCount;
                 continue;
@@ -703,6 +712,31 @@ internal static class ForRestFlowScriptCompiler
         builder.Append('(');
         builder.Append(TranslateExpression(expression, locals));
         builder.AppendLine(");");
+        return true;
+    }
+
+    private static bool TryCompileDelayStatement(
+        StringBuilder builder,
+        string trimmed,
+        HashSet<string> locals)
+    {
+        if (!TryReadKeywordRemainder(trimmed, "delay", out var expression, allowOpenParenStart: true))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            builder.AppendLine("/* delay: missing expression */");
+            return true;
+        }
+
+        // Generates: await Task.Delay((int)Math.Max(0, (long)(<expression>)));
+        // Clamp to non-negative and cast through long so the DSL accepts double,
+        // long, and int expressions consistently without overflow surprises.
+        builder.Append("await System.Threading.Tasks.Task.Delay((int)System.Math.Max(0L, (long)(");
+        builder.Append(TranslateExpression(expression, locals));
+        builder.AppendLine(")));");
         return true;
     }
 
@@ -3412,6 +3446,7 @@ internal static class ForRestFlowScriptCompiler
                StartsWithKeywordBoundary(trimmed, "log", allowOpenParenStart: true) ||
                StartsWithKeywordBoundary(trimmed, "warn", allowOpenParenStart: true) ||
                StartsWithKeywordBoundary(trimmed, "error", allowOpenParenStart: true) ||
+               StartsWithKeywordBoundary(trimmed, "delay", allowOpenParenStart: true) ||
                string.Equals(trimmed, "break", StringComparison.Ordinal) ||
                string.Equals(trimmed, "continue", StringComparison.Ordinal) ||
                TryFindAssignmentIndex(trimmed, out _);
@@ -3438,7 +3473,8 @@ internal static class ForRestFlowScriptCompiler
 
         return string.Equals(trimmed, "log", StringComparison.Ordinal) ||
                string.Equals(trimmed, "warn", StringComparison.Ordinal) ||
-               string.Equals(trimmed, "error", StringComparison.Ordinal);
+               string.Equals(trimmed, "error", StringComparison.Ordinal) ||
+               string.Equals(trimmed, "delay", StringComparison.Ordinal);
     }
 
     private static bool StartsWithContinuationToken(string trimmed)

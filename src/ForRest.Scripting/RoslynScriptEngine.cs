@@ -153,6 +153,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 crypto = new CryptoApi(),
                 regex = new RegexApi(),
                 random = new RandomApi(),
+                payloads = new PayloadsApi(),
                 workspace = new WorkspaceApi(
                     request.Workspace,
                     variablesApi,

@@ -1234,6 +1234,79 @@ internal static class ForRestLanguageReference
             "break",
             false),
         new(
+            "delay",
+            "delay",
+            "Flow",
+            "Pause execution for N milliseconds (true async delay).",
+            "Use `delay <expression>` to pause the script for a precise number of milliseconds. The expression may be a literal number, a variable, or an arithmetic expression that evaluates to a number. The compiler emits `await Task.Delay((int)...)` so the pause is a real async wait — no busy-looping — and values are clamped to be non-negative. Handy for manual backoffs, rate-limit throttling, replay timing tests, or spacing out fuzzer iterations.",
+            """
+            # Literal pause
+            delay 1000
+
+            # Expression pause based on a runtime variable
+            runtime backoff_ms = 250
+            foreach attempt in [0..4] {
+              delay backoff_ms * (attempt + 1)
+              let sent = request.send()
+              if sent.status == 200 { break }
+            }
+            """,
+            ["delay", "sleep", "wait", "backoff", "pause", "throttle", "timing"],
+            ["delay"],
+            "Keyword",
+            "delay ${1:1000}",
+            true),
+        new(
+            "payloads",
+            "payloads",
+            "Security",
+            "Curated bug bounty / security test payload catalog with custom category support.",
+            "`payloads` is a script-facing helper that exposes built-in fuzzing corpora for common web vulnerability classes. Every list is documented publicly (SecLists, OWASP WSTG, Burp Intruder) and intended for *authorized* testing only. Use the named properties (`payloads.sqli`, `payloads.xss`, `payloads.path_traversal`, `payloads.command_injection`, `payloads.ssti`, `payloads.open_redirect`, `payloads.xxe`, `payloads.nosqli`, `payloads.crlf_injection`, `payloads.ssrf`) or call `payloads.Category(name)` / `payloads.Combine(...)` for dynamic lookups. Custom categories can be injected via the script host so teams can override the defaults with their own wordlists.",
+            """
+            # Straightforward SQLi fuzz of a query parameter
+            foreach p in payloads.sqli {
+              request.url = $"https://api.example.test/search?q={p}"
+              let sent = request.send()
+              if sent.status >= 500 { warn $"possible sqli: {p}" }
+            }
+
+            # Combine multiple categories with an extra literal, then stash findings
+            foreach p in payloads.Combine("xss", "ssti", "custom-payload") {
+              request.body = $"{{\"name\":\"{p}\"}}"
+              let sent = request.send()
+              if sent.body contains "error in template" {
+                stash row = { "category": "ssti", "payload": p, "status": sent.status }
+              }
+            }
+            """,
+            ["payloads", "fuzz", "fuzzing", "sqli", "xss", "ssti", "path traversal", "command injection", "ssrf", "xxe", "bug bounty", "security", "pentest", "owasp"],
+            ["payloads"],
+            "Value",
+            "payloads.${1|sqli,xss,path_traversal,command_injection,ssti,open_redirect,xxe,nosqli,crlf_injection,ssrf|}",
+            true),
+        new(
+            "fuzz-loop",
+            "fuzz loop",
+            "Security",
+            "Iterate a payload category against a named target location.",
+            "ForRest does not (yet) have a dedicated `fuzz` block; use a documented `foreach` + `payloads` pattern instead. The loop can target any mutation surface: `request.url`, `request.body`, `request.headers[\"X-Name\"]`, or a nested JSON path. Pair it with `retry` for flaky hosts, `delay` for rate-limited targets, and `stash` for capturing findings.",
+            """
+            # Fuzz a header with an SSRF corpus and stash any reflected URLs
+            foreach p in payloads.ssrf {
+              request.headers["X-Forwarded-For"] = p
+              delay 250                        # courteous rate limit
+              let sent = request.send()
+              if sent.status == 200 and sent.body contains p {
+                stash row = { "header": "X-Forwarded-For", "payload": p }
+              }
+            }
+            """,
+            ["fuzz", "fuzzer", "attack", "payload loop", "intruder", "pen test"],
+            ["fuzz"],
+            "Snippet",
+            "foreach p in payloads.${1|sqli,xss,path_traversal,command_injection,ssti,open_redirect,xxe,nosqli,crlf_injection,ssrf|} {\n  request.${2|url,body,headers[\"X-Test\"]|} = p\n  delay ${3:250}\n  let sent = request.send()\n  if sent.status >= 500 { warn $\"possible hit: {p}\" }\n}",
+            true),
+        new(
             "ai-providers",
             "AI providers",
             "AI",
