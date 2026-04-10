@@ -951,8 +951,9 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
 
         IReadOnlyDictionary<string, string> headers = settings.Provider.CustomHeaders;
         bool hasHeaders = headers.Count > 0;
+        bool needsGrokCompat = settings.Provider.ProviderKind == AiProviderKind.Grok;
 
-        if (string.IsNullOrWhiteSpace(endpoint) && !hasHeaders)
+        if (string.IsNullOrWhiteSpace(endpoint) && !hasHeaders && !needsGrokCompat)
         {
             return new OpenAIClient(settings.ApiKey.Value);
         }
@@ -966,6 +967,17 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         if (hasHeaders)
         {
             options.AddPolicy(new CustomHeaderPolicy(headers), PipelinePosition.PerTry);
+        }
+
+        if (needsGrokCompat)
+        {
+            // xAI's /v1/chat/completions and /v1/responses accept a strict
+            // subset of the OpenAI payload. The OpenAI SDK sends fields
+            // (parallel_tool_calls, store, response_format, reasoning on
+            // non-reasoning models, metadata, previous_response_id,
+            // text.format) that xAI 400s on. Rewrite the outbound body
+            // once, before transport, to keep the request working.
+            options.AddPolicy(new GrokCompatibilityPolicy(), PipelinePosition.BeforeTransport);
         }
 
         return new OpenAIClient(new ApiKeyCredential(settings.ApiKey.Value), options);
@@ -1003,6 +1015,211 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
 
                 message.Request.Headers.Set(header.Key, header.Value ?? string.Empty);
             }
+        }
+    }
+
+    /// <summary>
+    /// Pipeline policy that rewrites outbound Chat Completions / Responses
+    /// request bodies so they're compatible with xAI's stricter payload
+    /// surface. Applied only when the provider is Grok so we don't touch
+    /// any other OpenAI-compatible vendor.
+    /// </summary>
+    public sealed class GrokCompatibilityPolicy : PipelinePolicy
+    {
+        /// <summary>
+        /// Public entry point so unit tests can exercise the sanitizer
+        /// without spinning up a full pipeline. Returns the rewritten
+        /// body, or <c>null</c> when no modification was needed.
+        /// </summary>
+        public static byte[]? SanitizeRequestBody(byte[] bodyBytes)
+        {
+            return TryBuildSanitizedBody(bodyBytes ?? [], out byte[]? rewritten) ? rewritten : null;
+        }
+
+
+        /// <summary>
+        /// Top-level field names that xAI's chat and responses endpoints
+        /// historically reject. Kept as a single list rather than two per
+        /// transport because the cost of stripping a field that would
+        /// already have been absent is zero.
+        /// </summary>
+        private static readonly string[] StripTopLevelFields =
+        [
+            "parallel_tool_calls",
+            "store",
+            "response_format",
+            "metadata",
+            "previous_response_id",
+            "reasoning",
+        ];
+
+        public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            TryRewrite(message);
+            ProcessNext(message, pipeline, currentIndex);
+        }
+
+        public override async ValueTask ProcessAsync(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            await TryRewriteAsync(message);
+            await ProcessNextAsync(message, pipeline, currentIndex);
+        }
+
+        private static void TryRewrite(PipelineMessage message)
+        {
+            if (!TryCaptureBody(message, out byte[]? bodyBytes) || bodyBytes is null || bodyBytes.Length == 0)
+            {
+                return;
+            }
+
+            if (TryBuildSanitizedBody(bodyBytes, out byte[]? rewritten) && rewritten is not null)
+            {
+                ReplaceBody(message, rewritten);
+            }
+        }
+
+        private static async Task TryRewriteAsync(PipelineMessage message)
+        {
+            byte[]? bodyBytes = await TryCaptureBodyAsync(message);
+            if (bodyBytes is null || bodyBytes.Length == 0)
+            {
+                return;
+            }
+
+            if (TryBuildSanitizedBody(bodyBytes, out byte[]? rewritten) && rewritten is not null)
+            {
+                ReplaceBody(message, rewritten);
+            }
+        }
+
+        private static bool TryCaptureBody(PipelineMessage message, out byte[]? bytes)
+        {
+            bytes = null;
+            if (message.Request?.Content is not BinaryContent content)
+            {
+                return false;
+            }
+
+            try
+            {
+                using MemoryStream buffer = new();
+                content.WriteTo(buffer, default);
+                bytes = buffer.ToArray();
+                return bytes.Length > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static async Task<byte[]?> TryCaptureBodyAsync(PipelineMessage message)
+        {
+            if (message.Request?.Content is not BinaryContent content)
+            {
+                return null;
+            }
+
+            try
+            {
+                using MemoryStream buffer = new();
+                await content.WriteToAsync(buffer, default);
+                return buffer.ToArray();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void ReplaceBody(PipelineMessage message, byte[] bytes)
+        {
+            if (message.Request is null)
+            {
+                return;
+            }
+
+            message.Request.Content = BinaryContent.Create(BinaryData.FromBytes(bytes));
+            message.Request.Headers.Set("Content-Length", bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        private static bool TryBuildSanitizedBody(byte[] bodyBytes, out byte[]? rewritten)
+        {
+            rewritten = null;
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(bodyBytes);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return false;
+                }
+
+                bool modified = false;
+                using MemoryStream output = new();
+                using (Utf8JsonWriter writer = new(output))
+                {
+                    writer.WriteStartObject();
+                    foreach (JsonProperty property in doc.RootElement.EnumerateObject())
+                    {
+                        string name = property.Name;
+                        if (Array.Exists(
+                                StripTopLevelFields,
+                                field => string.Equals(field, name, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            modified = true;
+                            continue;
+                        }
+
+                        // Special-case the Responses API `text` object:
+                        // xAI rejects the `text.format` subtree.
+                        if (string.Equals(name, "text", StringComparison.OrdinalIgnoreCase) &&
+                            property.Value.ValueKind == JsonValueKind.Object)
+                        {
+                            if (TryRewriteTextField(property.Value, writer, out bool textModified))
+                            {
+                                modified |= textModified;
+                                continue;
+                            }
+                        }
+
+                        property.WriteTo(writer);
+                    }
+
+                    writer.WriteEndObject();
+                }
+
+                if (!modified)
+                {
+                    return false;
+                }
+
+                rewritten = output.ToArray();
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static bool TryRewriteTextField(JsonElement textElement, Utf8JsonWriter writer, out bool modified)
+        {
+            modified = false;
+            writer.WritePropertyName("text");
+            writer.WriteStartObject();
+            foreach (JsonProperty property in textElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "format", StringComparison.OrdinalIgnoreCase))
+                {
+                    modified = true;
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+            return true;
         }
     }
 }
