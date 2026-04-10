@@ -75,7 +75,7 @@
     </Style>
 
     <Style x:Key="StatusBarBorderStyle" TargetType="Border">
-        <Setter Property="Padding" Value="{OnPlatform Android='8,4', Default='2,2'}" />
+        <Setter Property="Padding" Value="{OnPlatform Android='14,10', Default='2,2'}" />
         <Setter Property="BackgroundColor" Value="{DynamicResource ThemeStatusBackgroundColor}" />
         <Setter Property="Stroke" Value="{DynamicResource ThemeStatusBorderColor}" />
     </Style>
@@ -198,6 +198,18 @@
         <Setter Property="MinimumHeightRequest" Value="36" />
         <Setter Property="BorderWidth" Value="1" />
         <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSurfaceMutedColor}" />
+        <Setter Property="BorderColor" Value="{DynamicResource ThemeBorderColor}" />
+        <Setter Property="TextColor" Value="{DynamicResource ThemeTextPrimaryColor}" />
+    </Style>
+
+    <Style x:Key="MobileFooterButtonStyle" TargetType="Button">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="MinimumHeightRequest" Value="32" />
+        <Setter Property="BorderWidth" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
         <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSurfaceMutedColor}" />
         <Setter Property="BorderColor" Value="{DynamicResource ThemeBorderColor}" />
         <Setter Property="TextColor" Value="{DynamicResource ThemeTextPrimaryColor}" />
