@@ -108,7 +108,7 @@ public sealed class SettingsTomlDocumentServiceTests
 				Ai = new ForRestAiSettings(Enabled: true)
 			});
 
-		StringAssert.Contains(editorText, "OpenAI endpoint is optional");
+		StringAssert.Contains(editorText, "OpenAI and Grok endpoints are optional");
 		StringAssert.Contains(editorText, "Azure OpenAI requires endpoint and deployment_name");
 	}
 
