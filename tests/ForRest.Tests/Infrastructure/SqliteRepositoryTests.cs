@@ -37,6 +37,19 @@ public sealed class SqliteRepositoryTests
     [TestMethod]
     public async Task Workspace_repository_round_trips_state_and_protects_secret_values()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // SqliteWorkspaceRepository round-trips secrets through DPAPI
+            // (System.Security.Cryptography.ProtectedData), which only works
+            // on Windows. The production repository is Windows-only too —
+            // see the [SupportedOSPlatform("windows")] attribute on
+            // SqliteWorkspaceRepository and the CA1416 analyzer hint it
+            // emits elsewhere. Skip cleanly on macOS / Linux CI so the
+            // test run stays green across platforms.
+            Assert.Inconclusive("SqliteWorkspaceRepository + DPAPI secret protection is Windows-only.");
+            return;
+        }
+
         var database = new SqliteAppDatabase(NullLogger<SqliteAppDatabase>.Instance);
         var repository = new SqliteWorkspaceRepository(database, NullLogger<SqliteWorkspaceRepository>.Instance);
         var state = CreateState();
