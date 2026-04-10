@@ -181,6 +181,9 @@ public sealed class ThemeConfigParser
 
 				parsed = current with { StreamResponses = streamResponses };
 				return true;
+			case "custom_headers":
+				parsed = current with { CustomHeaders = value };
+				return true;
 			default:
 				return SetMessage($"ignored setting entry '{key}'", out message);
 		}

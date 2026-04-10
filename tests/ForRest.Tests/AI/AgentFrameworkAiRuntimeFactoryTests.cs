@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ForRest.Services.AI;
 
 namespace ForRest.Tests.AI;
@@ -115,6 +116,93 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
         Assert.AreEqual(0, runtime.Issues.Count);
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Provider: Grok");
         StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Transport: Responses");
+    }
+
+    [TestMethod]
+    public void Prepare_builds_custom_provider_agent_with_custom_headers()
+    {
+        IAiRuntimeFactory factory = CreateFactory();
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.Custom,
+                Transport = AiConversationTransport.ChatCompletions,
+                Endpoint = "https://ai-gateway.example.internal/v1",
+                Model = "gpt-4o-mini",
+                CustomHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["X-Tenant"] = "acme",
+                    ["X-Trace"] = "for-rest",
+                },
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "gateway-secret",
+                IsConfigured = true,
+            },
+        };
+
+        AiPreparedRuntime runtime = factory.Prepare(settings, "Answer syntax questions.");
+
+        Assert.IsNotNull(runtime.Agent);
+        Assert.AreEqual(0, runtime.Issues.Count);
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Provider: Custom");
+    }
+
+    [TestMethod]
+    public void Prepare_reports_missing_endpoint_for_custom_provider()
+    {
+        IAiRuntimeFactory factory = CreateFactory();
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.Custom,
+                Transport = AiConversationTransport.ChatCompletions,
+                Model = "some-model",
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "k",
+                IsConfigured = true,
+            },
+        };
+
+        AiPreparedRuntime runtime = factory.Prepare(settings, "Answer syntax questions.");
+
+        Assert.IsNull(runtime.Agent);
+        Assert.IsTrue(runtime.Issues.Any(static issue => issue.Code == "ai.custom.endpoint.required"));
+    }
+
+    [TestMethod]
+    public void Prepare_builds_openrouter_agent_with_default_endpoint()
+    {
+        IAiRuntimeFactory factory = CreateFactory();
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.OpenRouter,
+                Transport = AiConversationTransport.ChatCompletions,
+                Endpoint = AiProviderDefaults.OpenRouterEndpoint,
+                Model = "anthropic/claude-3.5-sonnet",
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "or-key",
+                IsConfigured = true,
+            },
+        };
+
+        AiPreparedRuntime runtime = factory.Prepare(settings, "Answer syntax questions.");
+
+        Assert.IsNotNull(runtime.Agent);
+        Assert.AreEqual(0, runtime.Issues.Count);
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Provider: OpenRouter");
     }
 
     [TestMethod]
