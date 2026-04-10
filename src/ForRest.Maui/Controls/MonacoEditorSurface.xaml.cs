@@ -1828,6 +1828,66 @@ public partial class MonacoEditorSurface : ContentView
 
           return btoa(binary);
         },
+        encodeUtf8ToBase64: function (value) {
+          const bytes = new TextEncoder().encode(String(value ?? ""));
+          let binary = "";
+          for (let index = 0; index < bytes.length; index++) {
+            binary += String.fromCharCode(bytes[index]);
+          }
+
+          return btoa(binary);
+        },
+        selectAllText: function () {
+          if (!this.editor || !this.model) {
+            return false;
+          }
+
+          const lineCount = Math.max(1, this.model.getLineCount());
+          const lastLineMaxColumn = Math.max(1, this.model.getLineMaxColumn(lineCount));
+          this.editor.setSelection({
+            startLineNumber: 1,
+            startColumn: 1,
+            endLineNumber: lineCount,
+            endColumn: lastLineMaxColumn
+          });
+          this.editor.focus();
+          return true;
+        },
+        getSelectedTextAsBase64: function () {
+          if (!this.editor || !this.model) {
+            return null;
+          }
+
+          const selection = this.editor.getSelection();
+          if (!selection) {
+            return null;
+          }
+
+          const text = this.model.getValueInRange(selection) || "";
+          return this.encodeUtf8ToBase64(text);
+        },
+        deleteSelectedText: function () {
+          if (this.pendingReadOnly || !this.editor || !this.model) {
+            return false;
+          }
+
+          const selection = this.editor.getSelection();
+          if (!selection ||
+              (selection.startLineNumber === selection.endLineNumber &&
+               selection.startColumn === selection.endColumn)) {
+            return false;
+          }
+
+          this.editor.executeEdits("forrest-host-cut", [
+            {
+              range: selection,
+              text: "",
+              forceMoveMarkers: true
+            }
+          ]);
+          this.editor.focus();
+          return true;
+        },
         focus: function () {
           if (this.editor) {
             this.editor.focus();
@@ -1962,7 +2022,10 @@ public partial class MonacoEditorSurface : ContentView
 	private bool _contentHydrated;
 	private bool _shouldApplyTextToEditor = true;
 #if ANDROID
-	private const int AndroidPasteMenuItemId = 1;
+	private const int AndroidSelectAllMenuItemId = 1;
+	private const int AndroidCopyMenuItemId = 2;
+	private const int AndroidCutMenuItemId = 3;
+	private const int AndroidPasteMenuItemId = 4;
 	private Android.Webkit.WebView? _androidPlatformWebView;
 	private PopupMenu? _androidEditorContextMenu;
 #endif
@@ -2761,6 +2824,110 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		return PasteTextFromHostAsync(clipboardText, "android-context-menu");
 	}
+
+	private async Task<bool> HasAndroidEditorSelectionAsync()
+	{
+		await EnsureEditorReadyAsync();
+		if (!_isEditorReady)
+		{
+			return false;
+		}
+
+		string? result = await EvaluateOptionalAsync(
+			"window.forRestHost && window.forRestHost.editor ? " +
+			"(function(){var s=window.forRestHost.editor.getSelection();return s && !(s.startLineNumber===s.endLineNumber && s.startColumn===s.endColumn) ? 'true' : 'false';})() : 'false';");
+		return result?.Contains("true", StringComparison.OrdinalIgnoreCase) == true;
+	}
+
+	private async Task<bool> SelectAllTextFromAndroidContextMenuAsync()
+	{
+		await EnsureEditorReadyAsync();
+		if (!_isEditorReady)
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Select-all request skipped because the editor is not ready.");
+			return false;
+		}
+
+		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		string? result = await EvaluateOptionalAsync(
+			"window.forRestHost ? (window.forRestHost.selectAllText() ? 'true' : 'false') : 'false';");
+		bool selected = result?.Contains("true", StringComparison.OrdinalIgnoreCase) == true;
+		Debug.WriteLine($"[MonacoEditorSurface/Android] Select-all request completed. Selected={selected}");
+		return selected;
+	}
+
+	private async Task<bool> CopySelectedTextFromAndroidContextMenuAsync()
+	{
+		await EnsureEditorReadyAsync();
+		if (!_isEditorReady)
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Copy request skipped because the editor is not ready.");
+			return false;
+		}
+
+		string? result = await EvaluateOptionalAsync(
+			"window.forRestHost && window.forRestHost.editor ? window.forRestHost.getSelectedTextAsBase64() : null;");
+		string selectedText = ParseJavascriptBase64Result(result ?? string.Empty);
+		if (string.IsNullOrEmpty(selectedText))
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Copy request completed with empty selection.");
+			return false;
+		}
+
+		try
+		{
+			await Clipboard.Default.SetTextAsync(selectedText);
+		}
+		catch (Exception exception)
+		{
+			Debug.WriteLine($"[MonacoEditorSurface/Android] Copy request failed to write to clipboard. Exception={exception.Message}");
+			return false;
+		}
+
+		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		Debug.WriteLine($"[MonacoEditorSurface/Android] Copy request completed. Length={selectedText.Length}");
+		return true;
+	}
+
+	private async Task<bool> CutSelectedTextFromAndroidContextMenuAsync()
+	{
+		if (_pendingIsReadOnly)
+		{
+			return await CopySelectedTextFromAndroidContextMenuAsync();
+		}
+
+		await EnsureEditorReadyAsync();
+		if (!_isEditorReady)
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Cut request skipped because the editor is not ready.");
+			return false;
+		}
+
+		string? result = await EvaluateOptionalAsync(
+			"window.forRestHost && window.forRestHost.editor ? window.forRestHost.getSelectedTextAsBase64() : null;");
+		string selectedText = ParseJavascriptBase64Result(result ?? string.Empty);
+		if (string.IsNullOrEmpty(selectedText))
+		{
+			Debug.WriteLine("[MonacoEditorSurface/Android] Cut request completed with empty selection.");
+			return false;
+		}
+
+		try
+		{
+			await Clipboard.Default.SetTextAsync(selectedText);
+		}
+		catch (Exception exception)
+		{
+			Debug.WriteLine($"[MonacoEditorSurface/Android] Cut request failed to write to clipboard. Exception={exception.Message}");
+			return false;
+		}
+
+		await EvaluateOptionalAsync(
+			"window.forRestHost ? (window.forRestHost.deleteSelectedText() ? 'true' : 'false') : 'false';");
+		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		Debug.WriteLine($"[MonacoEditorSurface/Android] Cut request completed. Length={selectedText.Length}");
+		return true;
+	}
 #endif
 
 	private async Task EnsureTextAppliedAsync(EditorStatePayload state)
@@ -2853,37 +3020,25 @@ public partial class MonacoEditorSurface : ContentView
 
 	private async void OnAndroidWebViewLongClick(object? sender, Android.Views.View.LongClickEventArgs e)
 	{
-		if (_pendingIsReadOnly)
-		{
-			e.Handled = false;
-			return;
-		}
-
 		e.Handled = true;
-		Debug.WriteLine("[MonacoEditorSurface/Android] WebView long-press detected. Showing native editor context menu.");
+		Debug.WriteLine($"[MonacoEditorSurface/Android] WebView long-press detected. Showing native editor context menu. ReadOnly={_pendingIsReadOnly}");
 		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
 		await ShowAndroidEditorContextMenuAsync();
 	}
 
 	private async void OnAndroidWebViewContextClick(object? sender, Android.Views.View.ContextClickEventArgs e)
 	{
-		if (_pendingIsReadOnly)
-		{
-			e.Handled = false;
-			return;
-		}
-
 		e.Handled = true;
-		Debug.WriteLine("[MonacoEditorSurface/Android] WebView context-click detected. Showing native editor context menu.");
+		Debug.WriteLine($"[MonacoEditorSurface/Android] WebView context-click detected. Showing native editor context menu. ReadOnly={_pendingIsReadOnly}");
 		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
 		await ShowAndroidEditorContextMenuAsync();
 	}
 
 	private async Task ShowAndroidEditorContextMenuAsync()
 	{
-		if (_pendingIsReadOnly || _androidPlatformWebView is null)
+		if (_androidPlatformWebView is null)
 		{
-			Debug.WriteLine("[MonacoEditorSurface/Android] Context menu request skipped because the editor is read-only or the platform WebView is unavailable.");
+			Debug.WriteLine("[MonacoEditorSurface/Android] Context menu request skipped because the platform WebView is unavailable.");
 			return;
 		}
 
@@ -2896,9 +3051,12 @@ public partial class MonacoEditorSurface : ContentView
 		{
 		}
 
-		Debug.WriteLine(
-			$"[MonacoEditorSurface/Android] Showing native editor context menu. ClipboardHasText={!string.IsNullOrEmpty(clipboardText)} ClipboardLength={clipboardText?.Length ?? 0}");
+		bool hasSelection = await HasAndroidEditorSelectionAsync();
 
+		Debug.WriteLine(
+			$"[MonacoEditorSurface/Android] Showing native editor context menu. ReadOnly={_pendingIsReadOnly} HasSelection={hasSelection} ClipboardHasText={!string.IsNullOrEmpty(clipboardText)} ClipboardLength={clipboardText?.Length ?? 0}");
+
+		bool isReadOnly = _pendingIsReadOnly;
 		await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(() =>
 		{
 			if (_androidPlatformWebView is null)
@@ -2908,20 +3066,42 @@ public partial class MonacoEditorSurface : ContentView
 
 			DismissAndroidEditorContextMenu();
 			PopupMenu popupMenu = new(_androidPlatformWebView.Context, _androidPlatformWebView, GravityFlags.Start);
-			IMenuItem? pasteMenuItem = popupMenu.Menu?.Add(0, AndroidPasteMenuItemId, 0, "Paste");
-			pasteMenuItem?.SetEnabled(!string.IsNullOrEmpty(clipboardText));
+			IMenuItem? selectAllMenuItem = popupMenu.Menu?.Add(0, AndroidSelectAllMenuItemId, 0, "Select All");
+			selectAllMenuItem?.SetEnabled(true);
+			IMenuItem? copyMenuItem = popupMenu.Menu?.Add(0, AndroidCopyMenuItemId, 1, "Copy");
+			copyMenuItem?.SetEnabled(hasSelection);
+			IMenuItem? cutMenuItem = popupMenu.Menu?.Add(0, AndroidCutMenuItemId, 2, "Cut");
+			cutMenuItem?.SetEnabled(hasSelection && !isReadOnly);
+			IMenuItem? pasteMenuItem = popupMenu.Menu?.Add(0, AndroidPasteMenuItemId, 3, "Paste");
+			pasteMenuItem?.SetEnabled(!string.IsNullOrEmpty(clipboardText) && !isReadOnly);
 
 			EventHandler<PopupMenu.MenuItemClickEventArgs>? menuItemClickHandler = null;
 			EventHandler<PopupMenu.DismissEventArgs>? dismissHandler = null;
 			menuItemClickHandler = async (_, args) =>
 			{
-				if (args.Item?.ItemId != AndroidPasteMenuItemId)
+				int itemId = args.Item?.ItemId ?? 0;
+				switch (itemId)
 				{
-					return;
+					case AndroidSelectAllMenuItemId:
+						args.Handled = true;
+						await SelectAllTextFromAndroidContextMenuAsync();
+						break;
+					case AndroidCopyMenuItemId:
+						args.Handled = true;
+						await CopySelectedTextFromAndroidContextMenuAsync();
+						break;
+					case AndroidCutMenuItemId:
+						args.Handled = true;
+						await CutSelectedTextFromAndroidContextMenuAsync();
+						break;
+					case AndroidPasteMenuItemId:
+						args.Handled = true;
+						await PasteTextFromAndroidContextMenuAsync(clipboardText);
+						break;
+					default:
+						return;
 				}
 
-				args.Handled = true;
-				await PasteTextFromAndroidContextMenuAsync(clipboardText);
 				popupMenu.Dismiss();
 			};
 			dismissHandler = (_, _) =>

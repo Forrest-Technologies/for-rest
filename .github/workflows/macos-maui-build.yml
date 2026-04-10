@@ -1,0 +1,148 @@
+name: macOS MAUI Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-maui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: macos-latest
+    outputs:
+      build_configuration: ${{ steps.version.outputs.build_configuration }}
+      version_label: ${{ steps.version.outputs.version_label }}
+      app_display_version: ${{ steps.version.outputs.app_display_version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      file_version: ${{ steps.version.outputs.file_version }}
+      build_timestamp_utc: ${{ steps.version.outputs.build_timestamp_utc }}
+    steps:
+      - name: Compute branch version metadata
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE_LABEL=$(TZ=America/New_York date +%Y-%m-%d)
+          APP_DISPLAY_VERSION=$(TZ=America/New_York date +%Y.%-m.%-d)
+          APP_VERSION=$(TZ=America/New_York date +%Y%m%d)
+          FILE_VERSION="${APP_DISPLAY_VERSION}.0"
+          BUILD_TIMESTAMP_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          if [[ "${GITHUB_REF_NAME}" == "master" ]]; then
+            BUILD_CONFIGURATION=Release
+            VERSION_LABEL="${DATE_LABEL}"
+          else
+            BUILD_CONFIGURATION=Debug
+            VERSION_LABEL="${DATE_LABEL}-beta"
+          fi
+
+          {
+            echo "build_configuration=${BUILD_CONFIGURATION}"
+            echo "version_label=${VERSION_LABEL}"
+            echo "app_display_version=${APP_DISPLAY_VERSION}"
+            echo "app_version=${APP_VERSION}"
+            echo "file_version=${FILE_VERSION}"
+            echo "build_timestamp_utc=${BUILD_TIMESTAMP_UTC}"
+          } >> "${GITHUB_OUTPUT}"
+
+  build:
+    needs: prepare
+    runs-on: macos-latest
+    env:
+      MACCATALYST_TFM: net10.0-maccatalyst
+      MAC_ONLY_BUILD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: preview
+          global-json-file: global.json
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          dotnet --info
+          dotnet --list-sdks
+          sw_vers
+
+      - name: Restore MAUI workloads
+        shell: bash
+        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:ForRestMacOnly=${MAC_ONLY_BUILD}
+
+      - name: Run core unit tests
+        shell: bash
+        run: dotnet test tests/ForRest.Tests/ForRest.Tests.csproj -c Debug
+
+      - name: Build licensing function
+        shell: bash
+        run: dotnet build src/ForRest.Licensing.Functions/ForRest.Licensing.Functions.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
+
+      - name: Build licensing admin tool
+        shell: bash
+        run: dotnet build src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
+
+      - name: Build macOS (Mac Catalyst) app
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTPUT_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/ci/maccatalyst"
+          dotnet build src/ForRest.Maui/ForRest.Maui.csproj \
+            -c "${{ needs.prepare.outputs.build_configuration }}" \
+            -f "${MACCATALYST_TFM}" \
+            -p:ForRestMacOnly=${MAC_ONLY_BUILD} \
+            -p:ContinuousIntegrationBuild=true \
+            -p:CreatePackage=false \
+            -p:EnableCodeSigning=false \
+            -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} \
+            -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} \
+            -p:Version="${{ needs.prepare.outputs.version_label }}" \
+            -p:InformationalVersion="${{ needs.prepare.outputs.version_label }}" \
+            -p:FileVersion=${{ needs.prepare.outputs.file_version }} \
+            -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} \
+            -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} \
+            -p:ForRestLicenseServiceBaseUrl="${{ vars.FORREST_LICENSE_SERVICE_BASE_URL }}" \
+            -p:ForRestLicenseIssuer="${{ vars.FORREST_LICENSE_ISSUER }}" \
+            -p:ForRestLicenseAudience="${{ vars.FORREST_LICENSE_AUDIENCE }}" \
+            -p:ForRestLicenseSigningPublicKeyPem="${{ vars.FORREST_LICENSE_SIGNING_PUBLIC_KEY_PEM }}" \
+            -p:ForRestLicenseBuildGraceDays="${{ vars.FORREST_LICENSE_BUILD_GRACE_DAYS }}" \
+            -p:ForRestLicenseOfflineLeaseDays="${{ vars.FORREST_LICENSE_OFFLINE_LEASE_DAYS }}" \
+            -p:ForRestLicenseRefreshIntervalDays="${{ vars.FORREST_LICENSE_REFRESH_INTERVAL_DAYS }}" \
+            -p:ForRestLicenseClockSkewMinutes="${{ vars.FORREST_LICENSE_CLOCK_SKEW_MINUTES }}" \
+            -p:ForRestLicenseMaxActivations="${{ vars.FORREST_LICENSE_MAX_ACTIVATIONS }}" \
+            -o "${OUTPUT_DIRECTORY}"
+
+      - name: Package macOS build output
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_BASE="for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst"
+          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/ci/maccatalyst"
+          RELEASE_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release/maccatalyst"
+          mkdir -p "${RELEASE_DIRECTORY}"
+
+          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 3 -type d -name '*.app' | head -n 1 || true)
+          if [[ -z "${APP_BUNDLE}" ]]; then
+            echo "No .app bundle was produced by the Mac Catalyst build." >&2
+            ls -R "${BUILD_DIRECTORY}" >&2 || true
+            exit 1
+          fi
+
+          ZIP_PATH="${RELEASE_DIRECTORY}/${ARTIFACT_BASE}.zip"
+          rm -f "${ZIP_PATH}"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst
+          path: artifacts/release/maccatalyst/*
+          if-no-files-found: error
+          retention-days: 3
