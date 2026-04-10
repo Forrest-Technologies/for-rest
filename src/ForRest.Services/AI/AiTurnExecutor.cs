@@ -1,5 +1,7 @@
 #pragma warning disable MEAI001
 #pragma warning disable OPENAI001
+using System.IO;
+using System.Net.Sockets;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI.Responses;
@@ -31,6 +33,8 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
 {
     private const int MaxAutomaticContinuationAttempts = 4;
     private const int MaxAutonomousEditRecoveryAttempts = 1;
+    private const int MaxTransientNetworkRetryAttempts = 3;
+    private static readonly TimeSpan InitialTransientNetworkRetryDelay = TimeSpan.FromSeconds(1);
     private const string AutomaticContinuationPrompt = "Continue the previous answer from exactly where it stopped. Do not repeat prior text, do not add a preamble, and do not ask a follow-up question. Output only the remaining continuation.";
     private const string IncompleteResponseNote = "The AI response ended before completion after multiple automatic continuation attempts.";
     private const string TimedOutResponseNote = "AI request timed out before completion.";
@@ -88,12 +92,23 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
                 session,
                 runtime.DebugTrace,
                 cancellationToken);
+            AiActiveDocumentSnapshot? latestDocument = request.ActiveDocumentHost?.GetActiveDocument();
+            bool documentChangedDuringTurn =
+                initialDocument is not null &&
+                latestDocument is not null &&
+                HasActiveDocumentChanged(initialDocument.SourceText, latestDocument.SourceText);
             bool editCompleted = !ShouldAttemptAutonomousEditRecovery(
                 request,
                 initialDocument,
-                request.ActiveDocumentHost?.GetActiveDocument());
+                latestDocument);
+            // A length-truncated response after the document was already updated
+            // still represents a successful edit from the user's point of view.
+            bool succeeded = (turnOutcome.Response.Completed && editCompleted) ||
+                             (editCompleted && documentChangedDuringTurn);
+            runtime.DebugTrace.AddLine(
+                $"Turn success evaluation: responseCompleted={turnOutcome.Response.Completed} editCompleted={editCompleted} documentChangedDuringTurn={documentChangedDuringTurn} succeeded={succeeded}");
             return new(
-                Succeeded: turnOutcome.Response.Completed && editCompleted,
+                Succeeded: succeeded,
                 ResponseText: BuildFinalResponseText(turnOutcome.Response.Text, turnOutcome.Response.Response),
                 Issues: runtime.Issues,
                 SessionReset: sessionReset,
@@ -221,7 +236,11 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         CancellationToken cancellationToken)
     {
         debugTrace.AddSection("Agent prompt [initial]", prompt);
-        AgentResponse response = await agent.RunAsync(prompt, session, cancellationToken: cancellationToken);
+        AgentResponse response = await RunWithTransientNetworkRetryAsync(
+            () => agent.RunAsync(prompt, session, cancellationToken: cancellationToken),
+            "Agent prompt [initial]",
+            debugTrace,
+            cancellationToken);
         string accumulatedText = ExtractResponseText(response);
         debugTrace.AddSection("Agent response [initial]", DescribeAgentResponse(response, accumulatedText));
 
@@ -232,13 +251,73 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
                 response.ContinuationToken is not null
                     ? "Used provider continuation token."
                     : AutomaticContinuationPrompt);
-            response = await ContinueResponseAsync(agent, session, response, cancellationToken);
+            AgentResponse priorResponse = response;
+            response = await RunWithTransientNetworkRetryAsync(
+                () => ContinueResponseAsync(agent, session, priorResponse, cancellationToken),
+                $"Agent continuation [{attempt + 1}]",
+                debugTrace,
+                cancellationToken);
             string nextText = ExtractResponseText(response);
             accumulatedText = MergeContinuationText(accumulatedText, nextText);
             debugTrace.AddSection($"Agent response continuation [{attempt + 1}]", DescribeAgentResponse(response, nextText));
         }
 
         return new(response, accumulatedText, Completed: !ShouldAutomaticallyContinue(response));
+    }
+
+    private static async Task<T> RunWithTransientNetworkRetryAsync<T>(
+        Func<Task<T>> operation,
+        string operationLabel,
+        AiDebugTraceBuffer debugTrace,
+        CancellationToken cancellationToken)
+    {
+        TimeSpan delay = InitialTransientNetworkRetryDelay;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (Exception exception) when (attempt < MaxTransientNetworkRetryAttempts && IsTransientNetworkFailure(exception))
+            {
+                debugTrace.AddLine(
+                    $"Transient network failure on {operationLabel} attempt {attempt}: {exception.GetType().Name} - {exception.Message}. Retrying in {delay.TotalSeconds:0.#}s.");
+                try
+                {
+                    await Task.Delay(delay, cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    throw;
+                }
+
+                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 8000));
+            }
+        }
+    }
+
+    private static bool IsTransientNetworkFailure(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case HttpRequestException httpRequestException
+                    when httpRequestException.StatusCode is null ||
+                         httpRequestException.StatusCode == HttpStatusCode.RequestTimeout ||
+                         httpRequestException.StatusCode == HttpStatusCode.TooManyRequests ||
+                         (int)httpRequestException.StatusCode.Value >= 500:
+                    return true;
+                case SocketException:
+                    return true;
+                case IOException ioException when ioException is not FileNotFoundException and not DirectoryNotFoundException:
+                    return true;
+                case TimeoutException:
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task<TurnExecutionOutcome> RunAgentWithAutonomousEditRecoveryAsync(
