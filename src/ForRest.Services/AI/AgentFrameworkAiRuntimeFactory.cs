@@ -1027,6 +1027,18 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
     public sealed class GrokCompatibilityPolicy : PipelinePolicy
     {
         /// <summary>
+        /// AsyncLocal buffer that captures the most recent outbound
+        /// request body this policy processed on the current logical
+        /// call stack. The runtime factory sets a fresh buffer at the
+        /// start of each turn and reads it back into the debug trace
+        /// regardless of whether the call succeeded. Bounded to 32 KiB
+        /// so a runaway tool schema can't blow up the trace.
+        /// </summary>
+        internal static readonly AsyncLocal<StringBuilder?> LastOutboundBody = new();
+
+        private const int MaxCapturedBodyLength = 32 * 1024;
+
+        /// <summary>
         /// Public entry point so unit tests can exercise the sanitizer
         /// without spinning up a full pipeline. Returns the rewritten
         /// body, or <c>null</c> when no modification was needed.
@@ -1036,21 +1048,35 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             return TryBuildSanitizedBody(bodyBytes ?? [], out byte[]? rewritten) ? rewritten : null;
         }
 
-
         /// <summary>
         /// Top-level field names that xAI's chat and responses endpoints
-        /// historically reject. Kept as a single list rather than two per
-        /// transport because the cost of stripping a field that would
-        /// already have been absent is zero.
+        /// unconditionally reject regardless of model. `reasoning` is
+        /// *not* in this list — see <see cref="IsNonReasoningModel"/>
+        /// for the model-aware handling.
         /// </summary>
-        private static readonly string[] StripTopLevelFields =
+        private static readonly string[] UnconditionalStripTopLevelFields =
         [
             "parallel_tool_calls",
             "store",
             "response_format",
             "metadata",
             "previous_response_id",
-            "reasoning",
+        ];
+
+        /// <summary>
+        /// Tool parameter JSON Schema keywords that xAI's schema validator
+        /// historically chokes on. Stripped recursively from every tool
+        /// definition's <c>parameters</c> block.
+        /// </summary>
+        private static readonly string[] StripSchemaKeywords =
+        [
+            "$schema",
+            "$id",
+            "$defs",
+            "definitions",
+            "title",
+            "examples",
+            "default",
         ];
 
         public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
@@ -1072,10 +1098,14 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                 return;
             }
 
+            byte[] effectiveBytes = bodyBytes;
             if (TryBuildSanitizedBody(bodyBytes, out byte[]? rewritten) && rewritten is not null)
             {
                 ReplaceBody(message, rewritten);
+                effectiveBytes = rewritten;
             }
+
+            CaptureForDebugTrace(effectiveBytes);
         }
 
         private static async Task TryRewriteAsync(PipelineMessage message)
@@ -1086,9 +1116,41 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                 return;
             }
 
+            byte[] effectiveBytes = bodyBytes;
             if (TryBuildSanitizedBody(bodyBytes, out byte[]? rewritten) && rewritten is not null)
             {
                 ReplaceBody(message, rewritten);
+                effectiveBytes = rewritten;
+            }
+
+            CaptureForDebugTrace(effectiveBytes);
+        }
+
+        private static void CaptureForDebugTrace(byte[] bytes)
+        {
+            StringBuilder? buffer = LastOutboundBody.Value;
+            if (buffer is null)
+            {
+                // No active diagnostic scope — nothing to capture. This is
+                // the common production path.
+                return;
+            }
+
+            try
+            {
+                string text = System.Text.Encoding.UTF8.GetString(bytes);
+                if (text.Length > MaxCapturedBodyLength)
+                {
+                    text = text[..MaxCapturedBodyLength] + "…";
+                }
+
+                buffer.Clear();
+                buffer.Append(text);
+            }
+            catch
+            {
+                // Ignore — diagnostic capture must never mutate the
+                // outbound request.
             }
         }
 
@@ -1154,6 +1216,15 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                     return false;
                 }
 
+                string? model = null;
+                if (doc.RootElement.TryGetProperty("model", out JsonElement modelElement) &&
+                    modelElement.ValueKind == JsonValueKind.String)
+                {
+                    model = modelElement.GetString();
+                }
+
+                bool isNonReasoningModel = IsNonReasoningModel(model);
+
                 bool modified = false;
                 using MemoryStream output = new();
                 using (Utf8JsonWriter writer = new(output))
@@ -1162,11 +1233,29 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                     foreach (JsonProperty property in doc.RootElement.EnumerateObject())
                     {
                         string name = property.Name;
+
                         if (Array.Exists(
-                                StripTopLevelFields,
+                                UnconditionalStripTopLevelFields,
                                 field => string.Equals(field, name, StringComparison.OrdinalIgnoreCase)))
                         {
                             modified = true;
+                            continue;
+                        }
+
+                        // `reasoning` is only invalid on non-reasoning
+                        // models (e.g. grok-4-fast-non-reasoning). On
+                        // grok-4-fast-reasoning / grok-4 / future
+                        // reasoning variants it's a legitimate request
+                        // parameter and must be preserved.
+                        if (string.Equals(name, "reasoning", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (isNonReasoningModel)
+                            {
+                                modified = true;
+                                continue;
+                            }
+
+                            property.WriteTo(writer);
                             continue;
                         }
 
@@ -1178,6 +1267,20 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                             if (TryRewriteTextField(property.Value, writer, out bool textModified))
                             {
                                 modified |= textModified;
+                                continue;
+                            }
+                        }
+
+                        // Sanitize every tool's parameter schema so xAI's
+                        // stricter JSON Schema validator doesn't 400 on
+                        // OpenAI-SDK-generated `$defs` / `additionalProperties`
+                        // / `strict` artifacts.
+                        if (string.Equals(name, "tools", StringComparison.OrdinalIgnoreCase) &&
+                            property.Value.ValueKind == JsonValueKind.Array)
+                        {
+                            if (TryRewriteToolsArray(property.Value, writer, out bool toolsModified))
+                            {
+                                modified |= toolsModified;
                                 continue;
                             }
                         }
@@ -1202,6 +1305,26 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             }
         }
 
+        /// <summary>
+        /// A Grok model is "non-reasoning" if its id explicitly says so.
+        /// xAI publishes reasoning and non-reasoning variants with parallel
+        /// names like <c>grok-4-fast-reasoning</c> and
+        /// <c>grok-4-fast-non-reasoning</c>. We only strip the
+        /// <c>reasoning</c> request parameter when the model id contains
+        /// the non-reasoning marker — otherwise we assume reasoning is
+        /// legal and leave the parameter alone.
+        /// </summary>
+        public static bool IsNonReasoningModel(string? model)
+        {
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                return false;
+            }
+
+            return model.Contains("non-reasoning", StringComparison.OrdinalIgnoreCase)
+                || model.Contains("non_reasoning", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool TryRewriteTextField(JsonElement textElement, Utf8JsonWriter writer, out bool modified)
         {
             modified = false;
@@ -1220,6 +1343,184 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
 
             writer.WriteEndObject();
             return true;
+        }
+
+        private static bool TryRewriteToolsArray(JsonElement toolsElement, Utf8JsonWriter writer, out bool modified)
+        {
+            modified = false;
+            writer.WritePropertyName("tools");
+            writer.WriteStartArray();
+            foreach (JsonElement tool in toolsElement.EnumerateArray())
+            {
+                if (tool.ValueKind != JsonValueKind.Object)
+                {
+                    tool.WriteTo(writer);
+                    continue;
+                }
+
+                writer.WriteStartObject();
+                foreach (JsonProperty property in tool.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, "function", StringComparison.OrdinalIgnoreCase) &&
+                        property.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        writer.WritePropertyName("function");
+                        if (WriteSanitizedToolFunction(property.Value, writer))
+                        {
+                            modified = true;
+                        }
+
+                        continue;
+                    }
+
+                    // Top-level Responses API tools are flat (no
+                    // `function` wrapper); sanitize them in place.
+                    if (string.Equals(property.Name, "parameters", StringComparison.OrdinalIgnoreCase) &&
+                        property.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        writer.WritePropertyName("parameters");
+                        if (WriteSanitizedSchema(property.Value, writer))
+                        {
+                            modified = true;
+                        }
+
+                        continue;
+                    }
+
+                    // xAI rejects top-level `strict` on tools.
+                    if (string.Equals(property.Name, "strict", StringComparison.OrdinalIgnoreCase))
+                    {
+                        modified = true;
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            return true;
+        }
+
+        private static bool WriteSanitizedToolFunction(JsonElement functionElement, Utf8JsonWriter writer)
+        {
+            bool modified = false;
+            writer.WriteStartObject();
+            foreach (JsonProperty property in functionElement.EnumerateObject())
+            {
+                // xAI's Chat Completions tool shape rejects `strict: true`
+                // at the function level even though OpenAI supports it.
+                if (string.Equals(property.Name, "strict", StringComparison.OrdinalIgnoreCase))
+                {
+                    modified = true;
+                    continue;
+                }
+
+                if (string.Equals(property.Name, "parameters", StringComparison.OrdinalIgnoreCase) &&
+                    property.Value.ValueKind == JsonValueKind.Object)
+                {
+                    writer.WritePropertyName("parameters");
+                    if (WriteSanitizedSchema(property.Value, writer))
+                    {
+                        modified = true;
+                    }
+
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+            return modified;
+        }
+
+        /// <summary>
+        /// Recursively writes a JSON Schema subtree, stripping keywords
+        /// xAI rejects. Keeps <c>type</c>, <c>properties</c>,
+        /// <c>items</c>, <c>required</c>, <c>description</c>, <c>enum</c>,
+        /// and everything else the validator actually needs.
+        /// </summary>
+        private static bool WriteSanitizedSchema(JsonElement element, Utf8JsonWriter writer)
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                element.WriteTo(writer);
+                return false;
+            }
+
+            bool modified = false;
+            writer.WriteStartObject();
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                string name = property.Name;
+
+                if (Array.Exists(
+                        StripSchemaKeywords,
+                        keyword => string.Equals(keyword, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    modified = true;
+                    continue;
+                }
+
+                // xAI's strict validator rejects `additionalProperties:
+                // false`. Rewrite to `true` (looser) rather than omitting
+                // so custom tool definitions that rely on the key still
+                // round-trip.
+                if (string.Equals(name, "additionalProperties", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (property.Value.ValueKind == JsonValueKind.False)
+                    {
+                        writer.WriteBoolean("additionalProperties", true);
+                        modified = true;
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                    continue;
+                }
+
+                if (property.Value.ValueKind == JsonValueKind.Object)
+                {
+                    writer.WritePropertyName(name);
+                    if (WriteSanitizedSchema(property.Value, writer))
+                    {
+                        modified = true;
+                    }
+
+                    continue;
+                }
+
+                if (property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    writer.WritePropertyName(name);
+                    writer.WriteStartArray();
+                    foreach (JsonElement item in property.Value.EnumerateArray())
+                    {
+                        if (item.ValueKind == JsonValueKind.Object)
+                        {
+                            if (WriteSanitizedSchema(item, writer))
+                            {
+                                modified = true;
+                            }
+                        }
+                        else
+                        {
+                            item.WriteTo(writer);
+                        }
+                    }
+
+                    writer.WriteEndArray();
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+            return modified;
         }
     }
 }
