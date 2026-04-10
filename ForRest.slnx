@@ -11,6 +11,7 @@
     <Project Path="src/ForRest.Plugins.Abstractions/ForRest.Plugins.Abstractions.csproj" />
     <Project Path="src/ForRest.Plugins.Host/ForRest.Plugins.Host.csproj" />
     <Project Path="src/ForRest.Repositories/ForRest.Repositories.csproj" />
+    <Project Path="src/ForRest.Mcp/ForRest.Mcp.csproj" />
     <Project Path="src/ForRest.Scripting/ForRest.Scripting.csproj" />
     <Project Path="src/ForRest.Services/ForRest.Services.csproj" />
     <Project Path="src/ForRest.Shared/ForRest.Shared.csproj" />

@@ -5,11 +5,56 @@ public enum AiProviderKind
     OpenAI,
     AzureOpenAI,
     Grok,
+    Groq,
+    DeepSeek,
+    Mistral,
+    OpenRouter,
+    GoogleGemini,
+    Anthropic,
+    Custom,
 }
 
 public static class AiProviderDefaults
 {
+    public const string OpenAiEndpoint = "https://api.openai.com/v1";
     public const string GrokEndpoint = "https://api.x.ai/v1";
+    public const string GroqEndpoint = "https://api.groq.com/openai/v1";
+    public const string DeepSeekEndpoint = "https://api.deepseek.com/v1";
+    public const string MistralEndpoint = "https://api.mistral.ai/v1";
+    public const string OpenRouterEndpoint = "https://openrouter.ai/api/v1";
+    public const string GoogleGeminiEndpoint = "https://generativelanguage.googleapis.com/v1beta/openai";
+    public const string AnthropicEndpoint = "https://api.anthropic.com/v1";
+
+    public static string? GetDefaultEndpoint(AiProviderKind providerKind)
+    {
+        return providerKind switch
+        {
+            AiProviderKind.Grok => GrokEndpoint,
+            AiProviderKind.Groq => GroqEndpoint,
+            AiProviderKind.DeepSeek => DeepSeekEndpoint,
+            AiProviderKind.Mistral => MistralEndpoint,
+            AiProviderKind.OpenRouter => OpenRouterEndpoint,
+            AiProviderKind.GoogleGemini => GoogleGeminiEndpoint,
+            AiProviderKind.Anthropic => AnthropicEndpoint,
+            _ => null,
+        };
+    }
+
+    public static AiConversationTransport GetPreferredTransport(AiProviderKind providerKind)
+    {
+        // The Responses API is only broadly supported by OpenAI, Azure OpenAI, Grok/xAI,
+        // and Google Gemini's OpenAI-compat layer. Everyone else should default to
+        // chat completions so users who pick a provider and forget to set the transport
+        // still get a working round-trip.
+        return providerKind switch
+        {
+            AiProviderKind.OpenAI => AiConversationTransport.Responses,
+            AiProviderKind.AzureOpenAI => AiConversationTransport.Responses,
+            AiProviderKind.Grok => AiConversationTransport.Responses,
+            AiProviderKind.GoogleGemini => AiConversationTransport.Responses,
+            _ => AiConversationTransport.ChatCompletions,
+        };
+    }
 }
 
 public enum AiConversationTransport
@@ -44,6 +89,9 @@ public sealed record AiProviderSettings
     public string Model { get; init; } = string.Empty;
 
     public string DeploymentName { get; init; } = string.Empty;
+
+    public IReadOnlyDictionary<string, string> CustomHeaders { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed record AiToolSettings

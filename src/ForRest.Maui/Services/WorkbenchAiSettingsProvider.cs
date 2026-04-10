@@ -48,10 +48,11 @@ internal static class ForRestAiSettingsMapper
 			Provider = new AiProviderSettings
 			{
 				ProviderKind = providerKind,
-				Transport = ParseTransport(settings.Api),
+				Transport = ParseTransport(settings.Api, providerKind),
 				Endpoint = NormalizeEndpoint(settings.Endpoint, providerKind),
 				Model = settings.Model.Trim(),
 				DeploymentName = settings.DeploymentName.Trim(),
+				CustomHeaders = ParseCustomHeaders(settings.CustomHeaders),
 			},
 			ApiKey = new AiSecretSetting
 			{
@@ -74,16 +75,25 @@ internal static class ForRestAiSettingsMapper
 		{
 			"azure_openai" or "azure-openai" or "azure" => AiProviderKind.AzureOpenAI,
 			"grok" or "xai" or "x_ai" or "x-ai" or "x.ai" => AiProviderKind.Grok,
+			"groq" => AiProviderKind.Groq,
+			"deepseek" or "deep_seek" or "deep-seek" => AiProviderKind.DeepSeek,
+			"mistral" or "mistralai" or "mistral-ai" or "mistral_ai" => AiProviderKind.Mistral,
+			"openrouter" or "open_router" or "open-router" => AiProviderKind.OpenRouter,
+			"gemini" or "google" or "google_gemini" or "google-gemini" => AiProviderKind.GoogleGemini,
+			"anthropic" or "claude" => AiProviderKind.Anthropic,
+			"custom" or "openai_compatible" or "openai-compatible" => AiProviderKind.Custom,
 			_ => AiProviderKind.OpenAI,
 		};
 	}
 
-	private static AiConversationTransport ParseTransport(string value)
+	private static AiConversationTransport ParseTransport(string value, AiProviderKind providerKind)
 	{
-		return value?.Trim().ToLowerInvariant() switch
+		string? normalized = value?.Trim().ToLowerInvariant();
+		return normalized switch
 		{
-			"chat" or "chat_completions" => AiConversationTransport.ChatCompletions,
-			_ => AiConversationTransport.Responses,
+			"chat" or "chat_completions" or "chat-completions" or "completions" => AiConversationTransport.ChatCompletions,
+			"responses" or "response" => AiConversationTransport.Responses,
+			_ => AiProviderDefaults.GetPreferredTransport(providerKind),
 		};
 	}
 
@@ -92,9 +102,7 @@ internal static class ForRestAiSettingsMapper
 		string trimmed = (value ?? string.Empty).Trim();
 		if (trimmed.Length == 0)
 		{
-			return providerKind == AiProviderKind.Grok
-				? AiProviderDefaults.GrokEndpoint
-				: string.Empty;
+			return AiProviderDefaults.GetDefaultEndpoint(providerKind) ?? string.Empty;
 		}
 
 		trimmed = trimmed.TrimEnd('/');
@@ -120,5 +128,40 @@ internal static class ForRestAiSettingsMapper
 		}
 
 		return trimmed;
+	}
+
+	private static IReadOnlyDictionary<string, string> ParseCustomHeaders(string raw)
+	{
+		Dictionary<string, string> headers = new(StringComparer.OrdinalIgnoreCase);
+		if (string.IsNullOrWhiteSpace(raw))
+		{
+			return headers;
+		}
+
+		// Accept `Name: value` pairs separated by `;` or newlines so the
+		// TOML scalar stays single-line-safe (see ThemeConfigParser).
+		string[] pairs = raw.Split(
+			[';', '\n', '\r'],
+			StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+		foreach (string pair in pairs)
+		{
+			int separator = pair.IndexOf(':');
+			if (separator <= 0)
+			{
+				continue;
+			}
+
+			string name = pair[..separator].Trim();
+			string value = pair[(separator + 1)..].Trim();
+			if (name.Length == 0)
+			{
+				continue;
+			}
+
+			headers[name] = value;
+		}
+
+		return headers;
 	}
 }

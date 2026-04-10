@@ -106,6 +106,109 @@ public sealed class WorkbenchAiSettingsProviderTests
 	}
 
 	[TestMethod]
+	public void ToRuntimeSettings_maps_each_builtin_provider_to_default_endpoint()
+	{
+		(string providerName, AiProviderKind expectedKind, string expectedEndpoint, AiConversationTransport expectedTransport)[] cases =
+		[
+			("openai", AiProviderKind.OpenAI, "", AiConversationTransport.Responses),
+			("groq", AiProviderKind.Groq, "https://api.groq.com/openai/v1", AiConversationTransport.ChatCompletions),
+			("deepseek", AiProviderKind.DeepSeek, "https://api.deepseek.com/v1", AiConversationTransport.ChatCompletions),
+			("mistral", AiProviderKind.Mistral, "https://api.mistral.ai/v1", AiConversationTransport.ChatCompletions),
+			("openrouter", AiProviderKind.OpenRouter, "https://openrouter.ai/api/v1", AiConversationTransport.ChatCompletions),
+			("gemini", AiProviderKind.GoogleGemini, "https://generativelanguage.googleapis.com/v1beta/openai", AiConversationTransport.Responses),
+			("anthropic", AiProviderKind.Anthropic, "https://api.anthropic.com/v1", AiConversationTransport.ChatCompletions),
+		];
+
+		foreach ((string providerName, AiProviderKind expectedKind, string expectedEndpoint, AiConversationTransport expectedTransport) in cases)
+		{
+			ForRestAiSettings settings = new(
+				Enabled: true,
+				Provider: providerName,
+				Api: "",
+				Endpoint: "",
+				Model: "test-model",
+				ApiKey: "k");
+
+			AiSettings runtime = settings.ToRuntimeSettings();
+
+			Assert.AreEqual(expectedKind, runtime.Provider.ProviderKind, providerName);
+			Assert.AreEqual(expectedEndpoint, runtime.Provider.Endpoint, providerName);
+			Assert.AreEqual(expectedTransport, runtime.Provider.Transport, providerName);
+		}
+	}
+
+	[TestMethod]
+	public void ToRuntimeSettings_custom_provider_preserves_user_endpoint()
+	{
+		ForRestAiSettings settings = new(
+			Enabled: true,
+			Provider: "custom",
+			Api: "chat",
+			Endpoint: "https://ai-gateway.example.internal/v1",
+			Model: "gpt-4o-mini",
+			ApiKey: "gw");
+
+		AiSettings runtime = settings.ToRuntimeSettings();
+
+		Assert.AreEqual(AiProviderKind.Custom, runtime.Provider.ProviderKind);
+		Assert.AreEqual("https://ai-gateway.example.internal/v1", runtime.Provider.Endpoint);
+		Assert.AreEqual(AiConversationTransport.ChatCompletions, runtime.Provider.Transport);
+	}
+
+	[TestMethod]
+	public void ToRuntimeSettings_parses_custom_headers_from_semicolon_separated_string()
+	{
+		ForRestAiSettings settings = new(
+			Enabled: true,
+			Provider: "openrouter",
+			Api: "chat",
+			Model: "anthropic/claude-3.5-sonnet",
+			ApiKey: "or-key",
+			CustomHeaders: "HTTP-Referer: https://for-rest.dev; X-Title: For-Rest");
+
+		AiSettings runtime = settings.ToRuntimeSettings();
+
+		Assert.AreEqual(2, runtime.Provider.CustomHeaders.Count);
+		Assert.AreEqual("https://for-rest.dev", runtime.Provider.CustomHeaders["HTTP-Referer"]);
+		Assert.AreEqual("For-Rest", runtime.Provider.CustomHeaders["X-Title"]);
+	}
+
+	[TestMethod]
+	public void ToRuntimeSettings_parses_custom_headers_from_newline_separated_string()
+	{
+		ForRestAiSettings settings = new(
+			Enabled: true,
+			Provider: "anthropic",
+			Api: "chat",
+			Model: "claude-3-5-sonnet-latest",
+			ApiKey: "ak-key",
+			CustomHeaders: "anthropic-version: 2023-06-01\nX-Source: for-rest");
+
+		AiSettings runtime = settings.ToRuntimeSettings();
+
+		Assert.AreEqual(2, runtime.Provider.CustomHeaders.Count);
+		Assert.AreEqual("2023-06-01", runtime.Provider.CustomHeaders["anthropic-version"]);
+		Assert.AreEqual("for-rest", runtime.Provider.CustomHeaders["X-Source"]);
+	}
+
+	[TestMethod]
+	public void ToRuntimeSettings_custom_headers_are_case_insensitive()
+	{
+		ForRestAiSettings settings = new(
+			Enabled: true,
+			Provider: "custom",
+			Api: "chat",
+			Endpoint: "https://example.com/v1",
+			Model: "m",
+			ApiKey: "k",
+			CustomHeaders: "X-Api-Key: one");
+
+		AiSettings runtime = settings.ToRuntimeSettings();
+
+		Assert.IsTrue(runtime.Provider.CustomHeaders.ContainsKey("x-api-key"));
+	}
+
+	[TestMethod]
 	public void GetCurrentSettings_reads_ai_settings_from_config_file()
 	{
 		using TestConfigScope scope = new();

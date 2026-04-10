@@ -1207,6 +1207,123 @@ public sealed class ForRestScriptCompilerTests
     }
 
     [TestMethod]
+    public void Compile_delay_statement_emits_task_delay()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Delay"
+            method GET
+            url "https://api.example.test/health"
+
+            delay 750
+            log "after delay"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "System.Threading.Tasks.Task.Delay");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "750");
+    }
+
+    [TestMethod]
+    public void Compile_delay_statement_supports_expression_and_variables()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Delay Expr"
+            method GET
+            url "https://api.example.test/health"
+
+            runtime backoff_ms = 200
+            foreach attempt in [0..2] {
+              delay backoff_ms * (attempt + 1)
+              let sent = request.send()
+              if sent.status == 200 { break }
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "System.Threading.Tasks.Task.Delay");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "backoff_ms");
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "attempt");
+    }
+
+    [TestMethod]
+    public void Compile_payloads_namespace_is_usable_in_foreach_fuzz_loops()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "SQLi fuzz"
+            method GET
+            url "https://api.example.test/search"
+
+            foreach p in payloads.sqli {
+              request.url = $"https://api.example.test/search?q={p}"
+              let sent = request.send()
+              if sent.status == 500 { warn $"possible sqli: {p}" }
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "payloads.sqli");
+    }
+
+    [TestMethod]
+    public void Compile_payloads_combine_supports_multiple_categories()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Combined fuzz"
+            method POST
+            url "https://api.example.test/echo"
+
+            foreach p in payloads.Combine("xss", "ssti") {
+              request.body = p
+              let sent = request.send()
+              if sent.status >= 500 { warn $"server error for {p}" }
+            }
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        StringAssert.Contains(result.Payload.Request.PreRequestScript, "payloads.Combine");
+    }
+
+    [TestMethod]
     public void Compile_on_error_handler_wraps_flow_in_try_catch()
     {
         var compiler = new ForRestScriptCompiler(new ForRestScriptParser());

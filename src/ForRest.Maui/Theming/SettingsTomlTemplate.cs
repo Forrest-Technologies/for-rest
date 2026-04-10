@@ -20,6 +20,13 @@ public sealed class SettingsTomlTemplate
 	private const string AiSecretKeyName = "api_key";
 	private const string AiSystemPromptKeyName = "system_prompt";
 	private const string AiStreamResponsesKeyName = "stream_responses";
+	private const string AiCustomHeadersKeyName = "custom_headers";
+	private const string McpSectionHeader = "[mcp]";
+	private const string McpEnabledKeyName = "enabled";
+	private const string McpBindAddressKeyName = "bind_address";
+	private const string McpPortKeyName = "port";
+	private const string McpAuthTokenKeyName = "auth_token";
+	private const string McpMaxConcurrentSessionsKeyName = "max_concurrent_sessions";
 	private const string StyleEditorFontSizeKeyName = "editor_font_size";
 	private const string StyleResultPaneTabFontSizeKeyName = "result_pane_tab_font_size";
 	private static readonly Regex ThemeLinePattern = new(
@@ -44,7 +51,10 @@ public sealed class SettingsTomlTemplate
 				$"{StyleResultPaneTabFontSizeKeyName} = {settings.Style.ResultPaneTabFontSize.ToString("0.###", CultureInfo.InvariantCulture)}",
 				string.Empty,
 				BuildAiComment(settings.Ai),
-				.. BuildAiSection(settings.Ai)
+				.. BuildAiSection(settings.Ai),
+				string.Empty,
+				BuildMcpComment(settings.Mcp),
+				.. BuildMcpSection(settings.Mcp)
 			]);
 	}
 
@@ -154,8 +164,8 @@ public sealed class SettingsTomlTemplate
 	private static string BuildAiComment(ForRestAiSettings ai)
 	{
 		return ai.Enabled
-			? "# AI settings are enabled. provider accepts openai, azure_openai, or grok (xai). OpenAI and Grok endpoints are optional (Grok defaults to https://api.x.ai/v1); Azure OpenAI requires endpoint and deployment_name. stream_responses controls the inline typewriter reveal."
-			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider (openai, azure_openai, grok), model, api key, and optional endpoint fields. stream_responses controls the inline typewriter reveal.";
+			? "# AI settings are enabled. provider accepts openai, azure_openai, grok (xai), groq, deepseek, mistral, openrouter, gemini, anthropic, or custom. Most endpoints are optional because For-Rest has sane defaults; Azure OpenAI requires endpoint and deployment_name, custom requires endpoint. Use custom_headers (e.g. \"X-Api-Key: secret; X-Title: For-Rest\") when a provider needs extra headers. stream_responses controls the inline typewriter reveal."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider (openai, azure_openai, grok, groq, deepseek, mistral, openrouter, gemini, anthropic, custom), model, api key, optional endpoint, and optional custom_headers (semicolon-delimited \"Name: value\" pairs). stream_responses controls the inline typewriter reveal.";
 	}
 
 	private static IReadOnlyList<string> BuildAiSection(ForRestAiSettings ai)
@@ -179,6 +189,7 @@ public sealed class SettingsTomlTemplate
 		lines.Add($"{AiDeploymentNameKeyName} = \"{EscapeTomlString(ai.DeploymentName)}\"");
 		lines.Add($"{AiSecretKeyName} = \"{EscapeTomlString(ai.ApiKey)}\"");
 		lines.Add($"{AiSystemPromptKeyName} = \"{EscapeTomlString(ai.SystemPrompt)}\"");
+		lines.Add($"{AiCustomHeadersKeyName} = \"{EscapeTomlString(ai.CustomHeaders)}\"");
 		return lines;
 	}
 
@@ -189,6 +200,7 @@ public sealed class SettingsTomlTemplate
 		bool inThemeSection = false;
 		bool inStyleSection = false;
 		bool inAiSection = false;
+		bool inMcpSection = false;
 
 		for (int index = 0; index < lines.Length; index++)
 		{
@@ -200,10 +212,11 @@ public sealed class SettingsTomlTemplate
 				inThemeSection = string.Equals(trimmedLine, ThemeSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inStyleSection = string.Equals(trimmedLine, StyleSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inMcpSection = string.Equals(trimmedLine, McpSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection && !inStyleSection && !inAiSection)
+			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -240,6 +253,13 @@ public sealed class SettingsTomlTemplate
 					continue;
 				}
 			}
+			else if (inMcpSection)
+			{
+				if (!IsKnownMcpKey(key))
+				{
+					continue;
+				}
+			}
 			else if (!IsKnownAiKey(key))
 			{
 				continue;
@@ -260,6 +280,7 @@ public sealed class SettingsTomlTemplate
 		bool inThemeSection = false;
 		bool inStyleSection = false;
 		bool inAiSection = false;
+		bool inMcpSection = false;
 		HashSet<ShellThemeName> seenThemes = [];
 		HashSet<string> seenStyleKeys = [];
 		HashSet<string> seenAiKeys = [];
@@ -279,10 +300,11 @@ public sealed class SettingsTomlTemplate
 				inThemeSection = string.Equals(trimmedLine, ThemeSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inStyleSection = string.Equals(trimmedLine, StyleSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inMcpSection = string.Equals(trimmedLine, McpSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection && !inStyleSection && !inAiSection)
+			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -341,6 +363,42 @@ public sealed class SettingsTomlTemplate
 				continue;
 			}
 
+			if (inMcpSection)
+			{
+				if (!IsKnownMcpKey(key))
+				{
+					return false;
+				}
+
+				if (string.Equals(key, McpEnabledKeyName, StringComparison.OrdinalIgnoreCase))
+				{
+					if (!bool.TryParse(value, out _))
+					{
+						return false;
+					}
+
+					continue;
+				}
+
+				if (string.Equals(key, McpPortKeyName, StringComparison.OrdinalIgnoreCase) ||
+				    string.Equals(key, McpMaxConcurrentSessionsKeyName, StringComparison.OrdinalIgnoreCase))
+				{
+					if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+					{
+						return false;
+					}
+
+					continue;
+				}
+
+				if (!IsValidStringScalarForAutosave(value))
+				{
+					return false;
+				}
+
+				continue;
+			}
+
 			if (!IsKnownAiKey(key))
 			{
 				return false;
@@ -393,6 +451,8 @@ public sealed class SettingsTomlTemplate
 			return true;
 		}
 
+		// custom_headers is intentionally optional so configs written before
+		// it existed still autosave cleanly. Everything else is required.
 		return seenAiKeys.Contains(AiProviderKeyName) &&
 		       seenAiKeys.Contains(AiApiKeyName) &&
 		       seenAiKeys.Contains(AiEndpointKeyName) &&
@@ -400,6 +460,33 @@ public sealed class SettingsTomlTemplate
 		       seenAiKeys.Contains(AiDeploymentNameKeyName) &&
 		       seenAiKeys.Contains(AiSecretKeyName) &&
 		       seenAiKeys.Contains(AiSystemPromptKeyName);
+	}
+
+	private static string BuildMcpComment(ForRestMcpSettings mcp)
+	{
+		return mcp.Enabled
+			? "# MCP server (desktop-only). Exposes a Model Context Protocol endpoint over TCP so external agents can read the docs, list workspaces, and edit the active request. Bind to 127.0.0.1 unless you understand the exposure. Set auth_token to require `forrest-mcp-auth: <token>` as the first line of every incoming session."
+			: "# MCP server is disabled by default. Set mcp.enabled = true on a desktop build to expose For-Rest over the Model Context Protocol. bind_address defaults to 127.0.0.1 and port defaults to 7341.";
+	}
+
+	private static IReadOnlyList<string> BuildMcpSection(ForRestMcpSettings mcp)
+	{
+		List<string> lines =
+		[
+			McpSectionHeader,
+			$"{McpEnabledKeyName} = {(mcp.Enabled ? "true" : "false")}"
+		];
+
+		if (!mcp.Enabled && !mcp.HasConfiguredValues)
+		{
+			return lines;
+		}
+
+		lines.Add($"{McpBindAddressKeyName} = \"{EscapeTomlString(mcp.BindAddress)}\"");
+		lines.Add($"{McpPortKeyName} = {mcp.Port.ToString(CultureInfo.InvariantCulture)}");
+		lines.Add($"{McpAuthTokenKeyName} = \"{EscapeTomlString(mcp.AuthToken)}\"");
+		lines.Add($"{McpMaxConcurrentSessionsKeyName} = {mcp.MaxConcurrentSessions.ToString(CultureInfo.InvariantCulture)}");
+		return lines;
 	}
 
 	private static bool IsKnownAiKey(string key)
@@ -412,7 +499,17 @@ public sealed class SettingsTomlTemplate
 		       string.Equals(key, AiModelKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiDeploymentNameKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiSecretKeyName, StringComparison.OrdinalIgnoreCase) ||
-		       string.Equals(key, AiSystemPromptKeyName, StringComparison.OrdinalIgnoreCase);
+		       string.Equals(key, AiSystemPromptKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiCustomHeadersKeyName, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool IsKnownMcpKey(string key)
+	{
+		return string.Equals(key, McpEnabledKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, McpBindAddressKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, McpPortKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, McpAuthTokenKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, McpMaxConcurrentSessionsKeyName, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static bool IsKnownStyleKey(string key)

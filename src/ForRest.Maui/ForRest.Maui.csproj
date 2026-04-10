@@ -171,6 +171,13 @@
 		<ProjectReference Include="..\ForRest.Services\ForRest.Services.csproj" />
 	</ItemGroup>
 
+	<!-- MCP server is desktop-only: Windows and Mac Catalyst. Android excluded
+	     because TCP listeners + long-lived background hosts don't play well
+	     with the mobile lifecycle and the user explicitly scoped MCP to desktop. -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' or $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
+		<ProjectReference Include="..\ForRest.Mcp\ForRest.Mcp.csproj" />
+	</ItemGroup>
+
 	<Target Name="ValidateMonacoAssets" BeforeTargets="PrepareForBuild">
 		<Error Condition="!Exists('$(MSBuildProjectDirectory)\Resources\Raw\monaco\vs\loader.js')" Text="Packaged Monaco assets are missing from Resources\Raw\monaco. Run scripts\Update-Monaco.ps1 to restore the local editor bundle." />
 	</Target>

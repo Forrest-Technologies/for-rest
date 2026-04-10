@@ -21,7 +21,8 @@ public sealed record ForRestAiSettings(
 	string DeploymentName = "",
 	string ApiKey = "",
 	string SystemPrompt = "",
-	bool StreamResponses = true)
+	bool StreamResponses = true,
+	string CustomHeaders = "")
 {
 	public bool HasConfiguredValues =>
 		Enabled ||
@@ -32,7 +33,23 @@ public sealed record ForRestAiSettings(
 		!string.IsNullOrWhiteSpace(DeploymentName) ||
 		!string.IsNullOrWhiteSpace(ApiKey) ||
 		!string.IsNullOrWhiteSpace(SystemPrompt) ||
+		!string.IsNullOrWhiteSpace(CustomHeaders) ||
 		!StreamResponses;
+}
+
+public sealed record ForRestMcpSettings(
+	bool Enabled = false,
+	string BindAddress = "127.0.0.1",
+	int Port = 7341,
+	string AuthToken = "",
+	int MaxConcurrentSessions = 4)
+{
+	public bool HasConfiguredValues =>
+		Enabled ||
+		!string.Equals(BindAddress, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+		Port != 7341 ||
+		!string.IsNullOrWhiteSpace(AuthToken) ||
+		MaxConcurrentSessions != 4;
 }
 
 public sealed record ForRestStyleSettings(
@@ -73,6 +90,8 @@ public sealed record ForRestSettings(
 	public ForRestStyleSettings Style { get; init; } = new();
 
 	public ForRestAiSettings Ai { get; init; } = new();
+
+	public ForRestMcpSettings Mcp { get; init; } = new();
 }
 
 public sealed record SettingsTomlLine(
@@ -98,6 +117,7 @@ public sealed record ThemeConfigDocument(
 	string LicenseKey,
 	ForRestStyleSettings Style,
 	ForRestAiSettings Ai,
+	ForRestMcpSettings Mcp,
 	IReadOnlyList<string> Messages);
 
 public sealed record ThemeNormalizationResult(
