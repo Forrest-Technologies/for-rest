@@ -18,6 +18,7 @@ public sealed class RequestWorkbenchStateStore
     };
 
     private readonly string stateFilePath;
+    private readonly SemaphoreSlim saveGate = new(1, 1);
 
     public RequestWorkbenchStateStore(string? customStateFilePath = null)
     {
@@ -110,8 +111,76 @@ public sealed class RequestWorkbenchStateStore
     public async Task SaveAsync(RequestWorkbenchState state, CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(stateFilePath)!);
-        await using var stream = File.Create(stateFilePath);
-        await JsonSerializer.SerializeAsync(stream, state, SerializerOptions, cancellationToken);
+
+        await saveGate.WaitAsync(cancellationToken);
+        try
+        {
+            string tempPath = stateFilePath + ".tmp";
+            await WriteWithRetryAsync(tempPath, state, cancellationToken);
+            ReplaceWithRetry(tempPath, stateFilePath);
+        }
+        finally
+        {
+            saveGate.Release();
+        }
+    }
+
+    private static async Task WriteWithRetryAsync(
+        string path,
+        RequestWorkbenchState state,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 6;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await using FileStream stream = new(
+                    path,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None);
+                await JsonSerializer.SerializeAsync(stream, state, SerializerOptions, cancellationToken);
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(25 * attempt, cancellationToken);
+            }
+            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(25 * attempt, cancellationToken);
+            }
+        }
+    }
+
+    private static void ReplaceWithRetry(string sourcePath, string destinationPath)
+    {
+        const int maxAttempts = 6;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                if (File.Exists(destinationPath))
+                {
+                    File.Replace(sourcePath, destinationPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(sourcePath, destinationPath);
+                }
+
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(25 * attempt);
+            }
+            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(25 * attempt);
+            }
+        }
     }
 
     private static RequestWorkbenchState CreateDefaultState(IReadOnlyList<RequestWorkbenchWorkspaceState> defaults)
