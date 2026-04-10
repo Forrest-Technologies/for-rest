@@ -89,6 +89,35 @@ public sealed class AgentFrameworkAiRuntimeFactoryTests
     }
 
     [TestMethod]
+    public void Prepare_builds_grok_agent_with_response_transport()
+    {
+        IAiRuntimeFactory factory = CreateFactory();
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.Grok,
+                Transport = AiConversationTransport.Responses,
+                Endpoint = AiProviderDefaults.GrokEndpoint,
+                Model = "grok-4-fast-non-reasoning",
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "xai-key",
+                IsConfigured = true,
+            },
+        };
+
+        AiPreparedRuntime runtime = factory.Prepare(settings, "Answer syntax questions.");
+
+        Assert.IsNotNull(runtime.Agent);
+        Assert.AreEqual(0, runtime.Issues.Count);
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Provider: Grok");
+        StringAssert.Contains(runtime.PromptManifest.SystemPrompt, "Transport: Responses");
+    }
+
+    [TestMethod]
     public void Prepare_keeps_openai_response_transport_enabled()
     {
         IAiRuntimeFactory factory = CreateFactory();

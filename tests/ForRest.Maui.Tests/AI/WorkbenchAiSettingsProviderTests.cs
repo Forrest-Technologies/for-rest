@@ -37,6 +37,75 @@ public sealed class WorkbenchAiSettingsProviderTests
 	}
 
 	[TestMethod]
+	public void ToRuntimeSettings_maps_grok_provider_and_defaults_endpoint()
+	{
+		ForRestAiSettings settings = new(
+			Enabled: true,
+			Provider: "grok",
+			Api: "responses",
+			Endpoint: "",
+			Model: "grok-4-fast-non-reasoning",
+			ApiKey: "xai-key");
+
+		AiSettings runtime = settings.ToRuntimeSettings();
+
+		Assert.AreEqual(AiProviderKind.Grok, runtime.Provider.ProviderKind);
+		Assert.AreEqual(AiConversationTransport.Responses, runtime.Provider.Transport);
+		Assert.AreEqual("https://api.x.ai/v1", runtime.Provider.Endpoint);
+		Assert.AreEqual("grok-4-fast-non-reasoning", runtime.Provider.Model);
+	}
+
+	[TestMethod]
+	public void ToRuntimeSettings_strips_transport_suffix_from_endpoint()
+	{
+		ForRestAiSettings settings = new(
+			Enabled: true,
+			Provider: "grok",
+			Api: "responses",
+			Endpoint: "https://api.x.ai/v1/responses",
+			Model: "grok-4-fast-non-reasoning",
+			ApiKey: "xai-key");
+
+		AiSettings runtime = settings.ToRuntimeSettings();
+
+		Assert.AreEqual("https://api.x.ai/v1", runtime.Provider.Endpoint);
+	}
+
+	[TestMethod]
+	public void ToRuntimeSettings_strips_chat_completions_suffix_from_endpoint()
+	{
+		ForRestAiSettings settings = new(
+			Enabled: true,
+			Provider: "openai",
+			Api: "chat",
+			Endpoint: "https://api.openai.com/v1/chat/completions/",
+			Model: "gpt-4.1-mini",
+			ApiKey: "test-key");
+
+		AiSettings runtime = settings.ToRuntimeSettings();
+
+		Assert.AreEqual("https://api.openai.com/v1", runtime.Provider.Endpoint);
+	}
+
+	[TestMethod]
+	public void ToRuntimeSettings_recognizes_xai_provider_aliases()
+	{
+		foreach (string alias in new[] { "xai", "x-ai", "x_ai", "x.ai", "GROK" })
+		{
+			ForRestAiSettings settings = new(
+				Enabled: true,
+				Provider: alias,
+				Api: "responses",
+				Model: "grok-4-fast-non-reasoning",
+				ApiKey: "xai-key");
+
+			AiSettings runtime = settings.ToRuntimeSettings();
+
+			Assert.AreEqual(AiProviderKind.Grok, runtime.Provider.ProviderKind, $"Alias '{alias}' should map to Grok.");
+		}
+	}
+
+	[TestMethod]
 	public void GetCurrentSettings_reads_ai_settings_from_config_file()
 	{
 		using TestConfigScope scope = new();

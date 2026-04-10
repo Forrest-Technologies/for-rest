@@ -58,6 +58,56 @@ public sealed class AiSettingsTests
     }
 
     [TestMethod]
+    public void Enabled_grok_settings_require_model_but_not_endpoint()
+    {
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.Grok,
+                Model = string.Empty,
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "xai-key",
+                IsConfigured = true,
+            },
+        };
+
+        IReadOnlyList<AiSettingsIssue> issues = new AiSettingsValidator().Validate(settings);
+        string[] codes = [.. issues.Select(static issue => issue.Code)];
+
+        CollectionAssert.Contains(codes, "ai.grok.model.required");
+        Assert.IsFalse(codes.Contains("ai.azure.endpoint.required"));
+    }
+
+    [TestMethod]
+    public void Enabled_grok_settings_report_invalid_endpoint()
+    {
+        AiSettings settings = new()
+        {
+            Enabled = true,
+            Provider = new AiProviderSettings
+            {
+                ProviderKind = AiProviderKind.Grok,
+                Model = "grok-4-fast-non-reasoning",
+                Endpoint = "not-a-url",
+            },
+            ApiKey = new AiSecretSetting
+            {
+                Value = "xai-key",
+                IsConfigured = true,
+            },
+        };
+
+        IReadOnlyList<AiSettingsIssue> issues = new AiSettingsValidator().Validate(settings);
+        string[] codes = [.. issues.Select(static issue => issue.Code)];
+
+        CollectionAssert.Contains(codes, "ai.endpoint.invalid");
+    }
+
+    [TestMethod]
     public void Enabled_azure_settings_require_endpoint_and_deployment()
     {
         AiSettings settings = new()
