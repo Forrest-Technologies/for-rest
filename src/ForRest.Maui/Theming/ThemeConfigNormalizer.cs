@@ -50,7 +50,8 @@ public sealed class ThemeConfigNormalizer
 		ForRestSettings settings = new(selectedTheme, document.LicenseKey)
 		{
 			Style = normalizedStyle,
-			Ai = document.Ai
+			Ai = document.Ai,
+			Mcp = document.Mcp
 		};
 
 		string normalizedText = Render(document, settings);
@@ -69,10 +70,12 @@ public sealed class ThemeConfigNormalizer
 		bool insertedThemeSection = false;
 		bool insertedStyleSection = false;
 		bool insertedAiSection = false;
+		bool insertedMcpSection = false;
 		bool insertedLicense = false;
 		bool skippingThemeSection = false;
 		bool skippingStyleSection = false;
 		bool skippingAiSection = false;
+		bool skippingMcpSection = false;
 		int licenseInsertIndex = GetLicenseInsertionIndex(document.Lines);
 
 		foreach (SettingsTomlLine line in document.Lines)
@@ -92,6 +95,11 @@ public sealed class ThemeConfigNormalizer
 				if (skippingAiSection)
 				{
 					skippingAiSection = false;
+				}
+
+				if (skippingMcpSection)
+				{
+					skippingMcpSection = false;
 				}
 
 				if (string.Equals(line.SectionName, "appearance.theme", StringComparison.OrdinalIgnoreCase))
@@ -135,9 +143,33 @@ public sealed class ThemeConfigNormalizer
 					skippingAiSection = true;
 					continue;
 				}
+
+				if (string.Equals(line.SectionName, "mcp", StringComparison.OrdinalIgnoreCase))
+				{
+					if (!insertedStyleSection)
+					{
+						AppendStyleSection(output, settings.Style);
+						insertedStyleSection = true;
+					}
+
+					if (!insertedAiSection)
+					{
+						AppendAiSection(output, settings.Ai);
+						insertedAiSection = true;
+					}
+
+					if (!insertedMcpSection)
+					{
+						AppendMcpSection(output, settings.Mcp);
+						insertedMcpSection = true;
+					}
+
+					skippingMcpSection = true;
+					continue;
+				}
 			}
 
-			if (skippingThemeSection || skippingStyleSection || skippingAiSection)
+			if (skippingThemeSection || skippingStyleSection || skippingAiSection || skippingMcpSection)
 			{
 				continue;
 			}
@@ -199,6 +231,16 @@ public sealed class ThemeConfigNormalizer
 			AppendAiSection(output, settings.Ai);
 		}
 
+		if (!insertedMcpSection)
+		{
+			if (output.Count > 0 && !string.IsNullOrWhiteSpace(output[^1]))
+			{
+				output.Add(string.Empty);
+			}
+
+			AppendMcpSection(output, settings.Mcp);
+		}
+
 		return string.Join(Environment.NewLine, TrimTrailingBlankLines(output));
 	}
 
@@ -256,6 +298,24 @@ public sealed class ThemeConfigNormalizer
 		output.Add($"api_key = \"{SettingsTomlTemplate.EscapeTomlString(ai.ApiKey)}\"");
 		output.Add($"system_prompt = \"{SettingsTomlTemplate.EscapeTomlString(ai.SystemPrompt)}\"");
 		output.Add($"custom_headers = \"{SettingsTomlTemplate.EscapeTomlString(ai.CustomHeaders)}\"");
+	}
+
+	private static void AppendMcpSection(List<string> output, ForRestMcpSettings mcp)
+	{
+		output.Add(mcp.Enabled
+			? "# MCP server (desktop-only). Exposes a Model Context Protocol endpoint over TCP so external agents can read the docs, list workspaces, and edit the active request."
+			: "# MCP server is disabled by default. Set mcp.enabled = true on a desktop build to expose For-Rest over the Model Context Protocol.");
+		output.Add("[mcp]");
+		output.Add($"enabled = {(mcp.Enabled ? "true" : "false")}");
+		if (!mcp.Enabled && !mcp.HasConfiguredValues)
+		{
+			return;
+		}
+
+		output.Add($"bind_address = \"{SettingsTomlTemplate.EscapeTomlString(mcp.BindAddress)}\"");
+		output.Add($"port = {mcp.Port.ToString(CultureInfo.InvariantCulture)}");
+		output.Add($"auth_token = \"{SettingsTomlTemplate.EscapeTomlString(mcp.AuthToken)}\"");
+		output.Add($"max_concurrent_sessions = {mcp.MaxConcurrentSessions.ToString(CultureInfo.InvariantCulture)}");
 	}
 
 	private static IReadOnlyList<string> TrimTrailingBlankLines(List<string> output)

@@ -1,6 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using ForRest.Maui.Theming;
 using ForRest.Maui.Services;
+#if WINDOWS || MACCATALYST
+using ForRest.Maui.Services.Mcp;
+#endif
 
 namespace ForRest.Maui;
 
@@ -73,6 +76,23 @@ public partial class App : Application
 		window.Destroying += OnWindowDestroying;
 		WindowChromeStyler.Apply(window, _themeService.CurrentTheme);
 
+#if WINDOWS || MACCATALYST
+		try
+		{
+			ForRestMcpServerLifecycle? mcpLifecycle = _services.GetService<ForRestMcpServerLifecycle>();
+			if (mcpLifecycle is not null)
+			{
+				// Fire-and-forget; MCP server failures are logged internally and
+				// must never block window creation or the UI thread.
+				_ = mcpLifecycle.StartAsync();
+			}
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("MCP server lifecycle startup failed.", exception);
+		}
+#endif
+
 		return window;
 	}
 
@@ -105,6 +125,21 @@ public partial class App : Application
 		finally
 		{
 			_themeService.ThemeChanged -= OnThemeChanged;
+
+#if WINDOWS || MACCATALYST
+			try
+			{
+				ForRestMcpServerLifecycle? mcpLifecycle = _services.GetService<ForRestMcpServerLifecycle>();
+				if (mcpLifecycle is not null)
+				{
+					await mcpLifecycle.StopAsync();
+				}
+			}
+			catch (Exception exception)
+			{
+				AppLaunchGuard.RecordException("MCP server lifecycle shutdown failed.", exception);
+			}
+#endif
 
 			try
 			{

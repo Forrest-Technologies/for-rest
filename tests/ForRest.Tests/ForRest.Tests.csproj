@@ -26,6 +26,7 @@
     <ProjectReference Include="..\..\src\ForRest.Repositories\ForRest.Repositories.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Infrastructure.Sqlite\ForRest.Infrastructure.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Scripting\ForRest.Scripting.csproj" />
+    <ProjectReference Include="..\..\src\ForRest.Mcp\ForRest.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

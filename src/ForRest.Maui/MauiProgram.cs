@@ -7,6 +7,10 @@ using ForRest.Services;
 using ForRest.Services.AI;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging;
+#if WINDOWS || MACCATALYST
+using ForRest.Mcp;
+using ForRest.Maui.Services.Mcp;
+#endif
 
 namespace ForRest.Maui;
 
@@ -30,6 +34,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ThemeConfigStore>();
 		builder.Services.AddSingleton<SettingsTomlDocumentService>();
 		builder.Services.AddSingleton<IWorkbenchAiSettingsProvider, WorkbenchAiSettingsProvider>();
+		builder.Services.AddSingleton<IWorkbenchMcpSettingsProvider, WorkbenchMcpSettingsProvider>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
 		builder.Services.AddSingleton<ILicenseLeaseCacheStore, FileLicenseLeaseCacheStore>();
@@ -69,6 +74,18 @@ public static class MauiProgram
 		builder.Services.AddSingleton<MainPageViewModel>();
 		builder.Services.AddTransient<MainPage>();
 		builder.Services.AddTransient<AndroidMainPage>();
+
+#if WINDOWS || MACCATALYST
+		// Desktop-only Model Context Protocol server host. Mobile targets
+		// intentionally skip this because background TCP listeners are
+		// hostile to the Android lifecycle.
+		builder.Services.AddSingleton<ForRestMcpTools>(static services =>
+			new ForRestMcpTools(
+				services.GetRequiredService<IAiKnowledgeCatalog>(),
+				services.GetRequiredService<IAiDocumentationSearchService>(),
+				static () => null));
+		builder.Services.AddSingleton<ForRestMcpServerLifecycle>();
+#endif
 
 #if DEBUG
 		builder.Logging.AddDebug();
