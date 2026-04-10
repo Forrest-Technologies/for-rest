@@ -12,6 +12,7 @@ using OpenAI;
 using OpenAI.Chat;
 using OpenAI.Responses;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 
 namespace ForRest.Services.AI;
 
@@ -111,8 +112,11 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         AIAgent agent = settings.Provider.ProviderKind switch
         {
             AiProviderKind.AzureOpenAI => CreateAzureAgent(settings, manifest.SystemPrompt, runtimeTools),
-            AiProviderKind.Grok => CreateOpenAiCompatibleAgent(settings, manifest.SystemPrompt, runtimeTools, AiProviderDefaults.GrokEndpoint),
-            _ => CreateOpenAiCompatibleAgent(settings, manifest.SystemPrompt, runtimeTools, fallbackEndpoint: null),
+            _ => CreateOpenAiCompatibleAgent(
+                settings,
+                manifest.SystemPrompt,
+                runtimeTools,
+                AiProviderDefaults.GetDefaultEndpoint(settings.Provider.ProviderKind)),
         };
 
         debugTrace.AddLine($"Prepared agent: {agent.Name ?? AgentName}");
@@ -945,17 +949,61 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             ? fallbackEndpoint ?? string.Empty
             : settings.Provider.Endpoint;
 
-        if (string.IsNullOrWhiteSpace(endpoint))
+        IReadOnlyDictionary<string, string> headers = settings.Provider.CustomHeaders;
+        bool hasHeaders = headers.Count > 0;
+
+        if (string.IsNullOrWhiteSpace(endpoint) && !hasHeaders)
         {
             return new OpenAIClient(settings.ApiKey.Value);
         }
 
-        return new OpenAIClient(
-            new ApiKeyCredential(settings.ApiKey.Value),
-            new OpenAIClientOptions
+        OpenAIClientOptions options = new();
+        if (!string.IsNullOrWhiteSpace(endpoint))
+        {
+            options.Endpoint = new Uri(endpoint);
+        }
+
+        if (hasHeaders)
+        {
+            options.AddPolicy(new CustomHeaderPolicy(headers), PipelinePosition.PerTry);
+        }
+
+        return new OpenAIClient(new ApiKeyCredential(settings.ApiKey.Value), options);
+    }
+
+    private sealed class CustomHeaderPolicy(IReadOnlyDictionary<string, string> headers) : PipelinePolicy
+    {
+        private readonly IReadOnlyDictionary<string, string> _headers = headers;
+
+        public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            ApplyHeaders(message);
+            ProcessNext(message, pipeline, currentIndex);
+        }
+
+        public override ValueTask ProcessAsync(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            ApplyHeaders(message);
+            return ProcessNextAsync(message, pipeline, currentIndex);
+        }
+
+        private void ApplyHeaders(PipelineMessage message)
+        {
+            if (message.Request is null)
             {
-                Endpoint = new Uri(endpoint),
-            });
+                return;
+            }
+
+            foreach (KeyValuePair<string, string> header in _headers)
+            {
+                if (string.IsNullOrWhiteSpace(header.Key))
+                {
+                    continue;
+                }
+
+                message.Request.Headers.Set(header.Key, header.Value ?? string.Empty);
+            }
+        }
     }
 }
 #pragma warning restore OPENAI001

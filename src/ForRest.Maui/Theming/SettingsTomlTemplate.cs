@@ -20,6 +20,7 @@ public sealed class SettingsTomlTemplate
 	private const string AiSecretKeyName = "api_key";
 	private const string AiSystemPromptKeyName = "system_prompt";
 	private const string AiStreamResponsesKeyName = "stream_responses";
+	private const string AiCustomHeadersKeyName = "custom_headers";
 	private const string StyleEditorFontSizeKeyName = "editor_font_size";
 	private const string StyleResultPaneTabFontSizeKeyName = "result_pane_tab_font_size";
 	private static readonly Regex ThemeLinePattern = new(
@@ -154,8 +155,8 @@ public sealed class SettingsTomlTemplate
 	private static string BuildAiComment(ForRestAiSettings ai)
 	{
 		return ai.Enabled
-			? "# AI settings are enabled. provider accepts openai, azure_openai, or grok (xai). OpenAI and Grok endpoints are optional (Grok defaults to https://api.x.ai/v1); Azure OpenAI requires endpoint and deployment_name. stream_responses controls the inline typewriter reveal."
-			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider (openai, azure_openai, grok), model, api key, and optional endpoint fields. stream_responses controls the inline typewriter reveal.";
+			? "# AI settings are enabled. provider accepts openai, azure_openai, grok (xai), groq, deepseek, mistral, openrouter, gemini, anthropic, or custom. Most endpoints are optional because For-Rest has sane defaults; Azure OpenAI requires endpoint and deployment_name, custom requires endpoint. Use custom_headers (e.g. \"X-Api-Key: secret; X-Title: For-Rest\") when a provider needs extra headers. stream_responses controls the inline typewriter reveal."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider (openai, azure_openai, grok, groq, deepseek, mistral, openrouter, gemini, anthropic, custom), model, api key, optional endpoint, and optional custom_headers (semicolon-delimited \"Name: value\" pairs). stream_responses controls the inline typewriter reveal.";
 	}
 
 	private static IReadOnlyList<string> BuildAiSection(ForRestAiSettings ai)
@@ -179,6 +180,7 @@ public sealed class SettingsTomlTemplate
 		lines.Add($"{AiDeploymentNameKeyName} = \"{EscapeTomlString(ai.DeploymentName)}\"");
 		lines.Add($"{AiSecretKeyName} = \"{EscapeTomlString(ai.ApiKey)}\"");
 		lines.Add($"{AiSystemPromptKeyName} = \"{EscapeTomlString(ai.SystemPrompt)}\"");
+		lines.Add($"{AiCustomHeadersKeyName} = \"{EscapeTomlString(ai.CustomHeaders)}\"");
 		return lines;
 	}
 
@@ -393,6 +395,8 @@ public sealed class SettingsTomlTemplate
 			return true;
 		}
 
+		// custom_headers is intentionally optional so configs written before
+		// it existed still autosave cleanly. Everything else is required.
 		return seenAiKeys.Contains(AiProviderKeyName) &&
 		       seenAiKeys.Contains(AiApiKeyName) &&
 		       seenAiKeys.Contains(AiEndpointKeyName) &&
@@ -412,7 +416,8 @@ public sealed class SettingsTomlTemplate
 		       string.Equals(key, AiModelKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiDeploymentNameKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, AiSecretKeyName, StringComparison.OrdinalIgnoreCase) ||
-		       string.Equals(key, AiSystemPromptKeyName, StringComparison.OrdinalIgnoreCase);
+		       string.Equals(key, AiSystemPromptKeyName, StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(key, AiCustomHeadersKeyName, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static bool IsKnownStyleKey(string key)

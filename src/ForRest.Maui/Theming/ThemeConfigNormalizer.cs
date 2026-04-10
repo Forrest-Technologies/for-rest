@@ -255,6 +255,7 @@ public sealed class ThemeConfigNormalizer
 		output.Add($"deployment_name = \"{SettingsTomlTemplate.EscapeTomlString(ai.DeploymentName)}\"");
 		output.Add($"api_key = \"{SettingsTomlTemplate.EscapeTomlString(ai.ApiKey)}\"");
 		output.Add($"system_prompt = \"{SettingsTomlTemplate.EscapeTomlString(ai.SystemPrompt)}\"");
+		output.Add($"custom_headers = \"{SettingsTomlTemplate.EscapeTomlString(ai.CustomHeaders)}\"");
 	}
 
 	private static IReadOnlyList<string> TrimTrailingBlankLines(List<string> output)

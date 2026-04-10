@@ -21,7 +21,8 @@ public sealed record ForRestAiSettings(
 	string DeploymentName = "",
 	string ApiKey = "",
 	string SystemPrompt = "",
-	bool StreamResponses = true)
+	bool StreamResponses = true,
+	string CustomHeaders = "")
 {
 	public bool HasConfiguredValues =>
 		Enabled ||
@@ -32,6 +33,7 @@ public sealed record ForRestAiSettings(
 		!string.IsNullOrWhiteSpace(DeploymentName) ||
 		!string.IsNullOrWhiteSpace(ApiKey) ||
 		!string.IsNullOrWhiteSpace(SystemPrompt) ||
+		!string.IsNullOrWhiteSpace(CustomHeaders) ||
 		!StreamResponses;
 }
 

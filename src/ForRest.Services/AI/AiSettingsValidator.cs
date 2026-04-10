@@ -28,7 +28,8 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
             return issues;
         }
 
-        if (settings.Provider.ProviderKind == AiProviderKind.AzureOpenAI)
+        AiProviderKind providerKind = settings.Provider.ProviderKind;
+        if (providerKind == AiProviderKind.AzureOpenAI)
         {
             ValidateEndpoint(settings.Provider.Endpoint, issues, required: true);
 
@@ -41,16 +42,30 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
         {
             if (string.IsNullOrWhiteSpace(settings.Provider.Model))
             {
-                string code = settings.Provider.ProviderKind == AiProviderKind.Grok
-                    ? "ai.grok.model.required"
-                    : "ai.openai.model.required";
-                string message = settings.Provider.ProviderKind == AiProviderKind.Grok
-                    ? "Grok model is required when AI is enabled."
-                    : "OpenAI model is required when AI is enabled.";
+                (string code, string message) = providerKind switch
+                {
+                    AiProviderKind.Grok => ("ai.grok.model.required", "Grok model is required when AI is enabled."),
+                    AiProviderKind.Groq => ("ai.groq.model.required", "Groq model is required when AI is enabled."),
+                    AiProviderKind.DeepSeek => ("ai.deepseek.model.required", "DeepSeek model is required when AI is enabled."),
+                    AiProviderKind.Mistral => ("ai.mistral.model.required", "Mistral model is required when AI is enabled."),
+                    AiProviderKind.OpenRouter => ("ai.openrouter.model.required", "OpenRouter model is required when AI is enabled."),
+                    AiProviderKind.GoogleGemini => ("ai.gemini.model.required", "Google Gemini model is required when AI is enabled."),
+                    AiProviderKind.Anthropic => ("ai.anthropic.model.required", "Anthropic model is required when AI is enabled."),
+                    AiProviderKind.Custom => ("ai.custom.model.required", "Custom provider model is required when AI is enabled."),
+                    _ => ("ai.openai.model.required", "OpenAI model is required when AI is enabled."),
+                };
                 issues.Add(new(AiSettingsIssueSeverity.Error, code, message));
             }
 
-            ValidateEndpoint(settings.Provider.Endpoint, issues, required: false);
+            bool endpointRequired = providerKind == AiProviderKind.Custom;
+            if (endpointRequired && string.IsNullOrWhiteSpace(settings.Provider.Endpoint))
+            {
+                issues.Add(new(AiSettingsIssueSeverity.Error, "ai.custom.endpoint.required", "Custom provider endpoint is required when AI is enabled."));
+            }
+            else
+            {
+                ValidateEndpoint(settings.Provider.Endpoint, issues, required: false);
+            }
         }
 
         if (!settings.ApiKey.IsConfigured)
