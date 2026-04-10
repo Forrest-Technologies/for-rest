@@ -154,8 +154,8 @@ public sealed class SettingsTomlTemplate
 	private static string BuildAiComment(ForRestAiSettings ai)
 	{
 		return ai.Enabled
-			? "# AI settings are enabled. OpenAI endpoint is optional; Azure OpenAI requires endpoint and deployment_name. stream_responses controls the inline typewriter reveal."
-			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider, model, api key, and optional OpenAI endpoint fields. stream_responses controls the inline typewriter reveal.";
+			? "# AI settings are enabled. provider accepts openai, azure_openai, or grok (xai). OpenAI and Grok endpoints are optional (Grok defaults to https://api.x.ai/v1); Azure OpenAI requires endpoint and deployment_name. stream_responses controls the inline typewriter reveal."
+			: "# AI settings are disabled by default. Set ai.enabled = true to reveal provider (openai, azure_openai, grok), model, api key, and optional endpoint fields. stream_responses controls the inline typewriter reveal.";
 	}
 
 	private static IReadOnlyList<string> BuildAiSection(ForRestAiSettings ai)

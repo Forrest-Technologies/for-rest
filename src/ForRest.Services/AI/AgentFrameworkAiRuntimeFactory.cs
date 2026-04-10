@@ -111,7 +111,8 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         AIAgent agent = settings.Provider.ProviderKind switch
         {
             AiProviderKind.AzureOpenAI => CreateAzureAgent(settings, manifest.SystemPrompt, runtimeTools),
-            _ => CreateOpenAiAgent(settings, manifest.SystemPrompt, runtimeTools),
+            AiProviderKind.Grok => CreateOpenAiCompatibleAgent(settings, manifest.SystemPrompt, runtimeTools, AiProviderDefaults.GrokEndpoint),
+            _ => CreateOpenAiCompatibleAgent(settings, manifest.SystemPrompt, runtimeTools, fallbackEndpoint: null),
         };
 
         debugTrace.AddLine($"Prepared agent: {agent.Name ?? AgentName}");
@@ -901,16 +902,20 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         };
     }
 
-    private static AIAgent CreateOpenAiAgent(AiSettings settings, string instructions, IReadOnlyList<AITool> runtimeTools)
+    private static AIAgent CreateOpenAiCompatibleAgent(
+        AiSettings settings,
+        string instructions,
+        IReadOnlyList<AITool> runtimeTools,
+        string? fallbackEndpoint)
     {
-        OpenAIClient client = CreateOpenAiClient(settings);
+        OpenAIClient client = CreateOpenAiClient(settings, fallbackEndpoint);
         ChatClientAgentOptions options = CreateAgentOptions(instructions, runtimeTools, settings.Provider.Model);
 
         return settings.Provider.Transport switch
-            {
-                AiConversationTransport.ChatCompletions => client
-                    .GetChatClient(settings.Provider.Model)
-                    .AsAIAgent(options),
+        {
+            AiConversationTransport.ChatCompletions => client
+                .GetChatClient(settings.Provider.Model)
+                .AsAIAgent(options),
             _ => client
                 .GetResponsesClient(settings.Provider.Model)
                 .AsAIAgent(options),
@@ -934,9 +939,13 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         };
     }
 
-    private static OpenAIClient CreateOpenAiClient(AiSettings settings)
+    private static OpenAIClient CreateOpenAiClient(AiSettings settings, string? fallbackEndpoint)
     {
-        if (string.IsNullOrWhiteSpace(settings.Provider.Endpoint))
+        string endpoint = string.IsNullOrWhiteSpace(settings.Provider.Endpoint)
+            ? fallbackEndpoint ?? string.Empty
+            : settings.Provider.Endpoint;
+
+        if (string.IsNullOrWhiteSpace(endpoint))
         {
             return new OpenAIClient(settings.ApiKey.Value);
         }
@@ -945,7 +954,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             new ApiKeyCredential(settings.ApiKey.Value),
             new OpenAIClientOptions
             {
-                Endpoint = new Uri(settings.Provider.Endpoint),
+                Endpoint = new Uri(endpoint),
             });
     }
 }

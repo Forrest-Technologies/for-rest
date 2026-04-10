@@ -41,14 +41,15 @@ internal static class ForRestAiSettingsMapper
 		ArgumentNullException.ThrowIfNull(settings);
 
 		string apiKey = settings.ApiKey.Trim();
+		AiProviderKind providerKind = ParseProvider(settings.Provider);
 		return new AiSettings
 		{
 			Enabled = settings.Enabled,
 			Provider = new AiProviderSettings
 			{
-				ProviderKind = ParseProvider(settings.Provider),
+				ProviderKind = providerKind,
 				Transport = ParseTransport(settings.Api),
-				Endpoint = settings.Endpoint.Trim(),
+				Endpoint = NormalizeEndpoint(settings.Endpoint, providerKind),
 				Model = settings.Model.Trim(),
 				DeploymentName = settings.DeploymentName.Trim(),
 			},
@@ -69,9 +70,12 @@ internal static class ForRestAiSettingsMapper
 
 	private static AiProviderKind ParseProvider(string value)
 	{
-		return string.Equals(value?.Trim(), "azure_openai", StringComparison.OrdinalIgnoreCase)
-			? AiProviderKind.AzureOpenAI
-			: AiProviderKind.OpenAI;
+		return value?.Trim().ToLowerInvariant() switch
+		{
+			"azure_openai" or "azure-openai" or "azure" => AiProviderKind.AzureOpenAI,
+			"grok" or "xai" or "x_ai" or "x-ai" or "x.ai" => AiProviderKind.Grok,
+			_ => AiProviderKind.OpenAI,
+		};
 	}
 
 	private static AiConversationTransport ParseTransport(string value)
@@ -81,5 +85,40 @@ internal static class ForRestAiSettingsMapper
 			"chat" or "chat_completions" => AiConversationTransport.ChatCompletions,
 			_ => AiConversationTransport.Responses,
 		};
+	}
+
+	private static string NormalizeEndpoint(string value, AiProviderKind providerKind)
+	{
+		string trimmed = (value ?? string.Empty).Trim();
+		if (trimmed.Length == 0)
+		{
+			return providerKind == AiProviderKind.Grok
+				? AiProviderDefaults.GrokEndpoint
+				: string.Empty;
+		}
+
+		trimmed = trimmed.TrimEnd('/');
+
+		// Users often paste the full per-transport URL from provider docs
+		// (e.g. https://api.x.ai/v1/responses). The OpenAI-compatible SDK
+		// treats Endpoint as the base URI and appends /responses or
+		// /chat/completions itself, so we strip the trailing transport
+		// segment to keep the base URI correct.
+		string[] transportSuffixes =
+		[
+			"/chat/completions",
+			"/responses",
+		];
+
+		foreach (string suffix in transportSuffixes)
+		{
+			if (trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+			{
+				trimmed = trimmed[..^suffix.Length].TrimEnd('/');
+				break;
+			}
+		}
+
+		return trimmed;
 	}
 }

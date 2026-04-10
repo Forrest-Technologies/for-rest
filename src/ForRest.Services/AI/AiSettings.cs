@@ -4,6 +4,12 @@ public enum AiProviderKind
 {
     OpenAI,
     AzureOpenAI,
+    Grok,
+}
+
+public static class AiProviderDefaults
+{
+    public const string GrokEndpoint = "https://api.x.ai/v1";
 }
 
 public enum AiConversationTransport

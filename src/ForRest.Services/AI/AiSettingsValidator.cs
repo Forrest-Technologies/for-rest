@@ -30,7 +30,7 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
 
         if (settings.Provider.ProviderKind == AiProviderKind.AzureOpenAI)
         {
-            ValidateEndpoint(settings.Provider.Endpoint, issues);
+            ValidateEndpoint(settings.Provider.Endpoint, issues, required: true);
 
             if (string.IsNullOrWhiteSpace(settings.Provider.DeploymentName))
             {
@@ -41,8 +41,16 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
         {
             if (string.IsNullOrWhiteSpace(settings.Provider.Model))
             {
-                issues.Add(new(AiSettingsIssueSeverity.Error, "ai.openai.model.required", "OpenAI model is required when AI is enabled."));
+                string code = settings.Provider.ProviderKind == AiProviderKind.Grok
+                    ? "ai.grok.model.required"
+                    : "ai.openai.model.required";
+                string message = settings.Provider.ProviderKind == AiProviderKind.Grok
+                    ? "Grok model is required when AI is enabled."
+                    : "OpenAI model is required when AI is enabled.";
+                issues.Add(new(AiSettingsIssueSeverity.Error, code, message));
             }
+
+            ValidateEndpoint(settings.Provider.Endpoint, issues, required: false);
         }
 
         if (!settings.ApiKey.IsConfigured)
@@ -88,18 +96,26 @@ public sealed class AiSettingsValidator : IAiSettingsValidator
         return issues;
     }
 
-    private static void ValidateEndpoint(string endpoint, List<AiSettingsIssue> issues)
+    private static void ValidateEndpoint(string endpoint, List<AiSettingsIssue> issues, bool required)
     {
         if (string.IsNullOrWhiteSpace(endpoint))
         {
-            issues.Add(new(AiSettingsIssueSeverity.Error, "ai.azure.endpoint.required", "Azure OpenAI endpoint is required when AI is enabled."));
+            if (required)
+            {
+                issues.Add(new(AiSettingsIssueSeverity.Error, "ai.azure.endpoint.required", "Azure OpenAI endpoint is required when AI is enabled."));
+            }
+
             return;
         }
 
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? parsed) ||
             (parsed.Scheme is not "https" and not "http"))
         {
-            issues.Add(new(AiSettingsIssueSeverity.Error, "ai.azure.endpoint.invalid", "Azure OpenAI endpoint must be an absolute HTTP or HTTPS URL."));
+            string code = required ? "ai.azure.endpoint.invalid" : "ai.endpoint.invalid";
+            string message = required
+                ? "Azure OpenAI endpoint must be an absolute HTTP or HTTPS URL."
+                : "AI endpoint must be an absolute HTTP or HTTPS URL.";
+            issues.Add(new(AiSettingsIssueSeverity.Error, code, message));
         }
     }
 }
