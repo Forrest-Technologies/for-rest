@@ -5,7 +5,7 @@
              x:Class="ForRest.Maui.MainPage">
 
     <Grid Padding="0"
-          RowDefinitions="Auto,*,Auto,Auto"
+          RowDefinitions="Auto,*,Auto"
           RowSpacing="0">
         <Border IsVisible="{Binding IsStatusBannerVisible}"
                 BackgroundColor="{Binding StatusBannerBackgroundColor}"
@@ -130,27 +130,8 @@
         </Grid>
 
         <Border Grid.Row="2"
-                IsVisible="{Binding ShowCompactActionBar}"
-                Style="{StaticResource StatusBarBorderStyle}">
-            <Grid ColumnDefinitions="Auto,Auto,*"
-                  ColumnSpacing="8">
-                <Button Text="{Binding CompactLeftPaneButtonText}"
-                        Clicked="OnToggleLeftPaneClicked"
-                        Style="{StaticResource MobileToolbarButtonStyle}" />
-                <Button Grid.Column="1"
-                        Text="{Binding CompactRightPaneButtonText}"
-                        Clicked="OnToggleRightPaneClicked"
-                        Style="{StaticResource MobileToolbarButtonStyle}" />
-                <Label Grid.Column="2"
-                       Text="{Binding RequestStateStatus}"
-                       LineBreakMode="TailTruncation"
-                       VerticalTextAlignment="Center"
-                       Style="{StaticResource StatusBarTextStyle}" />
-            </Grid>
-        </Border>
-
-        <Border Grid.Row="3"
-                Margin="{OnPlatform Android='8,0,8,8', Default='0'}"
+                Margin="{OnPlatform Android='10,6,10,10', Default='0'}"
+                StrokeShape="{OnPlatform Android='RoundRectangle 16', Default='RoundRectangle 0'}"
                 Style="{StaticResource StatusBarBorderStyle}">
             <Grid>
                 <Grid IsVisible="{Binding ShowDesktopStatusBar}"
@@ -172,28 +153,55 @@
                            Style="{StaticResource StatusBarTextStyle}" />
                 </Grid>
 
-                <Grid IsVisible="{Binding ShowCompactStatusBar}"
-                      RowDefinitions="Auto,Auto"
-                      ColumnDefinitions="*,Auto,Auto"
-                      RowSpacing="2"
-                      ColumnSpacing="10">
-                    <Label Grid.ColumnSpan="3"
-                           Text="{Binding ExecutionStatus}"
-                           LineBreakMode="TailTruncation"
-                           Style="{StaticResource StatusBarTextStyle}" />
-                    <Label Grid.Row="1"
-                           Text="{Binding ResponseState}"
-                           LineBreakMode="TailTruncation"
-                           Style="{StaticResource StatusBarTextStyle}" />
-                    <Label Grid.Row="1"
-                           Grid.Column="1"
-                           Text="{Binding ResponseTimeStatus}"
-                           Style="{StaticResource StatusBarTextStyle}" />
-                    <Label Grid.Row="1"
-                           Grid.Column="2"
-                           Text="{Binding ResponseSizeStatus}"
-                           Style="{StaticResource StatusBarTextStyle}" />
-                </Grid>
+                <VerticalStackLayout IsVisible="{Binding ShowCompactStatusBar}"
+                                     Spacing="8">
+                    <Grid IsVisible="{Binding ShowCompactActionBar}"
+                          ColumnDefinitions="Auto,Auto,*"
+                          ColumnSpacing="8">
+                        <Button Text="{Binding CompactLeftPaneButtonText}"
+                                Clicked="OnToggleLeftPaneClicked"
+                                Style="{StaticResource MobileFooterButtonStyle}" />
+                        <Button Grid.Column="1"
+                                Text="{Binding CompactRightPaneButtonText}"
+                                Clicked="OnToggleRightPaneClicked"
+                                Style="{StaticResource MobileFooterButtonStyle}" />
+                        <Label Grid.Column="2"
+                               Text="{Binding RequestStateStatus}"
+                               LineBreakMode="TailTruncation"
+                               VerticalTextAlignment="Center"
+                               HorizontalTextAlignment="End"
+                               Margin="8,0,4,0"
+                               Style="{StaticResource StatusBarTextStyle}" />
+                    </Grid>
+
+                    <BoxView IsVisible="{Binding ShowCompactActionBar}"
+                             HeightRequest="1"
+                             HorizontalOptions="Fill"
+                             Color="{DynamicResource ThemeDividerColor}"
+                             Opacity="0.35" />
+
+                    <Grid RowDefinitions="Auto,Auto"
+                          ColumnDefinitions="*,Auto,Auto"
+                          RowSpacing="2"
+                          ColumnSpacing="10">
+                        <Label Grid.ColumnSpan="3"
+                               Text="{Binding ExecutionStatus}"
+                               LineBreakMode="TailTruncation"
+                               Style="{StaticResource StatusBarTextStyle}" />
+                        <Label Grid.Row="1"
+                               Text="{Binding ResponseState}"
+                               LineBreakMode="TailTruncation"
+                               Style="{StaticResource StatusBarTextStyle}" />
+                        <Label Grid.Row="1"
+                               Grid.Column="1"
+                               Text="{Binding ResponseTimeStatus}"
+                               Style="{StaticResource StatusBarTextStyle}" />
+                        <Label Grid.Row="1"
+                               Grid.Column="2"
+                               Text="{Binding ResponseSizeStatus}"
+                               Style="{StaticResource StatusBarTextStyle}" />
+                    </Grid>
+                </VerticalStackLayout>
             </Grid>
         </Border>
     </Grid>

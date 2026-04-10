@@ -3952,7 +3952,14 @@ public sealed class MainPageViewModel : ObservableObject
 
 			if (CanStreamInlineAiResponse(aiSettings, prompt, result))
 			{
-				await AnimateInlineAiResponseAsync(prompt!.LineNumber, result.ResponseText);
+				try
+				{
+					await AnimateInlineAiResponseAsync(prompt!.LineNumber, result.ResponseText);
+				}
+				catch (Exception streamingException)
+				{
+					AppLaunchGuard.RecordException("Inline AI streaming animation failed.", streamingException);
+				}
 			}
 
 			(string repairedUpdatedText, int? repairedSuggestedCursorLineNumber, int repairedSuggestedCursorColumn) = prompt is null
