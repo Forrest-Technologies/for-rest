@@ -3,6 +3,7 @@
 using System.ClientModel;
 using System.IO;
 using System.Net.Sockets;
+using System.Text;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI.Responses;
@@ -78,6 +79,18 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
                 DebugTrace: runtime.DebugTrace.Snapshot());
         }
 
+        // When targeting Grok, install an AsyncLocal capture buffer so the
+        // compatibility policy can record the exact (sanitized) request
+        // body the SDK sent to xAI. We flush that buffer into the debug
+        // trace after the call — regardless of success / failure — so
+        // the outbound payload is always auditable next to whatever
+        // response (or 400 body) came back.
+        bool captureGrokBody = request.Settings.Provider.ProviderKind == AiProviderKind.Grok;
+        if (captureGrokBody)
+        {
+            AgentFrameworkAiRuntimeFactory.GrokCompatibilityPolicy.LastOutboundBody.Value = new StringBuilder();
+        }
+
         try
         {
             (AgentSession session, bool sessionReset) = await GetOrCreateSessionAsync(
@@ -108,6 +121,7 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
                              (editCompleted && documentChangedDuringTurn);
             runtime.DebugTrace.AddLine(
                 $"Turn success evaluation: responseCompleted={turnOutcome.Response.Completed} editCompleted={editCompleted} documentChangedDuringTurn={documentChangedDuringTurn} succeeded={succeeded}");
+            FlushGrokOutboundBody(runtime, captureGrokBody);
             return new(
                 Succeeded: succeeded,
                 ResponseText: BuildFinalResponseText(turnOutcome.Response.Text, turnOutcome.Response.Response),
@@ -120,6 +134,7 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         {
             await ResetSessionAsync(request.ConversationId);
             runtime.DebugTrace.AddLine("Executor result: timed out and reset the session.");
+            FlushGrokOutboundBody(runtime, captureGrokBody);
             return new(
                 Succeeded: false,
                 ResponseText: TimedOutResponseNote,
@@ -132,6 +147,7 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         {
             await ResetSessionAsync(request.ConversationId);
             runtime.DebugTrace.AddLine("Executor result: canceled by caller and reset the session.");
+            FlushGrokOutboundBody(runtime, captureGrokBody);
             return new(
                 Succeeded: false,
                 ResponseText: TimedOutResponseNote,
@@ -144,11 +160,17 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
         {
             await ResetSessionAsync(request.ConversationId);
             string providerDetail = TryExtractProviderErrorDetail(exception);
-            runtime.DebugTrace.AddSection("Executor exception", exception.ToString());
+
+            // Surface the 400 body FIRST in the debug trace so it is the
+            // first thing a human scrolling the Inspect panel sees after
+            // a failure, then follow it with the full exception.
             if (!string.IsNullOrWhiteSpace(providerDetail))
             {
                 runtime.DebugTrace.AddSection("Provider error body", providerDetail);
             }
+
+            runtime.DebugTrace.AddSection("Executor exception", exception.ToString());
+            FlushGrokOutboundBody(runtime, captureGrokBody);
 
             string userMessage = string.IsNullOrWhiteSpace(providerDetail)
                 ? $"AI request failed: {exception.Message}"
@@ -162,6 +184,25 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
                 AutonomousEditRecoveryAttempts: 0,
                 DebugTrace: runtime.DebugTrace.Snapshot());
         }
+    }
+
+    private static void FlushGrokOutboundBody(AiPreparedRuntime runtime, bool captureGrokBody)
+    {
+        if (!captureGrokBody)
+        {
+            return;
+        }
+
+        StringBuilder? buffer = AgentFrameworkAiRuntimeFactory.GrokCompatibilityPolicy.LastOutboundBody.Value;
+        AgentFrameworkAiRuntimeFactory.GrokCompatibilityPolicy.LastOutboundBody.Value = null;
+        if (buffer is null || buffer.Length == 0)
+        {
+            return;
+        }
+
+        runtime.DebugTrace.AddSection(
+            "Outbound Grok request body (post-sanitize)",
+            buffer.ToString());
     }
 
     /// <summary>
