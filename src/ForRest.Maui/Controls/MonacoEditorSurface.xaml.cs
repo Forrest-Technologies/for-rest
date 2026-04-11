@@ -24,6 +24,7 @@ public partial class MonacoEditorSurface : ContentView
 	public event EventHandler? RedoRequested;
 	public event EventHandler<MonacoResponseVarRequestEventArgs>? ResponseVarCopyRequested;
 	public event EventHandler<MonacoCursorPositionChangedEventArgs>? CursorPositionChanged;
+	public event EventHandler<MonacoEditorFocusEventArgs>? EditorFocusChanged;
 	private static readonly double DefaultEditorFontSize = OperatingSystem.IsAndroid() ? 14d : 13.5d;
 
 	private const string MonacoHostHtml = """
@@ -63,6 +64,32 @@ public partial class MonacoEditorSurface : ContentView
       background: var(--editable-span-bg);
       border-bottom: 1px solid var(--editable-span-border);
       border-radius: 2px;
+    }
+
+    /*
+     * Hides the literal characters of every secret value while keeping
+     * the underlying model text intact. The before-pseudo prints a
+     * fixed-width row of bullets in the same place. Removing the
+     * decoration on focus reveals the real value without needing to
+     * setValue the editor (which would reset the cursor).
+     */
+    .secret-masked-value {
+      color: transparent !important;
+      caret-color: transparent !important;
+      position: relative;
+    }
+    .secret-masked-value::before {
+      content: "***";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      padding: 0 2px;
+      font-family: inherit;
+      color: var(--vscode-editor-foreground, #555);
+      background: rgba(160, 160, 160, 0.18);
+      border-radius: 2px;
+      pointer-events: none;
     }
   </style>
 </head>
@@ -615,6 +642,8 @@ public partial class MonacoEditorSurface : ContentView
         lastAppliedCursorRequestVersion: 0,
         pendingShouldApplyText: true,
         editableDecorations: [],
+        secretDecorations: [],
+        isEditorFocused: false,
         currentEditableRanges: [],
         lastKnownValue: "",
         responseActionsRegistered: false,
@@ -1367,6 +1396,17 @@ public partial class MonacoEditorSurface : ContentView
           this.lastKnownValue = this.editor.getValue();
           this.editor.onDidChangeModelContent((event) => {
             this.handleModelContentChanged(event);
+            this.refreshSecretDecorations();
+          });
+          this.editor.onDidFocusEditorText(() => {
+            this.isEditorFocused = true;
+            this.refreshSecretDecorations();
+            requestHostCommand("focus", { focused: "true" });
+          });
+          this.editor.onDidBlurEditorWidget(() => {
+            this.isEditorFocused = false;
+            this.refreshSecretDecorations();
+            requestHostCommand("focus", { focused: "false" });
           });
           if (this.isAndroid) {
             this.scheduleAndroidFontRemeasure();
@@ -1628,6 +1668,7 @@ public partial class MonacoEditorSurface : ContentView
           this.applyPendingCursorMove();
 
           this.lastKnownValue = this.editor ? this.editor.getValue() : this.pendingValue;
+          this.refreshSecretDecorations();
           if (shouldRefreshLayout) {
             this.scheduleLayoutRefresh();
           }
@@ -1782,6 +1823,48 @@ public partial class MonacoEditorSurface : ContentView
               this.editor.setSelection(selection);
             }
           }
+        },
+        // Decoration manager that overlays a `***` glyph on every secret
+        // value span while the editor is unfocused. The model text is
+        // never modified, so the cursor never jumps when focus changes
+        // and the user's edits round-trip cleanly through the C# host.
+        refreshSecretDecorations: function () {
+          if (!this.editor || !this.model) {
+            return;
+          }
+
+          if (this.isEditorFocused) {
+            if (this.secretDecorations.length > 0) {
+              this.secretDecorations = this.editor.deltaDecorations(this.secretDecorations, []);
+            }
+            return;
+          }
+
+          const newDecorations = [];
+          const lineCount = this.model.getLineCount();
+          for (let lineNumber = 1; lineNumber <= lineCount; lineNumber++) {
+            const lineText = this.model.getLineContent(lineNumber);
+            const match = /^([ \t]*)secret[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(.+?)[ \t]*$/i.exec(lineText);
+            if (!match) {
+              continue;
+            }
+
+            const value = match[3];
+            const valueColumn = lineText.lastIndexOf(value) + 1;
+            if (valueColumn <= 0) {
+              continue;
+            }
+
+            newDecorations.push({
+              range: new monaco.Range(lineNumber, valueColumn, lineNumber, valueColumn + value.length),
+              options: {
+                inlineClassName: "secret-masked-value",
+                stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+              },
+            });
+          }
+
+          this.secretDecorations = this.editor.deltaDecorations(this.secretDecorations, newDecorations);
         },
         handleModelContentChanged: function (event) {
           if (this.isApplyingProtectedEdit) {
@@ -2341,6 +2424,46 @@ public partial class MonacoEditorSurface : ContentView
 			CursorPositionChanged?.Invoke(this, new MonacoCursorPositionChangedEventArgs(cursorLineNumber, cursorColumn));
 			return;
 		}
+
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "focus", StringComparison.OrdinalIgnoreCase))
+		{
+			// The Monaco JS layer relays its onDidFocusEditorText /
+			// onDidBlurEditorWidget events through this command so the host
+			// can drive the secret-mask decoration toggle on the view
+			// model side. The decorations themselves are managed in JS so
+			// we don't need to push any text — just relay the focus state.
+			bool focused = string.Equals(QueryString(uri, "focused"), "true", StringComparison.OrdinalIgnoreCase);
+			EditorFocusChanged?.Invoke(this, new MonacoEditorFocusEventArgs(focused));
+			return;
+		}
+	}
+
+	private static string QueryString(Uri uri, string key)
+	{
+		string query = uri.Query;
+		if (string.IsNullOrEmpty(query))
+		{
+			return string.Empty;
+		}
+
+		string trimmed = query.StartsWith('?') ? query[1..] : query;
+		foreach (string pair in trimmed.Split('&', StringSplitOptions.RemoveEmptyEntries))
+		{
+			int separator = pair.IndexOf('=');
+			if (separator < 0)
+			{
+				continue;
+			}
+
+			string name = Uri.UnescapeDataString(pair[..separator]);
+			if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+			{
+				return Uri.UnescapeDataString(pair[(separator + 1)..]);
+			}
+		}
+
+		return string.Empty;
 	}
 
 	private async Task EnsureEditorReadyAsync()
@@ -3261,4 +3384,9 @@ public sealed class MonacoCursorPositionChangedEventArgs(int lineNumber, int col
 	public int LineNumber { get; } = lineNumber;
 
 	public int Column { get; } = column;
+}
+
+public sealed class MonacoEditorFocusEventArgs(bool isFocused) : EventArgs
+{
+	public bool IsFocused { get; } = isFocused;
 }

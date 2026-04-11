@@ -81,6 +81,34 @@ public sealed class MonacoEditorSurfaceSourceTests
 		StringAssert.Contains(source, "window.forRestHost ? (window.forRestHost.pasteTextFromHost(");
 	}
 
+	[TestMethod]
+	public void MonacoEditorSurface_overlays_secret_value_decorations_when_unfocused()
+	{
+		string source = GetNormalizedMonacoEditorSurfaceSource();
+
+		// JS-side: the host registers focus/blur listeners that toggle
+		// the decoration set and forward the focus state to the C# host.
+		StringAssert.Contains(source, "this.editor.onDidFocusEditorText(()");
+		StringAssert.Contains(source, "this.editor.onDidBlurEditorWidget(()");
+		StringAssert.Contains(source, "requestHostCommand(\"focus\", { focused: \"true\" })");
+		StringAssert.Contains(source, "requestHostCommand(\"focus\", { focused: \"false\" })");
+		StringAssert.Contains(source, "refreshSecretDecorations: function ()");
+		StringAssert.Contains(source, "secret-masked-value");
+		StringAssert.Contains(source, "secretDecorations: []");
+
+		// CSS for the masked overlay must be present so the decoration
+		// actually hides the literal characters.
+		StringAssert.Contains(source, ".secret-masked-value {");
+		StringAssert.Contains(source, "color: transparent !important;");
+
+		// C#-side: a "focus" forrest:// command is routed to the
+		// EditorFocusChanged event so the workbench host can drive the
+		// view model's IsActiveEditorFocused state.
+		StringAssert.Contains(source, "EditorFocusChanged?.Invoke(this, new MonacoEditorFocusEventArgs(focused));");
+		StringAssert.Contains(source, "public event EventHandler<MonacoEditorFocusEventArgs>? EditorFocusChanged;");
+		StringAssert.Contains(source, "public sealed class MonacoEditorFocusEventArgs(bool isFocused)");
+	}
+
 	private static string GetMethodBody(string source, string signaturePrefix, string methodName)
 	{
 		Match match = Regex.Match(

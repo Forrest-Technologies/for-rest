@@ -252,6 +252,11 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.SetBinding(MonacoEditorSurface.EditableRangesJsonProperty, nameof(MainPageViewModel.ActiveEditorEditableRangesJson));
 		editor.SetBinding(MonacoEditorSurface.EditorFontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
 		editor.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		// Monaco stays bound to the raw ActiveEditorText so the model
+		// always holds the real source. Secret values are hidden via
+		// JavaScript decorations the Monaco host applies/removes on
+		// focus change — that avoids the cursor jumping when a user
+		// taps into a previously masked editor.
 		editor.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
 		editor.SetBinding(MonacoEditorSurface.LanguageHelpJsonProperty, nameof(MainPageViewModel.LanguageHelpCatalogJson));
 		editor.SetBinding(MonacoEditorSurface.RequestedCursorLineNumberProperty, nameof(MainPageViewModel.ActiveEditorRequestedCursorLineNumber));
@@ -261,7 +266,16 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.UndoRequested += OnEditorUndoRequested;
 		editor.RedoRequested += OnEditorRedoRequested;
 		editor.CursorPositionChanged += OnEditorCursorPositionChanged;
+		editor.EditorFocusChanged += OnMonacoEditorFocusChanged;
 		return editor;
+	}
+
+	private void OnMonacoEditorFocusChanged(object? sender, MonacoEditorFocusEventArgs e)
+	{
+		if (BindingContext is MainPageViewModel viewModel)
+		{
+			viewModel.SetActiveEditorFocus(e.IsFocused);
+		}
 	}
 
 	private View BuildLanguageHelpExampleSurface()

@@ -1228,9 +1228,7 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        if (!TryReadMessageAssertion(trimmedLine[7..].Trim(), out var expressionText, out var message)
-            || !TryReadLeadingOperator(expressionText, out var comparisonOperator, out var right)
-            || !TryParseExpression(right, out var value))
+        if (!TryParseOperatorAssertion(trimmedLine[7..].Trim(), out var comparisonOperator, out var value, out var message, out var expressionText))
         {
             return false;
         }
@@ -1258,9 +1256,7 @@ public sealed class ForRestScriptParser
                 out assertion);
         }
 
-        if (!TryReadMessageAssertion(remainder, out var expressionText, out var message)
-            || !TryReadLeadingOperator(expressionText, out var comparisonOperator, out var right)
-            || !TryParseExpression(right, out var value))
+        if (!TryParseOperatorAssertion(remainder, out var comparisonOperator, out var value, out var message, out var expressionText))
         {
             return false;
         }
@@ -1293,9 +1289,7 @@ public sealed class ForRestScriptParser
                 out assertion);
         }
 
-        if (!TryReadMessageAssertion(afterHeader.Trim(), out var expressionText, out var message)
-            || !TryReadLeadingOperator(expressionText, out var comparisonOperator, out var right)
-            || !TryParseExpression(right, out var value))
+        if (!TryParseOperatorAssertion(afterHeader.Trim(), out var comparisonOperator, out var value, out var message, out var expressionText))
         {
             return false;
         }
@@ -1329,20 +1323,17 @@ public sealed class ForRestScriptParser
                 selector);
         }
 
-        if (!TryReadMessageAssertion(afterSelector.Trim(), out var expressionText, out var message))
-        {
-            return false;
-        }
+        string afterSelectorTrimmed = afterSelector.Trim();
 
-        if (string.Equals(expressionText, "exists", StringComparison.OrdinalIgnoreCase))
+        // `json "$.id" exists` with or without a trailing label. We check
+        // this shape ahead of the operator form because `exists` is a
+        // bareword marker, not an operator.
+        if (TryParseJsonExistsAssertion(afterSelectorTrimmed, selector, out assertion))
         {
-            string existsLabel = ResolveAssertionLabel(message, $"json \"{selector}\" exists");
-            assertion = new(ForRestScriptAssertionTarget.Json, ForRestScriptComparisonOperator.Exists, existsLabel, Selector: selector);
             return true;
         }
 
-        if (!TryReadLeadingOperator(expressionText, out var comparisonOperator, out var right)
-            || !TryParseExpression(right, out var value))
+        if (!TryParseOperatorAssertion(afterSelectorTrimmed, out var comparisonOperator, out var value, out var message, out var expressionText))
         {
             return false;
         }
@@ -1350,6 +1341,92 @@ public sealed class ForRestScriptParser
         string label = ResolveAssertionLabel(message, $"json \"{selector}\" {expressionText}");
         assertion = new(ForRestScriptAssertionTarget.Json, comparisonOperator, label, Selector: selector, Value: value);
         return true;
+    }
+
+    private static bool TryParseJsonExistsAssertion(string input, string selector, out ForRestScriptAssertion? assertion)
+    {
+        assertion = null;
+        string trimmed = TrimOptionalTerminator(input);
+        if (string.Equals(trimmed, "exists", StringComparison.OrdinalIgnoreCase))
+        {
+            assertion = new(
+                ForRestScriptAssertionTarget.Json,
+                ForRestScriptComparisonOperator.Exists,
+                $"json \"{selector}\" exists",
+                Selector: selector);
+            return true;
+        }
+
+        if (TryReadTrailingQuotedString(trimmed, out var withoutLabel, out var label)
+            && string.Equals(withoutLabel.Trim(), "exists", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(label))
+        {
+            assertion = new(
+                ForRestScriptAssertionTarget.Json,
+                ForRestScriptComparisonOperator.Exists,
+                label!,
+                Selector: selector);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Parse an assertion right-hand side of the form
+    /// <c>&lt;operator&gt; &lt;value&gt;</c> with an optional trailing
+    /// quoted label. The human-readable message is ambiguous when the
+    /// comparison value is itself a quoted string (e.g.
+    /// <c>contains "json"</c> — is <c>"json"</c> the value or the label?).
+    /// To resolve it we try the no-label shape first; only if that fails
+    /// to yield a valid expression do we fall back to stripping the
+    /// trailing quoted string as the label.
+    /// </summary>
+    private static bool TryParseOperatorAssertion(
+        string input,
+        out ForRestScriptComparisonOperator comparisonOperator,
+        out ForRestScriptValueExpression? value,
+        out string? message,
+        out string expressionText)
+    {
+        comparisonOperator = ForRestScriptComparisonOperator.Equal;
+        value = null;
+        message = null;
+        expressionText = string.Empty;
+
+        string trimmed = TrimOptionalTerminator(input);
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return false;
+        }
+
+        // Attempt 1: assume no trailing label, parse the entire trimmed
+        // text as an operator expression.
+        if (TryReadLeadingOperator(trimmed, out var primaryOperator, out var primaryRight)
+            && TryParseExpression(primaryRight, out var primaryValue))
+        {
+            comparisonOperator = primaryOperator;
+            value = primaryValue;
+            expressionText = trimmed;
+            message = null;
+            return true;
+        }
+
+        // Attempt 2: the trailing quoted token may be a label, not the
+        // operand. Strip it and retry.
+        if (TryReadTrailingQuotedString(trimmed, out var withoutLabel, out var trailingLabel)
+            && !string.IsNullOrWhiteSpace(withoutLabel)
+            && TryReadLeadingOperator(withoutLabel, out var fallbackOperator, out var fallbackRight)
+            && TryParseExpression(fallbackRight, out var fallbackValue))
+        {
+            comparisonOperator = fallbackOperator;
+            value = fallbackValue;
+            expressionText = withoutLabel;
+            message = trailingLabel;
+            return true;
+        }
+
+        return false;
     }
 
     private static string ResolveAssertionLabel(string? message, string fallback)
@@ -1400,33 +1477,6 @@ public sealed class ForRestScriptParser
             HeaderName: string.IsNullOrWhiteSpace(headerName) ? null : headerName,
             Selector: selector,
             Value: new ForRestScriptStringExpression(pattern!));
-        return true;
-    }
-
-    private static bool TryReadMessageAssertion(string text, out string expressionText, out string? message)
-    {
-        expressionText = string.Empty;
-        message = null;
-        text = TrimOptionalTerminator(text);
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return false;
-        }
-
-        // The trailing human-readable message is optional. If we can find a
-        // trailing quoted token that consumes the tail of the line we use it
-        // as the assertion label; otherwise the entire input becomes the
-        // expression and the caller is responsible for synthesizing a
-        // default label from the assertion's source.
-        if (TryReadTrailingQuotedString(text, out var withMessageExpression, out var trailingMessage))
-        {
-            expressionText = withMessageExpression;
-            message = trailingMessage;
-            return true;
-        }
-
-        expressionText = text;
-        message = null;
         return true;
     }
 
