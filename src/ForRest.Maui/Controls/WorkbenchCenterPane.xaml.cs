@@ -290,8 +290,28 @@ public partial class WorkbenchCenterPane : ContentView
 		};
 		editor.SetBinding(EditorSurface.EditorFontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
 		editor.SetBinding(EditorSurface.LanguageProperty, nameof(MainPageViewModel.ActiveEditorLanguage));
-		editor.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
+		// Bind to the presentation text so secret values stay masked
+		// while the user is not actively editing the request script.
+		editor.SetBinding(EditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorPresentationText), mode: BindingMode.TwoWay);
+		editor.InnerEditorFocused += OnNativeEditorFocused;
+		editor.InnerEditorUnfocused += OnNativeEditorUnfocused;
 		return editor;
+	}
+
+	private void OnNativeEditorFocused(object? sender, FocusEventArgs e)
+	{
+		if (BindingContext is MainPageViewModel viewModel)
+		{
+			viewModel.SetActiveEditorFocus(true);
+		}
+	}
+
+	private void OnNativeEditorUnfocused(object? sender, FocusEventArgs e)
+	{
+		if (BindingContext is MainPageViewModel viewModel)
+		{
+			viewModel.SetActiveEditorFocus(false);
+		}
 	}
 
 	private View BuildFallbackEditor()
@@ -350,7 +370,9 @@ public partial class WorkbenchCenterPane : ContentView
 		editor.SetDynamicResource(InputView.TextColorProperty, ThemeResourceKeys.TextPrimaryColor);
 		editor.SetDynamicResource(VisualElement.BackgroundColorProperty, ThemeResourceKeys.EditorBackgroundColor);
 		editor.SetBinding(Editor.FontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
-		editor.SetBinding(Editor.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
+		editor.SetBinding(Editor.TextProperty, nameof(MainPageViewModel.ActiveEditorPresentationText), mode: BindingMode.TwoWay);
+		editor.Focused += OnNativeEditorFocused;
+		editor.Unfocused += OnNativeEditorUnfocused;
 
 		Grid grid = new()
 		{

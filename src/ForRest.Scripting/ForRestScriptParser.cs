@@ -582,7 +582,7 @@ public sealed class ForRestScriptParser
         }
 
         diagnostics.Add(CreateDiagnostic(
-            "Could not parse the expectation. Use forms like 'expect status == 200 \"returns 200\"', 'expect header \"Content-Type\" contains \"json\" \"json response\"', or 'expect json \"$.id\" exists \"has id\"'.",
+            "Could not parse the expectation. Supported forms: expect status == 200; expect header \"Content-Type\" contains \"json\"; expect json \"$.id\" exists; expect body regex \"<pattern>\". A trailing quoted label is optional.",
             lineNumber,
             sourceLine));
         return true;
@@ -1235,7 +1235,8 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        assertion = new(ForRestScriptAssertionTarget.Status, comparisonOperator, message!, Value: value);
+        string label = ResolveAssertionLabel(message, $"status {expressionText}");
+        assertion = new(ForRestScriptAssertionTarget.Status, comparisonOperator, label, Value: value);
         return true;
     }
 
@@ -1264,7 +1265,8 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        assertion = new(ForRestScriptAssertionTarget.Body, comparisonOperator, message!, Value: value);
+        string label = ResolveAssertionLabel(message, $"body {expressionText}");
+        assertion = new(ForRestScriptAssertionTarget.Body, comparisonOperator, label, Value: value);
         return true;
     }
 
@@ -1298,7 +1300,8 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        assertion = new(ForRestScriptAssertionTarget.Header, comparisonOperator, message!, HeaderName: headerName, Value: value);
+        string label = ResolveAssertionLabel(message, $"header \"{headerName}\" {expressionText}");
+        assertion = new(ForRestScriptAssertionTarget.Header, comparisonOperator, label, HeaderName: headerName, Value: value);
         return true;
     }
 
@@ -1333,7 +1336,8 @@ public sealed class ForRestScriptParser
 
         if (string.Equals(expressionText, "exists", StringComparison.OrdinalIgnoreCase))
         {
-            assertion = new(ForRestScriptAssertionTarget.Json, ForRestScriptComparisonOperator.Exists, message!, Selector: selector);
+            string existsLabel = ResolveAssertionLabel(message, $"json \"{selector}\" exists");
+            assertion = new(ForRestScriptAssertionTarget.Json, ForRestScriptComparisonOperator.Exists, existsLabel, Selector: selector);
             return true;
         }
 
@@ -1343,8 +1347,14 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        assertion = new(ForRestScriptAssertionTarget.Json, comparisonOperator, message!, Selector: selector, Value: value);
+        string label = ResolveAssertionLabel(message, $"json \"{selector}\" {expressionText}");
+        assertion = new(ForRestScriptAssertionTarget.Json, comparisonOperator, label, Selector: selector, Value: value);
         return true;
+    }
+
+    private static string ResolveAssertionLabel(string? message, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(message) ? fallback.Trim() : message!;
     }
 
     private static bool TryParseRegexAssertion(
@@ -1360,15 +1370,33 @@ public sealed class ForRestScriptParser
             return false;
         }
 
-        if (!TryReadQuotedToken(afterPattern.Trim(), out var message, out var remainder) || !string.IsNullOrWhiteSpace(remainder))
+        // The trailing label is optional. If a quoted token follows the
+        // pattern we treat it as the human-readable message; otherwise we
+        // synthesize a default from the assertion source so the parser
+        // matches the relaxed shape used for `expect status == 200`.
+        string trailing = afterPattern.Trim();
+        string? message = null;
+        if (trailing.Length > 0)
         {
-            return false;
+            if (!TryReadQuotedToken(trailing, out var parsedMessage, out var remainder) || !string.IsNullOrWhiteSpace(remainder))
+            {
+                return false;
+            }
+
+            message = parsedMessage;
         }
+
+        string fallback = target switch
+        {
+            ForRestScriptAssertionTarget.Header => $"header \"{headerName}\" regex \"{pattern}\"",
+            ForRestScriptAssertionTarget.Json => $"json \"{selector}\" regex \"{pattern}\"",
+            _ => $"body regex \"{pattern}\"",
+        };
 
         assertion = new(
             target,
             ForRestScriptComparisonOperator.RegexMatch,
-            message!,
+            ResolveAssertionLabel(message, fallback),
             HeaderName: string.IsNullOrWhiteSpace(headerName) ? null : headerName,
             Selector: selector,
             Value: new ForRestScriptStringExpression(pattern!));
@@ -1380,10 +1408,25 @@ public sealed class ForRestScriptParser
         expressionText = string.Empty;
         message = null;
         text = TrimOptionalTerminator(text);
-        if (!TryReadTrailingQuotedString(text, out expressionText, out message))
+        if (string.IsNullOrWhiteSpace(text))
         {
             return false;
         }
+
+        // The trailing human-readable message is optional. If we can find a
+        // trailing quoted token that consumes the tail of the line we use it
+        // as the assertion label; otherwise the entire input becomes the
+        // expression and the caller is responsible for synthesizing a
+        // default label from the assertion's source.
+        if (TryReadTrailingQuotedString(text, out var withMessageExpression, out var trailingMessage))
+        {
+            expressionText = withMessageExpression;
+            message = trailingMessage;
+            return true;
+        }
+
+        expressionText = text;
+        message = null;
         return true;
     }
 

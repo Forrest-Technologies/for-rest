@@ -87,8 +87,11 @@
                            Style="{StaticResource MonoMetaStyle}" />
                 </Grid>
 
-                <Editor Grid.Row="1"
-                        Text="{Binding ActiveEditorText, Mode=TwoWay}"
+                <Editor x:Name="RequestEditor"
+                        Grid.Row="1"
+                        Text="{Binding ActiveEditorPresentationText, Mode=TwoWay}"
+                        Focused="OnRequestEditorFocused"
+                        Unfocused="OnRequestEditorUnfocused"
                         AutoSize="Disabled"
                         Margin="0"
                         FontFamily="OpenSansRegular"

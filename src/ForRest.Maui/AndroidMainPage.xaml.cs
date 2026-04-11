@@ -169,6 +169,21 @@ public partial class AndroidMainPage : ContentPage
 		}
 	}
 
+	private void OnRequestEditorFocused(object? sender, FocusEventArgs e)
+	{
+		// Reveal real secret values for the user the moment they tap
+		// into the editor — they're now actively editing and need to
+		// see what they're working with.
+		ViewModel?.SetActiveEditorFocus(true);
+	}
+
+	private void OnRequestEditorUnfocused(object? sender, FocusEventArgs e)
+	{
+		// Re-mask secrets as soon as focus leaves so a phone left on a
+		// desk doesn't expose credentials over someone's shoulder.
+		ViewModel?.SetActiveEditorFocus(false);
+	}
+
 	private async Task ExecuteWithLaunchGuard(Func<Task> action, string context)
 	{
 		try

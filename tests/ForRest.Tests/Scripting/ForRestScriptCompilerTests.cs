@@ -1143,6 +1143,41 @@ public sealed class ForRestScriptCompilerTests
         StringAssert.Contains(messages, "Could not parse the expectation.");
         StringAssert.Contains(messages, "expect status == 200");
         StringAssert.Contains(messages, "expect header \"Content-Type\" contains \"json\"");
+        StringAssert.Contains(messages, "trailing quoted label is optional");
+    }
+
+    [TestMethod]
+    public void Compile_accepts_expect_assertions_without_a_trailing_quoted_message()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Bare Expect"
+            method GET
+            url "https://api.example.test/items"
+
+            expect status == 200
+            expect header "Content-Type" contains "json"
+            expect json "$.id" exists
+            expect body regex "ok"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(
+            result.Succeeded,
+            string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Document);
+        Assert.AreEqual(4, result.Document!.Tests.Count);
+        StringAssert.Contains(result.Document.Tests[0].Message, "status == 200");
+        StringAssert.Contains(result.Document.Tests[1].Message, "Content-Type");
+        StringAssert.Contains(result.Document.Tests[2].Message, "$.id");
+        StringAssert.Contains(result.Document.Tests[3].Message, "regex");
     }
 
     [TestMethod]
