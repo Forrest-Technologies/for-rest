@@ -626,6 +626,7 @@ public sealed class MainPageViewModel : ObservableObject
 			if (SetProperty(ref _debugOutputText, value))
 			{
 				OnPropertyChanged(nameof(CanCopyDebugOutput));
+				OnPropertyChanged(nameof(CanCopyDebugSummary));
 			}
 		}
 	}
@@ -1192,6 +1193,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public bool CanCopyRawRequest => !string.IsNullOrWhiteSpace(RequestRawText);
 
 	public bool CanCopyDebugOutput => !string.IsNullOrWhiteSpace(DebugOutputText);
+
+	public bool CanCopyDebugSummary => !string.IsNullOrWhiteSpace(DebugOutputText);
 
 	public bool CanCopyHeaders => ResponseHeaderRows.Count > 0;
 
@@ -2312,6 +2315,25 @@ public sealed class MainPageViewModel : ObservableObject
 
 		await Clipboard.Default.SetTextAsync(DebugOutputText);
 		ExecutionStatus = "Copied debug output.";
+	}
+
+	public async Task CopyDebugSummaryAsync()
+	{
+		if (!CanCopyDebugSummary)
+		{
+			ExecutionStatus = "No debug output available to summarize.";
+			return;
+		}
+
+		string summary = AiDebugSummaryFormatter.BuildSummary(DebugOutputText);
+		if (string.IsNullOrWhiteSpace(summary))
+		{
+			ExecutionStatus = "No debug summary available to copy.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(summary);
+		ExecutionStatus = "Copied debug summary.";
 	}
 
 	public async Task CopyStashAsync()

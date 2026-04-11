@@ -36,6 +36,7 @@
     <Compile Include="..\..\src\ForRest.Maui\Theming\ThemeConfigNormalizer.cs" Link="Theming\ThemeConfigNormalizer.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Theming\ThemeConfigStore.cs" Link="Theming\ThemeConfigStore.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Theming\SettingsTomlDocumentService.cs" Link="Theming\SettingsTomlDocumentService.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Services\AiDebugSummaryFormatter.cs" Link="Services\AiDebugSummaryFormatter.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\AppLaunchGuard.cs" Link="Services\AppLaunchGuard.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ForRestEditorDebugSnapshotFactory.cs" Link="Services\ForRestEditorDebugSnapshotFactory.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\InMemoryExecutionHistoryRepository.cs" Link="Services\InMemoryExecutionHistoryRepository.cs" />

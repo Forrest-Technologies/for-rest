@@ -242,6 +242,11 @@ public partial class InspectorPane : ContentView
 		await ViewModel.CopyDebugOutputAsync();
 	}
 
+	private async void OnCopyDebugSummaryClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.CopyDebugSummaryAsync();
+	}
+
 	private async void OnExportStashClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.ExportStashCsvAsync();

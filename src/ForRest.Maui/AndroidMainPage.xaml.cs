@@ -152,6 +152,23 @@ public partial class AndroidMainPage : ContentPage
 		}
 	}
 
+	private async void OnCopyDebugSummaryClicked(object? sender, EventArgs e)
+	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
+		try
+		{
+			await ViewModel.CopyDebugSummaryAsync();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Android debug summary copy failed.", exception);
+		}
+	}
+
 	private async Task ExecuteWithLaunchGuard(Func<Task> action, string context)
 	{
 		try
@@ -185,6 +202,14 @@ public partial class AndroidMainPage : ContentPage
 		ResponseTabButton.IsEnabled = outputView != AndroidOutputView.Response;
 		RawTabButton.IsEnabled = outputView != AndroidOutputView.Raw;
 		DebugTabButton.IsEnabled = outputView != AndroidOutputView.Debug;
+
+		// The "Copy Summary" affordance is only meaningful while the
+		// debug pane is in view — outside of that the summary collapses
+		// to noise. Hide the pretty-print toggle in the same slot when
+		// summary mode takes over so the toolbar stays uncluttered.
+		bool isDebug = outputView == AndroidOutputView.Debug;
+		CopyDebugSummaryButton.IsVisible = isDebug;
+		ResponsePrettyPrintButton.IsVisible = !isDebug;
 	}
 
 	private static View BuildFallbackContent(Exception exception)
