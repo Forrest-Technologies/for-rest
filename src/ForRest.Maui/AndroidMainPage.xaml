@@ -87,8 +87,11 @@
                            Style="{StaticResource MonoMetaStyle}" />
                 </Grid>
 
-                <Editor Grid.Row="1"
-                        Text="{Binding ActiveEditorText, Mode=TwoWay}"
+                <Editor x:Name="RequestEditor"
+                        Grid.Row="1"
+                        Text="{Binding ActiveEditorPresentationText, Mode=TwoWay}"
+                        Focused="OnRequestEditorFocused"
+                        Unfocused="OnRequestEditorUnfocused"
                         AutoSize="Disabled"
                         Margin="0"
                         FontFamily="OpenSansRegular"
@@ -134,12 +137,22 @@
                         Text="Copy Output"
                         Style="{StaticResource SubtleToolbarButtonStyle}"
                         Clicked="OnCopyOutputClicked" />
-                <Button Grid.Row="1"
+                <Button x:Name="ResponsePrettyPrintButton"
+                        Grid.Row="1"
                         Grid.Column="1"
                         Grid.ColumnSpan="2"
                         Text="{Binding ResponsePrettyPrintButtonText}"
                         Style="{StaticResource DenseTabButtonStyle}"
                         Clicked="OnTogglePrettyPrintClicked" />
+                <Button x:Name="CopyDebugSummaryButton"
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Grid.ColumnSpan="2"
+                        Text="Copy Summary"
+                        Style="{StaticResource SubtleToolbarButtonStyle}"
+                        Clicked="OnCopyDebugSummaryClicked"
+                        IsEnabled="{Binding CanCopyDebugSummary}"
+                        IsVisible="False" />
                 <Label Grid.Row="1"
                        Grid.Column="3"
                        Text="{Binding ExecutionStatus}"

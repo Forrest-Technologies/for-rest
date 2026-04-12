@@ -814,6 +814,70 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public void ActiveEditorPresentationText_masks_secret_values_when_editor_is_unfocused()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		viewModel.ActiveEditorText = """
+			secret api_key = "super-secret-token"
+			method GET
+			url "https://api.example.test/items"
+			""";
+
+		viewModel.SetActiveEditorFocus(false);
+
+		StringAssert.Contains(viewModel.ActiveEditorPresentationText, "secret api_key = \"***\"");
+		Assert.IsFalse(viewModel.ActiveEditorPresentationText.Contains("super-secret-token", StringComparison.Ordinal));
+		StringAssert.Contains(viewModel.ActiveEditorPresentationText, "method GET");
+		// The underlying source must remain untouched so the user can run
+		// the request and so the AI restoration logic still has the real
+		// value to splice back into AI rewrites.
+		StringAssert.Contains(viewModel.ActiveEditorText, "super-secret-token");
+	}
+
+	[TestMethod]
+	public void ActiveEditorPresentationText_reveals_secrets_after_focus_returns_to_editor()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		viewModel.ActiveEditorText = "secret api_key = \"super-secret-token\"\nmethod GET";
+
+		viewModel.SetActiveEditorFocus(false);
+		viewModel.SetActiveEditorFocus(true);
+
+		StringAssert.Contains(viewModel.ActiveEditorPresentationText, "super-secret-token");
+		Assert.IsFalse(viewModel.ActiveEditorPresentationText.Contains("\"***\"", StringComparison.Ordinal));
+	}
+
+	[TestMethod]
+	public void ActiveEditorPresentationText_setter_drops_writes_when_unfocused_to_protect_secrets()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		viewModel.ActiveEditorText = "secret api_key = \"super-secret-token\"\nmethod GET";
+		viewModel.SetActiveEditorFocus(false);
+
+		// Simulating what would happen if a binding feedback loop tried to
+		// write the masked text back into the view model — we must drop it
+		// on the floor so the real secret value isn't replaced by `"***"`.
+		viewModel.ActiveEditorPresentationText = "secret api_key = \"***\"\nmethod GET";
+
+		StringAssert.Contains(viewModel.ActiveEditorText, "super-secret-token");
+	}
+
+	[TestMethod]
+	public void ActiveEditorPresentationText_propagates_user_edits_when_focused()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		viewModel.SetActiveEditorFocus(true);
+
+		viewModel.ActiveEditorPresentationText = "name \"Edited\"\nmethod POST";
+
+		Assert.AreEqual("name \"Edited\"\nmethod POST", viewModel.ActiveEditorText);
+	}
+
+	[TestMethod]
 	public void DeleteSelectedRequest_replaces_last_request_with_new_request()
 	{
 		using TestHarness harness = new();

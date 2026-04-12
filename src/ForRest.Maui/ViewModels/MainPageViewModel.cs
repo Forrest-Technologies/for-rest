@@ -126,6 +126,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private double _resultPaneTabFontSize = ForRestStyleSettings.DefaultResultPaneTabFontSize;
 	private string _themeConfigText;
 	private string _activeEditorText;
+	private bool _isActiveEditorFocused;
 	private string _activeEditorLanguage;
 	private string _activeDocumentKind;
 	private string _activeDocumentKindLabel;
@@ -626,6 +627,7 @@ public sealed class MainPageViewModel : ObservableObject
 			if (SetProperty(ref _debugOutputText, value))
 			{
 				OnPropertyChanged(nameof(CanCopyDebugOutput));
+				OnPropertyChanged(nameof(CanCopyDebugSummary));
 			}
 		}
 	}
@@ -682,7 +684,62 @@ public sealed class MainPageViewModel : ObservableObject
 			}
 
 			RecordActiveDocumentHistoryChange(previousValue);
+			OnPropertyChanged(nameof(ActiveEditorPresentationText));
 		}
+	}
+
+	/// <summary>
+	/// Display-side wrapper around <see cref="ActiveEditorText"/> that
+	/// hides every <c>secret</c> declaration's value with a fixed mask
+	/// while the editor is unfocused. As soon as the user taps into the
+	/// editor (focus arrives) the underlying source is shown again so
+	/// they can read and edit the real value. Settings editors are never
+	/// masked because they have their own redaction strategy and the
+	/// `secret` keyword only applies to request scripts.
+	/// </summary>
+	public string ActiveEditorPresentationText
+	{
+		get
+		{
+			if (_isActiveEditorFocused || IsActiveSettingsEditor)
+			{
+				return ActiveEditorText;
+			}
+
+			return SecretMaskingService.MaskSecrets(ActiveEditorText);
+		}
+		set
+		{
+			// The two-way binding fires this setter when the user types
+			// in the focused editor (the only state in which the user
+			// sees real text). When the editor is unfocused the displayed
+			// text is the masked form, and propagating that back into
+			// ActiveEditorText would clobber the real secret values, so
+			// we drop those writes on the floor.
+			if (!_isActiveEditorFocused && !IsActiveSettingsEditor)
+			{
+				return;
+			}
+
+			ActiveEditorText = value;
+		}
+	}
+
+	public bool IsActiveEditorFocused
+	{
+		get => _isActiveEditorFocused;
+		private set
+		{
+			if (SetProperty(ref _isActiveEditorFocused, value))
+			{
+				OnPropertyChanged(nameof(ActiveEditorPresentationText));
+			}
+		}
+	}
+
+	public void SetActiveEditorFocus(bool focused)
+	{
+		IsActiveEditorFocused = focused;
 	}
 
 	public string ActiveEditorLanguage
@@ -1192,6 +1249,8 @@ public sealed class MainPageViewModel : ObservableObject
 	public bool CanCopyRawRequest => !string.IsNullOrWhiteSpace(RequestRawText);
 
 	public bool CanCopyDebugOutput => !string.IsNullOrWhiteSpace(DebugOutputText);
+
+	public bool CanCopyDebugSummary => !string.IsNullOrWhiteSpace(DebugOutputText);
 
 	public bool CanCopyHeaders => ResponseHeaderRows.Count > 0;
 
@@ -2312,6 +2371,25 @@ public sealed class MainPageViewModel : ObservableObject
 
 		await Clipboard.Default.SetTextAsync(DebugOutputText);
 		ExecutionStatus = "Copied debug output.";
+	}
+
+	public async Task CopyDebugSummaryAsync()
+	{
+		if (!CanCopyDebugSummary)
+		{
+			ExecutionStatus = "No debug output available to summarize.";
+			return;
+		}
+
+		string summary = AiDebugSummaryFormatter.BuildSummary(DebugOutputText);
+		if (string.IsNullOrWhiteSpace(summary))
+		{
+			ExecutionStatus = "No debug summary available to copy.";
+			return;
+		}
+
+		await Clipboard.Default.SetTextAsync(summary);
+		ExecutionStatus = "Copied debug summary.";
 	}
 
 	public async Task CopyStashAsync()
@@ -4942,6 +5020,7 @@ public sealed class MainPageViewModel : ObservableObject
 	{
 		_activeEditorText = value;
 		OnPropertyChanged(nameof(ActiveEditorText));
+		OnPropertyChanged(nameof(ActiveEditorPresentationText));
 	}
 
 	private void ForceActiveEditorRefresh(bool includeText = true)

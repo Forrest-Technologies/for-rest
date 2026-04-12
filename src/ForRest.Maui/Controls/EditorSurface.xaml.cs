@@ -60,7 +60,19 @@ public partial class EditorSurface : ContentView
 	{
 		InitializeComponent();
 		UpdateLineNumbers(Text);
+		TextEditor.Focused += OnTextEditorFocused;
+		TextEditor.Unfocused += OnTextEditorUnfocused;
 	}
+
+	/// <summary>
+	/// Forwarded from the inner Maui Editor so the host (e.g. workbench
+	/// pane) can react to the user starting / ending an edit session
+	/// without reaching into the visual tree. Used by the secret-masking
+	/// presentation layer to swap masked and revealed text on focus.
+	/// </summary>
+	public event EventHandler<FocusEventArgs>? InnerEditorFocused;
+
+	public event EventHandler<FocusEventArgs>? InnerEditorUnfocused;
 
 	public ObservableCollection<string> LineNumbers { get; } = [];
 
@@ -150,6 +162,16 @@ public partial class EditorSurface : ContentView
 	private static void OnTextChanged(BindableObject bindable, object? oldValue, object? newValue)
 	{
 		((EditorSurface)bindable).UpdateLineNumbers(newValue as string);
+	}
+
+	private void OnTextEditorFocused(object? sender, FocusEventArgs e)
+	{
+		InnerEditorFocused?.Invoke(this, e);
+	}
+
+	private void OnTextEditorUnfocused(object? sender, FocusEventArgs e)
+	{
+		InnerEditorUnfocused?.Invoke(this, e);
 	}
 
 	private void UpdateLineNumbers(string? text)

@@ -152,6 +152,38 @@ public partial class AndroidMainPage : ContentPage
 		}
 	}
 
+	private async void OnCopyDebugSummaryClicked(object? sender, EventArgs e)
+	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
+		try
+		{
+			await ViewModel.CopyDebugSummaryAsync();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Android debug summary copy failed.", exception);
+		}
+	}
+
+	private void OnRequestEditorFocused(object? sender, FocusEventArgs e)
+	{
+		// Reveal real secret values for the user the moment they tap
+		// into the editor — they're now actively editing and need to
+		// see what they're working with.
+		ViewModel?.SetActiveEditorFocus(true);
+	}
+
+	private void OnRequestEditorUnfocused(object? sender, FocusEventArgs e)
+	{
+		// Re-mask secrets as soon as focus leaves so a phone left on a
+		// desk doesn't expose credentials over someone's shoulder.
+		ViewModel?.SetActiveEditorFocus(false);
+	}
+
 	private async Task ExecuteWithLaunchGuard(Func<Task> action, string context)
 	{
 		try
@@ -185,6 +217,14 @@ public partial class AndroidMainPage : ContentPage
 		ResponseTabButton.IsEnabled = outputView != AndroidOutputView.Response;
 		RawTabButton.IsEnabled = outputView != AndroidOutputView.Raw;
 		DebugTabButton.IsEnabled = outputView != AndroidOutputView.Debug;
+
+		// The "Copy Summary" affordance is only meaningful while the
+		// debug pane is in view — outside of that the summary collapses
+		// to noise. Hide the pretty-print toggle in the same slot when
+		// summary mode takes over so the toolbar stays uncluttered.
+		bool isDebug = outputView == AndroidOutputView.Debug;
+		CopyDebugSummaryButton.IsVisible = isDebug;
+		ResponsePrettyPrintButton.IsVisible = !isDebug;
 	}
 
 	private static View BuildFallbackContent(Exception exception)

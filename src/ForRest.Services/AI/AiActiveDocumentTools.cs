@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -131,11 +132,32 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
+        // The default JavaScript encoder escapes single and double quotes
+        // as \u0027/\u0022. Tool results round-trip through a second JSON
+        // envelope before they reach the model, and reasoning models
+        // routinely fail to decode the resulting double-escaped tokens —
+        // a parser diagnostic that should look like
+        //   expect header "Content-Type" contains "json"
+        // arrives as
+        //   expect header \\u0022Content-Type\\u0022 contains \\u0022json\\u0022
+        // and the model "fixes" the assertion by guessing nonsense forms.
+        // The relaxed encoder keeps quotes as plain `"` so the diagnostic
+        // stays readable after both encoding hops.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    private static readonly Regex SecretRedactionPattern = new(
-        @"(?<=\bsecret\s+\w+\s*=\s*)""[^""]*""",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // Match the entire `secret <name> = <value>` declaration as a line, so
+    // we can redact non-string secret values (identifiers, function calls,
+    // future list literals) and round-trip the original right-hand side
+    // back into the document after the AI replaces it. Captures:
+    //   1: leading whitespace
+    //   2: secret name
+    //   3: raw value expression text (everything after `=` to end of line)
+    private static readonly Regex SecretDeclarationPattern = new(
+        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
+    private const string RedactedSecretMarker = "\"***\"";
 
     #endregion
 
@@ -223,8 +245,15 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             return SerializeFailure($"The patch exceeds the configured maximum of {settings.Tools.MaxPatchCharacters} replacement characters.");
         }
 
+        // The AI only ever sees the *redacted* document via
+        // ReadActiveDocument, so the start indices it produces are valid
+        // against the redacted text — not the live source. Apply the
+        // edits to the redacted text first, then splice the original
+        // secret declarations back in so credentials survive even when
+        // the patch incidentally touches lines around them.
+        string redactedSource = RedactSecrets(document.SourceText);
         AiDocumentPatchResult patchResult = documentPatchService.Apply(
-            new(document.DocumentId, document.SourceText, edits));
+            new(document.DocumentId, redactedSource, edits));
 
         if (!patchResult.Succeeded)
         {
@@ -232,22 +261,23 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             {
                 succeeded = false,
                 documentId = document.DocumentId,
-                patchedText = document.SourceText,
+                patchedText = redactedSource,
                 retryWithRead = true,
                 retryWithReplace = true,
-                docHints = BuildDocHints(string.Join(Environment.NewLine, patchResult.Errors), document.Diagnostics, document.SourceText),
+                docHints = BuildDocHints(string.Join(Environment.NewLine, patchResult.Errors), document.Diagnostics, redactedSource),
                 errors = patchResult.Errors,
             });
         }
 
-        AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, patchResult.PatchedText);
+        string restoredPatchedText = RestoreOriginalSecrets(document.SourceText, patchResult.PatchedText);
+        AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, restoredPatchedText);
         if (!updateResult.Succeeded)
         {
             return Serialize(new
             {
                 succeeded = false,
                 documentId = document.DocumentId,
-                patchedText = string.IsNullOrWhiteSpace(updateResult.UpdatedText) ? patchResult.PatchedText : updateResult.UpdatedText,
+                patchedText = string.IsNullOrWhiteSpace(updateResult.UpdatedText) ? patchResult.PatchedText : RedactSecrets(updateResult.UpdatedText),
                 retryWithRead = true,
                 retryWithReplace = updateResult.RetryWithReplace,
                 docHints = BuildDocHints(updateResult.Message, updateResult.Diagnostics, patchResult.PatchedText),
@@ -260,6 +290,10 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
         {
             succeeded = true,
             documentId = document.DocumentId,
+            // patchResult.PatchedText is already operating against the
+            // redacted source, so it inherits the `"***"` placeholders
+            // for any secret declarations the patch left intact. Echoing
+            // it directly keeps the AI from ever seeing the real values.
             patchedText = patchResult.PatchedText,
             errors = Array.Empty<string>(),
         });
@@ -290,7 +324,14 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             return SerializeFailure($"The replacement exceeds the configured maximum of {settings.Tools.MaxPatchCharacters} characters.");
         }
 
-        AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, updatedSourceText ?? string.Empty);
+        // The AI only ever sees redacted secret values, so any secret it
+        // copies into the rewritten document still has the `"***"` marker
+        // (or it deleted the secret line entirely). Splice the original
+        // declarations back in before the host commits the new text so
+        // user credentials survive AI rewrites.
+        string restoredSourceText = RestoreOriginalSecrets(document.SourceText, updatedSourceText ?? string.Empty);
+
+        AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, restoredSourceText);
         if (!updateResult.Succeeded)
         {
             return Serialize(new
@@ -310,7 +351,10 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
         {
             succeeded = true,
             documentId = document.DocumentId,
-            patchedText = updatedSourceText ?? string.Empty,
+            // Echo the redacted form back to the AI so it never sees the
+            // original secret values, even though the host now has the
+            // restored declarations.
+            patchedText = RedactSecrets(restoredSourceText),
             errors = Array.Empty<string>(),
         });
     }
@@ -368,7 +412,110 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             return sourceText;
         }
 
-        return SecretRedactionPattern.Replace(sourceText, "\"***\"");
+        return SecretDeclarationPattern.Replace(sourceText, match =>
+        {
+            string indent = match.Groups["indent"].Value;
+            string name = match.Groups["name"].Value;
+            return $"{indent}secret {name} = {RedactedSecretMarker}";
+        });
+    }
+
+    /// <summary>
+    /// Returns a name-keyed map of every <c>secret</c> declaration in
+    /// <paramref name="sourceText"/>, capturing the full original
+    /// declaration line (including indentation and the unredacted
+    /// right-hand side). Used to restore secrets after the AI replaces
+    /// the document with text it built from the redacted view.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> ExtractSecretDeclarations(string? sourceText)
+    {
+        Dictionary<string, string> declarations = new(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(sourceText))
+        {
+            return declarations;
+        }
+
+        foreach (Match match in SecretDeclarationPattern.Matches(sourceText))
+        {
+            string name = match.Groups["name"].Value;
+            if (string.IsNullOrEmpty(name) || declarations.ContainsKey(name))
+            {
+                continue;
+            }
+
+            // Store the canonical line text (no trailing whitespace) so it
+            // can be substituted back verbatim — preserving indentation,
+            // quoting, and any comment-free trailing characters the user
+            // wrote.
+            declarations[name] = match.Value.TrimEnd();
+        }
+
+        return declarations;
+    }
+
+    /// <summary>
+    /// Re-applies the original secret declarations after the AI returns
+    /// a replacement document. The AI only sees redacted secrets, so any
+    /// secret it leaves intact still has the <c>"***"</c> marker as its
+    /// value, and any secret it deletes outright must be re-inserted so
+    /// the user does not silently lose credentials.
+    /// </summary>
+    internal static string RestoreOriginalSecrets(string? originalSourceText, string? newSourceText)
+    {
+        IReadOnlyDictionary<string, string> originals = ExtractSecretDeclarations(originalSourceText);
+        if (originals.Count == 0)
+        {
+            return newSourceText ?? string.Empty;
+        }
+
+        string updated = newSourceText ?? string.Empty;
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        // First pass: replace each surviving secret declaration with its
+        // original line so the AI cannot mutate the value, even if it
+        // tried to write a different placeholder than `"***"`.
+        updated = SecretDeclarationPattern.Replace(updated, match =>
+        {
+            string name = match.Groups["name"].Value;
+            if (originals.TryGetValue(name, out string? originalLine))
+            {
+                seen.Add(name);
+                string indent = match.Groups["indent"].Value;
+                // Keep whatever indentation the AI placed the line at so
+                // surrounding formatting is preserved.
+                int firstNonWhitespace = 0;
+                while (firstNonWhitespace < originalLine.Length && (originalLine[firstNonWhitespace] == ' ' || originalLine[firstNonWhitespace] == '\t'))
+                {
+                    firstNonWhitespace++;
+                }
+
+                return indent + originalLine[firstNonWhitespace..];
+            }
+
+            return match.Value;
+        });
+
+        // Second pass: re-insert any secret the AI deleted entirely.
+        // Stick the missing declarations at the very top of the document
+        // so they take effect for the rest of the script and so the user
+        // can immediately see them after a rewrite.
+        List<string> missing = [];
+        foreach (KeyValuePair<string, string> entry in originals)
+        {
+            if (!seen.Contains(entry.Key))
+            {
+                missing.Add(entry.Value);
+            }
+        }
+
+        if (missing.Count > 0)
+        {
+            string newline = updated.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+            string prefix = string.Join(newline, missing) + newline;
+            updated = prefix + updated;
+        }
+
+        return updated;
     }
 
     private static string Serialize(object value)
