@@ -169,6 +169,13 @@ public partial class AndroidMainPage : ContentPage
 		}
 	}
 
+	private void OnSelectAllOutputClicked(object? sender, EventArgs e)
+	{
+		ResponseOutputEditor.Focus();
+		ResponseOutputEditor.CursorPosition = 0;
+		ResponseOutputEditor.SelectionLength = ResponseOutputEditor.Text?.Length ?? 0;
+	}
+
 	private void OnRequestEditorFocused(object? sender, FocusEventArgs e)
 	{
 		// Reveal real secret values for the user the moment they tap

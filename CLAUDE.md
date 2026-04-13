@@ -38,6 +38,10 @@ tests/
 dotnet build ForRest.slnx
 dotnet test tests\ForRest.Tests\ForRest.Tests.csproj
 Start-Process .\src\ForRest.App\bin\Debug\net10.0-windows10.0.19041.0\ForRest.App.exe
+
+# macOS unsigned build (no Apple Developer license required)
+# Users run the .app via right-click → Open or Security & Privacy settings.
+dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true
 ```
 
 ## Architecture Rules

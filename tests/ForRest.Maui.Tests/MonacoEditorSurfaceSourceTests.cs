@@ -82,6 +82,41 @@ public sealed class MonacoEditorSurfaceSourceTests
 	}
 
 	[TestMethod]
+	public void MonacoEditorSurface_tokenizer_highlights_all_scripting_keywords()
+	{
+		string source = GetNormalizedMonacoEditorSurfaceSource();
+
+		// Directives added after the initial tokenizer
+		StringAssert.Contains(source, "delay");
+		StringAssert.Contains(source, "user_agent");
+		StringAssert.Contains(source, "custom_user_agent");
+
+		// Flow keywords: break, continue
+		StringAssert.Contains(source, "break");
+		StringAssert.Contains(source, "continue");
+
+		// Script API globals
+		StringAssert.Contains(source, "payloads");
+		StringAssert.Contains(source, "time");
+		StringAssert.Contains(source, "strings");
+		StringAssert.Contains(source, "convert");
+		StringAssert.Contains(source, "random");
+		StringAssert.Contains(source, "snapshot");
+		StringAssert.Contains(source, "stash");
+		StringAssert.Contains(source, "tests");
+	}
+
+	[TestMethod]
+	public void MonacoEditorSurface_tokenizer_supports_interpolated_strings()
+	{
+		string source = GetNormalizedMonacoEditorSurfaceSource();
+
+		StringAssert.Contains(source, "interpolatedString");
+		StringAssert.Contains(source, "interpolatedExpr");
+		StringAssert.Contains(source, "$\"");
+	}
+
+	[TestMethod]
 	public void MonacoEditorSurface_overlays_secret_value_decorations_when_unfocused()
 	{
 		string source = GetNormalizedMonacoEditorSurfaceSource();

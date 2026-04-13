@@ -100,6 +100,21 @@
                                 Text="{Binding ResponsePrettyPrintButtonText}"
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnTogglePrettyPrintClicked" />
+                        <Button Margin="0,0,8,8"
+                                Text="{Binding HtmlPreviewButtonText}"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnToggleHtmlPreviewClicked"
+                                IsVisible="{Binding IsHtmlResponse}" />
+                        <Button Margin="0,0,8,8"
+                                Text="Save Body"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnSaveResponseBodyClicked"
+                                IsEnabled="{Binding CanCopyResponseBody}" />
+                        <Button Margin="0,0,8,8"
+                                Text="Save Raw"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnSaveRawResponseClicked"
+                                IsEnabled="{Binding CanCopyRawResponse}" />
                     </FlexLayout>
 
                     <ScrollView x:Name="ResponseSnapshotRail"
@@ -591,7 +606,8 @@
                 <Grid Grid.RowSpan="2"
                       RowDefinitions="Auto,*"
                       IsVisible="{Binding IsInspectorHeadersVisible}">
-                    <Grid ColumnDefinitions="*,Auto"
+                    <Grid ColumnDefinitions="*,Auto,Auto"
+                          ColumnSpacing="8"
                           Padding="0,0,0,8">
                         <Label Text="Response headers"
                                Style="{StaticResource SectionTitleStyle}" />
@@ -599,6 +615,11 @@
                                 Text="Copy Headers"
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnCopyHeadersClicked"
+                                IsEnabled="{Binding CanCopyHeaders}" />
+                        <Button Grid.Column="2"
+                                Text="Save Headers"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnSaveHeadersClicked"
                                 IsEnabled="{Binding CanCopyHeaders}" />
                     </Grid>
 
@@ -684,7 +705,8 @@
                 <Grid Grid.RowSpan="2"
                       RowDefinitions="Auto,*"
                       IsVisible="{Binding IsInspectorRawVisible}">
-                    <Grid ColumnDefinitions="*,Auto"
+                    <Grid ColumnDefinitions="*,Auto,Auto"
+                          ColumnSpacing="8"
                           Padding="0,0,0,8">
                         <Label Text="Raw exchange"
                                Style="{StaticResource SectionTitleStyle}" />
@@ -692,6 +714,11 @@
                                 Text="Copy Raw"
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnCopyRawResponseClicked"
+                                IsEnabled="{Binding CanCopyRawResponse}" />
+                        <Button Grid.Column="2"
+                                Text="Save Raw"
+                                Style="{StaticResource DenseTabButtonStyle}"
+                                Clicked="OnSaveRawResponseClicked"
                                 IsEnabled="{Binding CanCopyRawResponse}" />
                     </Grid>
 

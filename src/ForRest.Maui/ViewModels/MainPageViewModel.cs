@@ -108,6 +108,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private string _latestRuntimeErrorText = string.Empty;
 	private string _latestRuntimeDebugText = string.Empty;
 	private bool _isResponsePrettyPrintEnabled = true;
+	private bool _isHtmlPreviewEnabled;
 	private bool _isSynchronizingInspectorSnapshotSelection;
 	private string _debugOutputText;
 	private string _executionStatus;
@@ -618,6 +619,31 @@ public sealed class MainPageViewModel : ObservableObject
 	}
 
 	public string ResponsePrettyPrintButtonText => IsResponsePrettyPrintEnabled ? "Pretty JSON: On" : "Pretty JSON: Off";
+
+	public bool IsHtmlResponse => _selectedInspectorResponseSnapshot?.ContentType
+		?.Contains("text/html", StringComparison.OrdinalIgnoreCase) == true;
+
+	public bool IsHtmlPreviewEnabled
+	{
+		get => _isHtmlPreviewEnabled;
+		set
+		{
+			if (SetProperty(ref _isHtmlPreviewEnabled, value))
+			{
+				OnPropertyChanged(nameof(ShowHtmlPreview));
+				OnPropertyChanged(nameof(HtmlPreviewButtonText));
+			}
+		}
+	}
+
+	public bool ShowHtmlPreview => IsHtmlResponse && IsHtmlPreviewEnabled;
+
+	public string HtmlPreviewButtonText => IsHtmlPreviewEnabled ? "View Source" : "Render HTML";
+
+	public void ToggleHtmlPreview()
+	{
+		IsHtmlPreviewEnabled = !IsHtmlPreviewEnabled;
+	}
 
 	public string DebugOutputText
 	{
@@ -2437,6 +2463,69 @@ public sealed class MainPageViewModel : ObservableObject
 				File = new ShareFile(filePath),
 			});
 		ExecutionStatus = $"Shared stash CSV: {fileName}";
+	}
+
+	public async Task SaveResponseBodyAsync()
+	{
+		if (!CanCopyResponseBody || _selectedInspectorResponseSnapshot is null)
+		{
+			ExecutionStatus = "No response body available to save.";
+			return;
+		}
+
+		string extension = ResponseFileExtensionMapper.GetExtension(
+			_selectedInspectorResponseSnapshot.ContentType);
+		string fileName = $"forrest-response-{DateTime.Now:yyyyMMdd-HHmmss}{extension}";
+		string filePath = Path.Combine(FileSystem.Current.CacheDirectory, fileName);
+		await File.WriteAllTextAsync(filePath, ResponseBodyText);
+		await Share.Default.RequestAsync(
+			new ShareFileRequest
+			{
+				Title = "Save response body",
+				File = new ShareFile(filePath),
+			});
+		ExecutionStatus = $"Shared response body: {fileName}";
+	}
+
+	public async Task SaveRawExchangeAsync()
+	{
+		if (!CanCopyRawResponse)
+		{
+			ExecutionStatus = "No raw exchange available to save.";
+			return;
+		}
+
+		string fileName = $"forrest-raw-{DateTime.Now:yyyyMMdd-HHmmss}.http";
+		string filePath = Path.Combine(FileSystem.Current.CacheDirectory, fileName);
+		await File.WriteAllTextAsync(filePath, ResponseRawText);
+		await Share.Default.RequestAsync(
+			new ShareFileRequest
+			{
+				Title = "Save raw exchange",
+				File = new ShareFile(filePath),
+			});
+		ExecutionStatus = $"Shared raw exchange: {fileName}";
+	}
+
+	public async Task SaveHeadersAsync()
+	{
+		if (!CanCopyHeaders)
+		{
+			ExecutionStatus = "No response headers available to save.";
+			return;
+		}
+
+		string text = ResponsePaneCopyFormatter.BuildHeadersText(ResponseHeaderRows);
+		string fileName = $"forrest-headers-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
+		string filePath = Path.Combine(FileSystem.Current.CacheDirectory, fileName);
+		await File.WriteAllTextAsync(filePath, text);
+		await Share.Default.RequestAsync(
+			new ShareFileRequest
+			{
+				Title = "Save response headers",
+				File = new ShareFile(filePath),
+			});
+		ExecutionStatus = $"Shared response headers: {fileName}";
 	}
 
 	public void SelectStashRow(StashRowViewModel? row)
@@ -5335,6 +5424,8 @@ public sealed class MainPageViewModel : ObservableObject
 	private void ApplySelectedResponseSnapshot(ResponseSnapshot? response)
 	{
 		_selectedInspectorResponseSnapshot = response;
+		IsHtmlPreviewEnabled = false;
+		OnPropertyChanged(nameof(IsHtmlResponse));
 		RefreshResponsePresentation();
 		ResponseHeaderRows.Clear();
 		foreach (KeyValueDefinition header in response?.Headers ?? [])
