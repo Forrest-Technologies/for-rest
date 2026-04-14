@@ -56,6 +56,7 @@
     <Compile Include="..\..\src\ForRest.Maui\Services\LicenseRuntimeServices.cs" Link="Services\LicenseRuntimeServices.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\AppActivationService.cs" Link="Services\AppActivationService.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ForRestLicenseProfile.cs" Link="Services\ForRestLicenseProfile.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Services\ResponseFileExtensionMapper.cs" Link="Services\ResponseFileExtensionMapper.cs" />
   </ItemGroup>
 
 </Project>

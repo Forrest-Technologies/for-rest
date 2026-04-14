@@ -25,7 +25,14 @@ public static class MauiProgram
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
 				fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
-			});
+			})
+#if ANDROID
+			.ConfigureMauiHandlers(handlers =>
+			{
+				handlers.AddHandler<Editor, ForRest.Maui.Platforms.Android.Handlers.SelectableEditorHandler>();
+			})
+#endif
+			;
 
 		builder.Services.AddSingleton<ThemeCatalog>();
 		builder.Services.AddSingleton<SettingsTomlTemplate>();

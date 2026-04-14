@@ -46,7 +46,6 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
-		<UseHardenedRuntime Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">true</UseHardenedRuntime>
 		<ForRestBuildDateUtc Condition="'$(ForRestBuildDateUtc)' == ''">$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</ForRestBuildDateUtc>
 		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == ''">https://localhost:7071/api/</ForRestLicenseServiceBaseUrl>
 		<ForRestLicenseIssuer Condition="'$(ForRestLicenseIssuer)' == ''">forrest-license</ForRestLicenseIssuer>
@@ -122,11 +121,18 @@
 		<MauiAsset Include="$(IntermediateOutputPath)ForRest.Maui.dll" LogicalName="roslyn-runtime/ForRest.Maui.dll" />
 	</ItemGroup>
 
-	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
-		<!-- ForRest uses Roslyn runtime scripting. Running under Mono with interpreter support keeps
-		     runtime script compilation functional while the hardened runtime + JIT entitlement allow
-		     Apple signing to permit dynamic code generation. -->
+	<!-- Unsigned macOS build: users can run via right-click Open or Security & Privacy settings.
+	     Pass -p:ForRestMacUnsigned=true to produce an unsigned .app bundle for testing. -->
+	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' and '$(ForRestMacUnsigned)' == 'true'">
 		<UseInterpreter>true</UseInterpreter>
+		<EnableCodeSigning>false</EnableCodeSigning>
+		<UseHardenedRuntime>false</UseHardenedRuntime>
+	</PropertyGroup>
+
+	<!-- Signed macOS build (default): hardened runtime + entitlements for JIT and sandbox. -->
+	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' and '$(ForRestMacUnsigned)' != 'true'">
+		<UseInterpreter>true</UseInterpreter>
+		<UseHardenedRuntime>true</UseHardenedRuntime>
 		<CodesignEntitlements>Platforms\MacCatalyst\Entitlements.plist</CodesignEntitlements>
 	</PropertyGroup>
 

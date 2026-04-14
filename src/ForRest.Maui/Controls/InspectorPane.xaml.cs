@@ -252,6 +252,21 @@ public partial class InspectorPane : ContentView
 		await ViewModel.ExportStashCsvAsync();
 	}
 
+	private async void OnSaveResponseBodyClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.SaveResponseBodyAsync();
+	}
+
+	private async void OnSaveRawResponseClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.SaveRawExchangeAsync();
+	}
+
+	private async void OnSaveHeadersClicked(object? sender, EventArgs e)
+	{
+		await ViewModel.SaveHeadersAsync();
+	}
+
 	private void OnInlineCopyCompleted(object? sender, CopyableLabelCopiedEventArgs e)
 	{
 		ViewModel.ExecutionStatus = e.Message;
@@ -262,6 +277,12 @@ public partial class InspectorPane : ContentView
 		await ViewModel.CopyResponseVariableAsync(e.LineNumber, e.Column);
 	}
 
+	private void OnToggleHtmlPreviewClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ToggleHtmlPreview();
+		RefreshResponseBodyViewer();
+	}
+
 	private void EnsureResponseBodyViewer()
 	{
 		if (ResponseBodyViewerHost.Content is not null || !IsVisible || !ViewModel.IsInspectorResponseVisible)
@@ -269,9 +290,55 @@ public partial class InspectorPane : ContentView
 			return;
 		}
 
-		ResponseBodyViewerHost.Content = PlatformExperience.UseWebCodeEditors() && !AppLaunchGuard.IsSafeModeEnabled
+		ResponseBodyViewerHost.Content = BuildResponseBodyViewer();
+	}
+
+	private void RefreshResponseBodyViewer()
+	{
+		if (!IsVisible || !ViewModel.IsInspectorResponseVisible)
+		{
+			return;
+		}
+
+		bool needsHtmlViewer = ViewModel.ShowHtmlPreview;
+		bool hasHtmlViewer = ResponseBodyViewerHost.Content is WebView;
+
+		if (needsHtmlViewer && hasHtmlViewer)
+		{
+			return;
+		}
+
+		if (!needsHtmlViewer && ResponseBodyViewerHost.Content is not WebView && ResponseBodyViewerHost.Content is not null)
+		{
+			return;
+		}
+
+		ResponseBodyViewerHost.Content = BuildResponseBodyViewer();
+	}
+
+	private View BuildResponseBodyViewer()
+	{
+		if (ViewModel.ShowHtmlPreview)
+		{
+			return BuildHtmlPreviewViewer();
+		}
+
+		return PlatformExperience.UseWebCodeEditors() && !AppLaunchGuard.IsSafeModeEnabled
 			? BuildMonacoResponseViewer()
 			: BuildNativeResponseViewer();
+	}
+
+	private View BuildHtmlPreviewViewer()
+	{
+		WebView webView = new()
+		{
+			VerticalOptions = LayoutOptions.Fill,
+			HorizontalOptions = LayoutOptions.Fill,
+		};
+
+		string htmlBody = ViewModel.ResponseBodyText ?? string.Empty;
+		webView.Source = new HtmlWebViewSource { Html = htmlBody };
+		return webView;
 	}
 
 	private void EnsureRequestBodyViewer()
