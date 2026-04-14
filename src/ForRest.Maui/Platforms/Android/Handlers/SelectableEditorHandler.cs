@@ -1,6 +1,7 @@
 using Android.Views;
 using AndroidX.AppCompat.Widget;
 using Microsoft.Maui.Handlers;
+using Microsoft.Maui.Platform;
 
 namespace ForRest.Maui.Platforms.Android.Handlers;
 
@@ -17,7 +18,7 @@ public class SelectableEditorHandler : EditorHandler
 
     #region Public Methods
 
-    protected override void ConnectHandler(AppCompatEditText platformView)
+    protected override void ConnectHandler(MauiEditText platformView)
     {
         base.ConnectHandler(platformView);
         EnableTextSelection(platformView);
