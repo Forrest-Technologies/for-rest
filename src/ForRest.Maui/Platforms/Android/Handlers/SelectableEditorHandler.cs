@@ -18,7 +18,7 @@ public class SelectableEditorHandler : EditorHandler
 
     #region Public Methods
 
-    protected override void ConnectHandler(AppCompatEditText platformView)
+    protected override void ConnectHandler(MauiAppCompatEditText platformView)
     {
         base.ConnectHandler(platformView);
         EnableTextSelection(platformView);
@@ -28,7 +28,7 @@ public class SelectableEditorHandler : EditorHandler
 
     #region Private Methods
 
-    private static void EnableTextSelection(AppCompatEditText editText)
+    private static void EnableTextSelection(MauiAppCompatEditText editText)
     {
         editText.SetTextIsSelectable(true);
         editText.LongClickable = true;
@@ -37,7 +37,7 @@ public class SelectableEditorHandler : EditorHandler
 
     private static void MapIsReadOnlySelectable(IEditorHandler handler, IEditor editor)
     {
-        if (handler.PlatformView is not AppCompatEditText editText)
+        if (handler.PlatformView is not MauiAppCompatEditText editText)
         {
             return;
         }
