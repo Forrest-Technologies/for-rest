@@ -1994,10 +1994,12 @@ public partial class MonacoEditorSurface : ContentView
           require.config({ paths: { vs: `${baseUrl}/vs` } });
           require(["vs/editor/editor.main"], function () {
             window.forRestHost.create(window.monaco);
+          }, function (err) {
+            document.body.innerHTML = '<div style="padding:16px;color:#B2433D;font:12px Segoe UI,sans-serif;">Monaco module failed: ' + String(err) + '</div>';
           });
         })
-        .catch(() => {
-          document.body.innerHTML = '<div style="padding:16px;color:#B2433D;font:12px Segoe UI, sans-serif;">Unable to load Monaco.</div>';
+        .catch((err) => {
+          document.body.innerHTML = '<div style="padding:16px;color:#B2433D;font:12px Segoe UI,sans-serif;">Unable to load Monaco: ' + String(err) + '</div>';
         });
     })();
   </script>
@@ -3107,17 +3109,13 @@ public partial class MonacoEditorSurface : ContentView
 	private void AttachAndroidWebView()
 	{
 		Android.Webkit.WebView? platformView = EditorWebView.Handler?.PlatformView as Android.Webkit.WebView;
-		if (ReferenceEquals(_androidPlatformWebView, platformView))
+		if (platformView is null || ReferenceEquals(_androidPlatformWebView, platformView))
 		{
 			return;
 		}
 
 		DetachAndroidWebView();
 		_androidPlatformWebView = platformView;
-		if (_androidPlatformWebView is null)
-		{
-			return;
-		}
 
 		_androidPlatformWebView.Focusable = true;
 		_androidPlatformWebView.FocusableInTouchMode = true;
@@ -3127,6 +3125,8 @@ public partial class MonacoEditorSurface : ContentView
 		WebSettings? settings = _androidPlatformWebView.Settings;
 		if (settings is not null)
 		{
+			settings.JavaScriptEnabled = true;
+			settings.DomStorageEnabled = true;
 #pragma warning disable CA1422 // Required for Monaco to load scripts from file:///android_asset/
 			settings.AllowFileAccess = true;
 			settings.AllowFileAccessFromFileURLs = true;
@@ -3144,14 +3144,17 @@ public partial class MonacoEditorSurface : ContentView
 		_androidPlatformWebView.ContextClick += OnAndroidWebViewContextClick;
 		_androidPlatformWebView.Touch += OnAndroidWebViewTouch;
 
-		if (EditorWebView.Source is null)
-		{
-			EditorWebView.Source = new HtmlWebViewSource
-			{
-				Html = MonacoHostHtml,
-				BaseUrl = GetEditorWebViewBaseUrl()
-			};
-		}
+		// Load directly on the native Android WebView to guarantee the base
+		// URL and JavaScript/file-access settings are applied before the page
+		// parses.  Going through MAUI's HtmlWebViewSource can race with
+		// handler property mapping and leave the WebView with an incorrect
+		// base URI or default-off settings on Android.
+		_androidPlatformWebView.LoadDataWithBaseURL(
+			"file:///android_asset/",
+			MonacoHostHtml,
+			"text/html",
+			"UTF-8",
+			null);
 	}
 
 	private void DetachAndroidWebView()

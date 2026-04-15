@@ -75,11 +75,13 @@ public sealed class MonacoEditorSurfaceSourceTests
 	{
 		string source = GetNormalizedMonacoEditorSurfaceSource();
 
+		StringAssert.Contains(source, "settings.JavaScriptEnabled = true;");
+		StringAssert.Contains(source, "settings.DomStorageEnabled = true;");
 		StringAssert.Contains(source, "settings.AllowFileAccess = true;");
 		StringAssert.Contains(source, "settings.AllowFileAccessFromFileURLs = true;");
 		StringAssert.Contains(source, "settings.AllowUniversalAccessFromFileURLs = true;");
 		StringAssert.Contains(source, "#if !ANDROID");
-		StringAssert.Contains(source, "if (EditorWebView.Source is null)");
+		StringAssert.Contains(source, "LoadDataWithBaseURL");
 	}
 
 	[TestMethod]
