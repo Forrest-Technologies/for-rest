@@ -108,9 +108,9 @@ jobs:
         shell: pwsh
         run: dotnet build src/ForRest.Licensing.Functions/ForRest.Licensing.Functions.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
 
-      - name: Build licensing admin tool
+      - name: Publish licensing admin tool
         shell: pwsh
-        run: dotnet build src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
+        run: dotnet publish src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o artifacts/licensing-tool
 
       - name: Build Windows app
         shell: pwsh
@@ -194,6 +194,15 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}-obfuscation-map
           path: artifacts/obfuscation-maps/${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload licensing admin tool
+        if: matrix.arch == 'win-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-licensing-tool
+          path: artifacts/licensing-tool/*
           if-no-files-found: error
           retention-days: 3
 

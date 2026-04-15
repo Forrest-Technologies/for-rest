@@ -100,9 +100,51 @@ jobs:
         shell: pwsh
         run: dotnet build src/ForRest.Licensing.Functions/ForRest.Licensing.Functions.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
 
-      - name: Build licensing admin tool
+      - name: Publish licensing admin tool
         shell: pwsh
-        run: dotnet build src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
+        run: dotnet publish src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o artifacts/licensing-tool
+
+      - name: Build Android MAUI project
+        shell: pwsh
+        run: |
+          dotnet build src/ForRest.Maui/ForRest.Maui.csproj `
+            -c "${{ needs.prepare.outputs.build_configuration }}" `
+            -f $env:ANDROID_TFM `
+            -p:ContinuousIntegrationBuild=true `
+            -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} `
+            -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} `
+            -p:Version="${{ needs.prepare.outputs.version_label }}" `
+            -p:InformationalVersion="${{ needs.prepare.outputs.version_label }}" `
+            -p:FileVersion=${{ needs.prepare.outputs.file_version }} `
+            -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} `
+            -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} `
+            -p:ForRestLicenseServiceBaseUrl="${{ vars.FORREST_LICENSE_SERVICE_BASE_URL }}" `
+            -p:ForRestLicenseIssuer="${{ vars.FORREST_LICENSE_ISSUER }}" `
+            -p:ForRestLicenseAudience="${{ vars.FORREST_LICENSE_AUDIENCE }}" `
+            -p:ForRestLicenseSigningPublicKeyPem="${{ vars.FORREST_LICENSE_SIGNING_PUBLIC_KEY_PEM }}" `
+            -p:ForRestLicenseBuildGraceDays="${{ vars.FORREST_LICENSE_BUILD_GRACE_DAYS }}" `
+            -p:ForRestLicenseOfflineLeaseDays="${{ vars.FORREST_LICENSE_OFFLINE_LEASE_DAYS }}" `
+            -p:ForRestLicenseRefreshIntervalDays="${{ vars.FORREST_LICENSE_REFRESH_INTERVAL_DAYS }}" `
+            -p:ForRestLicenseClockSkewMinutes="${{ vars.FORREST_LICENSE_CLOCK_SKEW_MINUTES }}" `
+            -p:ForRestLicenseMaxActivations="${{ vars.FORREST_LICENSE_MAX_ACTIVATIONS }}"
+
+      - name: Restore local tools
+        shell: pwsh
+        run: dotnet tool restore
+
+      - name: Obfuscate release assemblies
+        shell: pwsh
+        run: |
+          $buildDirectory = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE "src\ForRest.Maui\bin\${{ needs.prepare.outputs.build_configuration }}") -Directory -Filter "net10.0-android*" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $buildDirectory) {
+            throw "Android build output directory was not found."
+          }
+          $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\android\ForRest.Obfuscar.Mapping.xml"
+          powershell -ExecutionPolicy Bypass -File scripts\Invoke-ForRestObfuscation.ps1 `
+            -InputDirectory $buildDirectory `
+            -OutputDirectory $buildDirectory `
+            -KeepPublicApi:$true `
+            -MappingOutputPath $mappingPath
 
       - name: Prepare Android signing
         id: signing
@@ -140,6 +182,7 @@ jobs:
           $publishArgs = @(
             'publish',
             'src/ForRest.Maui/ForRest.Maui.csproj',
+            '--no-build',
             '-c', '${{ needs.prepare.outputs.build_configuration }}',
             '-f', $env:ANDROID_TFM,
             '-p:ContinuousIntegrationBuild=true',
@@ -200,6 +243,22 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-android
           path: artifacts/release/android/*
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload obfuscation mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-android-obfuscation-map
+          path: artifacts/obfuscation-maps/android/*
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload licensing admin tool
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-licensing-tool
+          path: artifacts/licensing-tool/*
           if-no-files-found: error
           retention-days: 3
 
