@@ -143,6 +143,15 @@
                         Style="{StaticResource SubtleToolbarButtonStyle}"
                         Clicked="OnSelectAllOutputClicked"
                         HorizontalOptions="End" />
+                <Button x:Name="HtmlPreviewButton"
+                        Grid.Row="1"
+                        Grid.Column="3"
+                        Text="{Binding HtmlPreviewButtonText}"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnToggleHtmlPreviewClicked"
+                        IsVisible="{Binding IsHtmlResponse}"
+                        HorizontalOptions="End"
+                        Margin="0,0,80,0" />
                 <Button x:Name="ResponsePrettyPrintButton"
                         Grid.Row="1"
                         Grid.Column="1"
@@ -185,18 +194,8 @@
                            Style="{StaticResource MonoMetaStyle}" />
                 </Grid>
 
-                <Editor x:Name="ResponseOutputEditor"
-                        Grid.Row="1"
-                        IsReadOnly="True"
-                        AutoSize="Disabled"
-                        Margin="0"
-                        FontFamily="OpenSansRegular"
-                        FontSize="13"
-                        TextColor="{DynamicResource ThemeTextPrimaryColor}"
-                        BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
-                        IsSpellCheckEnabled="False"
-                        IsTextPredictionEnabled="False"
-                        Keyboard="Text" />
+                <ContentView x:Name="ResponseOutputHost"
+                             Grid.Row="1" />
             </Grid>
         </Border>
     </Grid>

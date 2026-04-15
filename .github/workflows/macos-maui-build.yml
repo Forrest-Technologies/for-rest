@@ -133,7 +133,7 @@ jobs:
           & scripts/Invoke-ForRestObfuscation.ps1 `
             -InputDirectory $inputDirectory `
             -OutputDirectory $inputDirectory `
-            -KeepPublicApi:$true `
+            -KeepPublicApi `
             -MappingOutputPath $mappingPath
 
       - name: Package macOS build output
