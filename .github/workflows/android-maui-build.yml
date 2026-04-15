@@ -156,6 +156,22 @@ jobs:
             -MappingOutputPath $mappingPath `
             -ExtraSearchPaths $extraPaths
 
+          # Copy obfuscated assemblies back to each library project's bin
+          # and obj directories so dotnet publish considers them up-to-date
+          # and does not recompile from source.
+          $config = "${{ needs.prepare.outputs.build_configuration }}"
+          foreach ($name in @('ForRest.Licensing', 'ForRest.Domain', 'ForRest.Services')) {
+            $dll = "$name.dll"
+            $source = Join-Path $buildDirectory $dll
+            if (-not (Test-Path $source)) { continue }
+            foreach ($root in @('bin', 'obj')) {
+              $target = Join-Path $env:GITHUB_WORKSPACE "src\$name\$root\$config\net10.0\$dll"
+              if (Test-Path $target) {
+                Copy-Item $source $target -Force
+              }
+            }
+          }
+
       - name: Prepare Android signing
         id: signing
         shell: pwsh
@@ -192,7 +208,6 @@ jobs:
           $publishArgs = @(
             'publish',
             'src/ForRest.Maui/ForRest.Maui.csproj',
-            '--no-build',
             '-c', '${{ needs.prepare.outputs.build_configuration }}',
             '-f', $env:ANDROID_TFM,
             '-p:ContinuousIntegrationBuild=true',
