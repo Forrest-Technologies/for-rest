@@ -18,7 +18,7 @@ public class SelectableEditorHandler : EditorHandler
 
     #region Public Methods
 
-    protected override void ConnectHandler(MauiEditText platformView)
+    protected override void ConnectHandler(AppCompatEditText platformView)
     {
         base.ConnectHandler(platformView);
         EnableTextSelection(platformView);
