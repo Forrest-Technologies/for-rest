@@ -132,28 +132,29 @@ jobs:
         shell: pwsh
         run: dotnet tool restore
 
-      - name: Stage assemblies for obfuscation
-        shell: pwsh
-        run: |
-          $stagingDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-staging"
-          dotnet build src/ForRest.Licensing/ForRest.Licensing.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o $stagingDirectory
-          dotnet build src/ForRest.Domain/ForRest.Domain.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o $stagingDirectory
-          dotnet build src/ForRest.Services/ForRest.Services.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o $stagingDirectory
-
       - name: Obfuscate release assemblies
         shell: pwsh
         run: |
-          $stagingDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-staging"
-          $androidBuildDirectory = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE "src\ForRest.Maui\bin\${{ needs.prepare.outputs.build_configuration }}") -Directory -Filter "net10.0-android*" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $androidBuildDirectory) {
+          $buildDirectory = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE "src\ForRest.Maui\bin\${{ needs.prepare.outputs.build_configuration }}") -Directory -Filter "net10.0-android*" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $buildDirectory) {
             throw "Android build output directory was not found."
           }
+
+          # Resolve NuGet package lib directories so Obfuscar can find
+          # transitive dependencies (e.g. System.ClientModel from Azure SDK)
+          # that are not copied to the Android build output.
+          $nugetBase = ((dotnet nuget locals global-packages -l) -replace 'global-packages:\s*', '').Trim()
+          $extraPaths = @(Get-ChildItem -Path $nugetBase -Recurse -Directory |
+            Where-Object { $_.Name -match '^net(10\.0|9\.0|8\.0|standard2\.[01])$' -and $_.Parent.Name -eq 'lib' } |
+            Select-Object -ExpandProperty FullName)
+
           $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\android\ForRest.Obfuscar.Mapping.xml"
           & scripts\Invoke-ForRestObfuscation.ps1 `
-            -InputDirectory $stagingDirectory `
-            -OutputDirectory $androidBuildDirectory `
+            -InputDirectory $buildDirectory `
+            -OutputDirectory $buildDirectory `
             -KeepPublicApi `
-            -MappingOutputPath $mappingPath
+            -MappingOutputPath $mappingPath `
+            -ExtraSearchPaths $extraPaths
 
       - name: Prepare Android signing
         id: signing
