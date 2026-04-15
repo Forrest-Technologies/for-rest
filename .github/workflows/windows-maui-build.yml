@@ -153,10 +153,10 @@ jobs:
         run: |
           $inputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
           $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\${{ matrix.arch }}\ForRest.Obfuscar.Mapping.xml"
-          powershell -ExecutionPolicy Bypass -File scripts\Invoke-ForRestObfuscation.ps1 `
+          & scripts\Invoke-ForRestObfuscation.ps1 `
             -InputDirectory $inputDirectory `
             -OutputDirectory $inputDirectory `
-            -KeepPublicApi:$true `
+            -KeepPublicApi `
             -MappingOutputPath $mappingPath
 
       - name: Package build output

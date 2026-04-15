@@ -140,10 +140,10 @@ jobs:
             throw "Android build output directory was not found."
           }
           $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\android\ForRest.Obfuscar.Mapping.xml"
-          powershell -ExecutionPolicy Bypass -File scripts\Invoke-ForRestObfuscation.ps1 `
+          & scripts\Invoke-ForRestObfuscation.ps1 `
             -InputDirectory $buildDirectory `
             -OutputDirectory $buildDirectory `
-            -KeepPublicApi:$true `
+            -KeepPublicApi `
             -MappingOutputPath $mappingPath
 
       - name: Prepare Android signing
