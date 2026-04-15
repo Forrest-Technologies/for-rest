@@ -10,7 +10,9 @@ param(
 
     [string[]]$Assemblies = @('ForRest.Licensing.dll', 'ForRest.Domain.dll', 'ForRest.Services.dll'),
 
-    [string]$MappingOutputPath = ''
+    [string]$MappingOutputPath = '',
+
+    [string[]]$ExtraSearchPaths = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +59,12 @@ $configLines = @(
     '  <Var name="XmlMapping" value="true" />',
     ('  <AssemblySearchPath path="' + $resolvedInputDirectory + '" />')
 )
+
+foreach ($searchPath in $ExtraSearchPaths) {
+    if (Test-Path $searchPath) {
+        $configLines += '  <AssemblySearchPath path="' + (Resolve-Path $searchPath).Path + '" />'
+    }
+}
 
 foreach ($assembly in $availableAssemblies) {
     $configLines += '  <Module file="' + (Join-Path $resolvedInputDirectory $assembly) + '" />'
