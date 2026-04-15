@@ -132,17 +132,26 @@ jobs:
         shell: pwsh
         run: dotnet tool restore
 
+      - name: Stage assemblies for obfuscation
+        shell: pwsh
+        run: |
+          $stagingDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-staging"
+          dotnet build src/ForRest.Licensing/ForRest.Licensing.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o $stagingDirectory
+          dotnet build src/ForRest.Domain/ForRest.Domain.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o $stagingDirectory
+          dotnet build src/ForRest.Services/ForRest.Services.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o $stagingDirectory
+
       - name: Obfuscate release assemblies
         shell: pwsh
         run: |
-          $buildDirectory = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE "src\ForRest.Maui\bin\${{ needs.prepare.outputs.build_configuration }}") -Directory -Filter "net10.0-android*" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $buildDirectory) {
+          $stagingDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-staging"
+          $androidBuildDirectory = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE "src\ForRest.Maui\bin\${{ needs.prepare.outputs.build_configuration }}") -Directory -Filter "net10.0-android*" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $androidBuildDirectory) {
             throw "Android build output directory was not found."
           }
           $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\android\ForRest.Obfuscar.Mapping.xml"
           & scripts\Invoke-ForRestObfuscation.ps1 `
-            -InputDirectory $buildDirectory `
-            -OutputDirectory $buildDirectory `
+            -InputDirectory $stagingDirectory `
+            -OutputDirectory $androidBuildDirectory `
             -KeepPublicApi `
             -MappingOutputPath $mappingPath
 
