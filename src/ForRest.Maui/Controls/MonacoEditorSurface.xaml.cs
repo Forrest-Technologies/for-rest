@@ -2127,11 +2127,13 @@ public partial class MonacoEditorSurface : ContentView
 	public MonacoEditorSurface()
 	{
 		InitializeComponent();
+#if !ANDROID
 		EditorWebView.Source = new HtmlWebViewSource
 		{
 			Html = MonacoHostHtml,
 			BaseUrl = GetEditorWebViewBaseUrl()
 		};
+#endif
 		EditorWebView.HandlerChanged += OnEditorWebViewHandlerChanged;
 		Loaded += OnLoaded;
 		Unloaded += OnUnloaded;
@@ -3125,6 +3127,11 @@ public partial class MonacoEditorSurface : ContentView
 		WebSettings? settings = _androidPlatformWebView.Settings;
 		if (settings is not null)
 		{
+#pragma warning disable CA1422 // Required for Monaco to load scripts from file:///android_asset/
+			settings.AllowFileAccess = true;
+			settings.AllowFileAccessFromFileURLs = true;
+			settings.AllowUniversalAccessFromFileURLs = true;
+#pragma warning restore CA1422
 			settings.TextZoom = 100;
 			settings.UseWideViewPort = false;
 			settings.LoadWithOverviewMode = false;
@@ -3136,6 +3143,15 @@ public partial class MonacoEditorSurface : ContentView
 		_androidPlatformWebView.LongClick += OnAndroidWebViewLongClick;
 		_androidPlatformWebView.ContextClick += OnAndroidWebViewContextClick;
 		_androidPlatformWebView.Touch += OnAndroidWebViewTouch;
+
+		if (EditorWebView.Source is null)
+		{
+			EditorWebView.Source = new HtmlWebViewSource
+			{
+				Html = MonacoHostHtml,
+				BaseUrl = GetEditorWebViewBaseUrl()
+			};
+		}
 	}
 
 	private void DetachAndroidWebView()

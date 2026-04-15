@@ -71,6 +71,18 @@ public sealed class MonacoEditorSurfaceSourceTests
 	}
 
 	[TestMethod]
+	public void MonacoEditorSurface_android_webview_enables_file_access_and_defers_source()
+	{
+		string source = GetNormalizedMonacoEditorSurfaceSource();
+
+		StringAssert.Contains(source, "settings.AllowFileAccess = true;");
+		StringAssert.Contains(source, "settings.AllowFileAccessFromFileURLs = true;");
+		StringAssert.Contains(source, "settings.AllowUniversalAccessFromFileURLs = true;");
+		StringAssert.Contains(source, "#if !ANDROID");
+		StringAssert.Contains(source, "if (EditorWebView.Source is null)");
+	}
+
+	[TestMethod]
 	public void MonacoEditorSurface_exposes_toolbar_clipboard_paste_through_host_bridge()
 	{
 		string source = GetNormalizedMonacoEditorSurfaceSource();

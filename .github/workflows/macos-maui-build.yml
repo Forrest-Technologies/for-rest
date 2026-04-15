@@ -85,9 +85,9 @@ jobs:
         shell: bash
         run: dotnet build src/ForRest.Licensing.Functions/ForRest.Licensing.Functions.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
 
-      - name: Build licensing admin tool
+      - name: Publish licensing admin tool
         shell: bash
-        run: dotnet build src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
+        run: dotnet publish src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o artifacts/licensing-tool
 
       - name: Build macOS (Mac Catalyst) app
         shell: bash
@@ -119,6 +119,23 @@ jobs:
             -p:ForRestLicenseMaxActivations="${{ vars.FORREST_LICENSE_MAX_ACTIVATIONS }}" \
             -o "${OUTPUT_DIRECTORY}"
 
+      - name: Restore local tools
+        if: needs.prepare.outputs.build_configuration == 'Release'
+        shell: bash
+        run: dotnet tool restore
+
+      - name: Obfuscate release assemblies
+        if: needs.prepare.outputs.build_configuration == 'Release'
+        shell: pwsh
+        run: |
+          $inputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts/ci/maccatalyst"
+          $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts/obfuscation-maps/maccatalyst/ForRest.Obfuscar.Mapping.xml"
+          & scripts/Invoke-ForRestObfuscation.ps1 `
+            -InputDirectory $inputDirectory `
+            -OutputDirectory $inputDirectory `
+            -KeepPublicApi:$true `
+            -MappingOutputPath $mappingPath
+
       - name: Package macOS build output
         shell: bash
         run: |
@@ -144,5 +161,22 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst
           path: artifacts/release/maccatalyst/*
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload obfuscation mapping
+        if: needs.prepare.outputs.build_configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst-obfuscation-map
+          path: artifacts/obfuscation-maps/maccatalyst/*
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload licensing admin tool
+        uses: actions/upload-artifact@v4
+        with:
+          name: for-rest-${{ needs.prepare.outputs.version_label }}-licensing-tool
+          path: artifacts/licensing-tool/*
           if-no-files-found: error
           retention-days: 3
