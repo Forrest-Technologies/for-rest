@@ -7,6 +7,7 @@ public partial class AndroidMainPage : ContentPage
 {
 	private bool _isInitialized;
 	private AndroidOutputView _outputView = AndroidOutputView.Response;
+	private Editor? _responseOutputEditor;
 
 	public AndroidMainPage(MainPageViewModel viewModel)
 	{
@@ -124,6 +125,17 @@ public partial class AndroidMainPage : ContentPage
 		}
 	}
 
+	private void OnToggleHtmlPreviewClicked(object? sender, EventArgs e)
+	{
+		if (ViewModel is null)
+		{
+			return;
+		}
+
+		ViewModel.ToggleHtmlPreview();
+		RefreshResponseOutputViewer();
+	}
+
 	private async void OnCopyOutputClicked(object? sender, EventArgs e)
 	{
 		if (ViewModel is null)
@@ -171,9 +183,14 @@ public partial class AndroidMainPage : ContentPage
 
 	private void OnSelectAllOutputClicked(object? sender, EventArgs e)
 	{
-		ResponseOutputEditor.Focus();
-		ResponseOutputEditor.CursorPosition = 0;
-		ResponseOutputEditor.SelectionLength = ResponseOutputEditor.Text?.Length ?? 0;
+		if (_responseOutputEditor is null)
+		{
+			return;
+		}
+
+		_responseOutputEditor.Focus();
+		_responseOutputEditor.CursorPosition = 0;
+		_responseOutputEditor.SelectionLength = _responseOutputEditor.Text?.Length ?? 0;
 	}
 
 	private void OnRequestEditorFocused(object? sender, FocusEventArgs e)
@@ -206,15 +223,7 @@ public partial class AndroidMainPage : ContentPage
 	private void UpdateOutputView(AndroidOutputView outputView)
 	{
 		_outputView = outputView;
-		ResponseOutputEditor.RemoveBinding(Editor.TextProperty);
-		ResponseOutputEditor.SetBinding(
-			Editor.TextProperty,
-			outputView switch
-			{
-				AndroidOutputView.Raw => nameof(MainPageViewModel.ResponseRawText),
-				AndroidOutputView.Debug => nameof(MainPageViewModel.DebugOutputText),
-				_ => nameof(MainPageViewModel.ResponseBodyText)
-			});
+
 		OutputTitleLabel.Text = outputView switch
 		{
 			AndroidOutputView.Raw => "Raw Exchange",
@@ -232,6 +241,68 @@ public partial class AndroidMainPage : ContentPage
 		bool isDebug = outputView == AndroidOutputView.Debug;
 		CopyDebugSummaryButton.IsVisible = isDebug;
 		ResponsePrettyPrintButton.IsVisible = !isDebug;
+
+		RefreshResponseOutputViewer();
+	}
+
+	private void RefreshResponseOutputViewer()
+	{
+		bool needsHtmlViewer = _outputView == AndroidOutputView.Response
+			&& ViewModel is not null
+			&& ViewModel.ShowHtmlPreview;
+
+		if (needsHtmlViewer)
+		{
+			string htmlBody = ViewModel!.ResponseBodyText ?? string.Empty;
+			WebView webView = new()
+			{
+				VerticalOptions = LayoutOptions.Fill,
+				HorizontalOptions = LayoutOptions.Fill,
+			};
+			webView.Source = new HtmlWebViewSource { Html = htmlBody };
+			ResponseOutputHost.Content = webView;
+			_responseOutputEditor = null;
+			return;
+		}
+
+		if (ResponseOutputHost.Content is Editor existingEditor)
+		{
+			existingEditor.RemoveBinding(Editor.TextProperty);
+			existingEditor.SetBinding(
+				Editor.TextProperty,
+				_outputView switch
+				{
+					AndroidOutputView.Raw => nameof(MainPageViewModel.ResponseRawText),
+					AndroidOutputView.Debug => nameof(MainPageViewModel.DebugOutputText),
+					_ => nameof(MainPageViewModel.ResponseBodyText)
+				});
+			_responseOutputEditor = existingEditor;
+			return;
+		}
+
+		Editor editor = new()
+		{
+			IsReadOnly = true,
+			AutoSize = EditorAutoSizeOption.Disabled,
+			Margin = new Thickness(0),
+			FontFamily = "OpenSansRegular",
+			FontSize = 13,
+			IsSpellCheckEnabled = false,
+			IsTextPredictionEnabled = false,
+			Keyboard = Keyboard.Text,
+		};
+		editor.SetDynamicResource(Editor.TextColorProperty, "ThemeTextPrimaryColor");
+		editor.SetDynamicResource(Editor.BackgroundColorProperty, "ThemeEditorBackgroundColor");
+		editor.SetBinding(
+			Editor.TextProperty,
+			_outputView switch
+			{
+				AndroidOutputView.Raw => nameof(MainPageViewModel.ResponseRawText),
+				AndroidOutputView.Debug => nameof(MainPageViewModel.DebugOutputText),
+				_ => nameof(MainPageViewModel.ResponseBodyText)
+			});
+		ResponseOutputHost.Content = editor;
+		_responseOutputEditor = editor;
 	}
 
 	private static View BuildFallbackContent(Exception exception)
