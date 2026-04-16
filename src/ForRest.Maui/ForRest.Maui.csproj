@@ -108,6 +108,15 @@
 		<MauiImage Update="Resources\Images\dotnet_bot.png" Resize="True" BaseSize="300,185" />
 		<MauiFont Include="Resources\Fonts\*" />
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+
+		<!-- Prevent Android from compressing Monaco editor assets inside the APK.
+		     The WebView loads these via file:///android_asset/ and cannot decompress
+		     them on the fly — compressed .js/.css/.json files arrive as garbled bytes
+		     and Monaco silently fails to initialise (blank white editor). -->
+		<AndroidNoCompress Include=".js" />
+		<AndroidNoCompress Include=".css" />
+		<AndroidNoCompress Include=".json" />
+
 		<!-- Package generic runtime dependencies from the checked-in cache, but never package app assemblies from snapshots. -->
 		<MauiAsset Include="roslyn-runtime\*.dll" Exclude="roslyn-runtime\ForRest.*.dll" LogicalName="roslyn-runtime/%(Filename)%(Extension)" />
 		<MauiAsset Include="..\ForRest.Domain\bin\$(Configuration)\net10.0\ForRest.Domain.dll" LogicalName="roslyn-runtime/ForRest.Domain.dll" />

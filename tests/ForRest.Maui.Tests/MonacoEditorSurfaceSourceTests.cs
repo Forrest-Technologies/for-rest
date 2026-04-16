@@ -81,8 +81,7 @@ public sealed class MonacoEditorSurfaceSourceTests
 		StringAssert.Contains(source, "settings.AllowFileAccessFromFileURLs = true;");
 		StringAssert.Contains(source, "settings.AllowUniversalAccessFromFileURLs = true;");
 		StringAssert.Contains(source, "#if !ANDROID");
-		StringAssert.Contains(source, "_androidPlatformWebView.LoadUrl(");
-		StringAssert.Contains(source, "<base href=\\\"file:///android_asset/\\\">");
+		StringAssert.Contains(source, "LoadDataWithBaseURL");
 	}
 
 	[TestMethod]
