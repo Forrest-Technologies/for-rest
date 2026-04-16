@@ -2122,6 +2122,7 @@ public partial class MonacoEditorSurface : ContentView
 	private const int AndroidCopyMenuItemId = 2;
 	private const int AndroidCutMenuItemId = 3;
 	private const int AndroidPasteMenuItemId = 4;
+	private static string? _androidMonacoHtmlPath;
 	private Android.Webkit.WebView? _androidPlatformWebView;
 	private PopupMenu? _androidEditorContextMenu;
 #endif
@@ -3144,17 +3145,24 @@ public partial class MonacoEditorSurface : ContentView
 		_androidPlatformWebView.ContextClick += OnAndroidWebViewContextClick;
 		_androidPlatformWebView.Touch += OnAndroidWebViewTouch;
 
-		// Load directly on the native Android WebView to guarantee the base
-		// URL and JavaScript/file-access settings are applied before the page
-		// parses.  Going through MAUI's HtmlWebViewSource can race with
-		// handler property mapping and leave the WebView with an incorrect
-		// base URI or default-off settings on Android.
-		_androidPlatformWebView.LoadDataWithBaseURL(
-			"file:///android_asset/",
-			MonacoHostHtml,
-			"text/html",
-			"UTF-8",
-			null);
+		// Load the Monaco host HTML from a real file:// URL instead of inline
+		// data.  Android's loadDataWithBaseURL treats the page as a data:
+		// origin on modern WebView builds, which silently blocks <script>
+		// elements that point to file:///android_asset/.  Writing the HTML
+		// to the app's cache directory with an injected <base> tag and
+		// loading via loadUrl avoids the restriction entirely.
+		if (_androidMonacoHtmlPath is null || !File.Exists(_androidMonacoHtmlPath))
+		{
+			string cacheDir = Path.Combine(FileSystem.CacheDirectory, "monaco-host");
+			Directory.CreateDirectory(cacheDir);
+			_androidMonacoHtmlPath = Path.Combine(cacheDir, "editor.html");
+			string html = MonacoHostHtml.Replace(
+				"<meta charset=\"utf-8\">",
+				"<meta charset=\"utf-8\">\n  <base href=\"file:///android_asset/\">");
+			File.WriteAllText(_androidMonacoHtmlPath, html);
+		}
+
+		_androidPlatformWebView.LoadUrl("file://" + _androidMonacoHtmlPath);
 	}
 
 	private void DetachAndroidWebView()
