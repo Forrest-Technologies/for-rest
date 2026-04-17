@@ -75,13 +75,15 @@ public sealed class MonacoEditorSurfaceSourceTests
 	{
 		string source = GetNormalizedMonacoEditorSurfaceSource();
 
-		StringAssert.Contains(source, "settings.JavaScriptEnabled = true;");
-		StringAssert.Contains(source, "settings.DomStorageEnabled = true;");
-		StringAssert.Contains(source, "settings.AllowFileAccess = true;");
-		StringAssert.Contains(source, "settings.AllowFileAccessFromFileURLs = true;");
-		StringAssert.Contains(source, "settings.AllowUniversalAccessFromFileURLs = true;");
-		StringAssert.Contains(source, "#if !ANDROID");
-		StringAssert.Contains(source, "LoadDataWithBaseURL");
+		StringAssert.Contains(source, "EditorWebView.Source = new HtmlWebViewSource");
+
+		string handlerSource = GetNormalizedForRestWebViewHandlerSource();
+
+		StringAssert.Contains(handlerSource, "settings.JavaScriptEnabled = true;");
+		StringAssert.Contains(handlerSource, "settings.DomStorageEnabled = true;");
+		StringAssert.Contains(handlerSource, "settings.AllowFileAccess = true;");
+		StringAssert.Contains(handlerSource, "settings.AllowFileAccessFromFileURLs = true;");
+		StringAssert.Contains(handlerSource, "settings.AllowUniversalAccessFromFileURLs = true;");
 	}
 
 	[TestMethod]
@@ -183,6 +185,25 @@ public sealed class MonacoEditorSurfaceSourceTests
 				"ForRest.Maui",
 				"Controls",
 				"MonacoEditorSurface.xaml.cs"));
+		return File.ReadAllText(sourcePath).Replace("\r\n", "\n", StringComparison.Ordinal);
+	}
+
+	private static string GetNormalizedForRestWebViewHandlerSource()
+	{
+		string sourcePath = Path.GetFullPath(
+			Path.Combine(
+				AppContext.BaseDirectory,
+				"..",
+				"..",
+				"..",
+				"..",
+				"..",
+				"src",
+				"ForRest.Maui",
+				"Platforms",
+				"Android",
+				"Handlers",
+				"ForRestWebViewHandler.cs"));
 		return File.ReadAllText(sourcePath).Replace("\r\n", "\n", StringComparison.Ordinal);
 	}
 }

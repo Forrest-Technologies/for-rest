@@ -446,38 +446,38 @@ public partial class MonacoEditorSurface : ContentView
 
       function registerLanguage(monaco) {
         monaco.languages.register({ id: "forrest" });
-        monaco.languages.setMonarchTokensProvider(“forrest”, {
+        monaco.languages.setMonarchTokensProvider("forrest", {
           tokenizer: {
             root: [
-              [/^##[^\n]*/, “comment.ai.prompt”],
-              [/^#>[^\n]*/, “comment.ai.response”],
-              [/^#~[^\n]*/, “comment.ai.stale”],
-              [/#[^\n]*/, “comment”],
-              [/\b(name|method|url|timeout|max_send_iterations|redirects|ssl|history|content_type|header|query|body|form|multipart|extract|expect|repeat|retry|auth|delay|user_agent|custom_user_agent)\b/, “keyword.directive”],
-              [/\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/, “keyword.method”],
-              [/\b(request\.send)\b/, “keyword.flow”],
-              [/\b(await|runtime|request|response|workspace|variables|json|console|encoding|crypto|regex|log|warn|error|let|if|else|while|for|foreach|in|and|or|not|break|continue|delay|payloads|time|strings|convert|random|snapshot|stash|tests)\b/, “keyword.flow”],
-              [/\b(true|false|null)\b/, “keyword.literal”],
-              [/[A-Za-z_][A-Za-z0-9_]*(?=\s*=)/, “variable.definition”],
-              [/\{\{[\w.\-]+\}\}/, “variable.placeholder”],
-              [/\{[\w.\-]+\}/, “variable.placeholder”],
-              [/[A-Za-z_][A-Za-z0-9_]*(?=\s*:)/, “attribute.name”],
-              [/\bhttps?:\/\/[^\s]+/, “string.url”],
-              [/\$”/, { token: “string”, next: “@interpolatedString” }],
-              [/[“„«][^”»\n]*[“»]/, “string”],
-              [/”([^”\\]|\\.)*”/, “string”],
-              [/\b\d+\b/, “number”],
-              [/[><=!]=?/, “operator”]
+              [/^##[^\n]*/, "comment.ai.prompt"],
+              [/^#>[^\n]*/, "comment.ai.response"],
+              [/^#~[^\n]*/, "comment.ai.stale"],
+              [/#[^\n]*/, "comment"],
+              [/\b(name|method|url|timeout|max_send_iterations|redirects|ssl|history|content_type|header|query|body|form|multipart|extract|expect|repeat|retry|auth|delay|user_agent|custom_user_agent)\b/, "keyword.directive"],
+              [/\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/, "keyword.method"],
+              [/\b(request\.send)\b/, "keyword.flow"],
+              [/\b(await|runtime|request|response|workspace|variables|json|console|encoding|crypto|regex|log|warn|error|let|if|else|while|for|foreach|in|and|or|not|break|continue|delay|payloads|time|strings|convert|random|snapshot|stash|tests)\b/, "keyword.flow"],
+              [/\b(true|false|null)\b/, "keyword.literal"],
+              [/[A-Za-z_][A-Za-z0-9_]*(?=\s*=)/, "variable.definition"],
+              [/\{\{[\w.\-]+\}\}/, "variable.placeholder"],
+              [/\{[\w.\-]+\}/, "variable.placeholder"],
+              [/[A-Za-z_][A-Za-z0-9_]*(?=\s*:)/, "attribute.name"],
+              [/\bhttps?:\/\/[^\s]+/, "string.url"],
+              [/\$"/, { token: "string", next: "@interpolatedString" }],
+              [/[“„«][^”»\n]*[”»]/, "string"],
+              [/"([^"\\]|\\.)*"/, "string"],
+              [/\b\d+\b/, "number"],
+              [/[><=!]=?/, "operator"]
             ],
             interpolatedString: [
-              [/\{/, { token: “variable.placeholder”, next: “@interpolatedExpr” }],
-              [/[^”\\{]+/, “string”],
-              [/\\./, “string”],
-              [/”/, { token: “string”, next: “@pop” }]
+              [/\{/, { token: "variable.placeholder", next: "@interpolatedExpr" }],
+              [/[^"\\{]+/, "string"],
+              [/\\./, "string"],
+              [/"/, { token: "string", next: "@pop" }]
             ],
             interpolatedExpr: [
-              [/\}/, { token: “variable.placeholder”, next: “@pop” }],
-              [/[^}]+/, “variable.placeholder”]
+              [/\}/, { token: "variable.placeholder", next: "@pop" }],
+              [/[^}]+/, "variable.placeholder"]
             ]
           }
         });
@@ -490,7 +490,7 @@ public partial class MonacoEditorSurface : ContentView
             { open: "[", close: "]" },
             { open: "(", close: ")" },
             { open: "\"", close: "\"" },
-            { open: "“", close: "”" },
+            { open: "„", close: "“" },
             { open: "«", close: "»" },
             { open: "'", close: "'" }
           ],
@@ -499,7 +499,7 @@ public partial class MonacoEditorSurface : ContentView
             { open: "[", close: "]" },
             { open: "(", close: ")" },
             { open: "\"", close: "\"" },
-            { open: "“", close: "”" },
+            { open: "„", close: "“" },
             { open: "«", close: "»" },
             { open: "'", close: "'" }
           ]
@@ -2129,13 +2129,11 @@ public partial class MonacoEditorSurface : ContentView
 	public MonacoEditorSurface()
 	{
 		InitializeComponent();
-#if !ANDROID
 		EditorWebView.Source = new HtmlWebViewSource
 		{
 			Html = MonacoHostHtml,
 			BaseUrl = GetEditorWebViewBaseUrl()
 		};
-#endif
 		EditorWebView.HandlerChanged += OnEditorWebViewHandlerChanged;
 		Loaded += OnLoaded;
 		Unloaded += OnUnloaded;
@@ -3143,13 +3141,6 @@ public partial class MonacoEditorSurface : ContentView
 		_androidPlatformWebView.LongClick += OnAndroidWebViewLongClick;
 		_androidPlatformWebView.ContextClick += OnAndroidWebViewContextClick;
 		_androidPlatformWebView.Touch += OnAndroidWebViewTouch;
-
-		_androidPlatformWebView.LoadDataWithBaseURL(
-			"file:///android_asset/",
-			MonacoHostHtml,
-			"text/html",
-			"UTF-8",
-			null);
 	}
 
 	private void DetachAndroidWebView()
