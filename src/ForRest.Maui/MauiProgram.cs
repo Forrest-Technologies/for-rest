@@ -30,6 +30,7 @@ public static class MauiProgram
 			.ConfigureMauiHandlers(handlers =>
 			{
 				handlers.AddHandler<Editor, ForRest.Maui.Platforms.Android.Handlers.SelectableEditorHandler>();
+				handlers.AddHandler<WebView, ForRest.Maui.Platforms.Android.Handlers.ForRestWebViewHandler>();
 			})
 #endif
 			;
