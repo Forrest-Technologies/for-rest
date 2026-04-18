@@ -1428,6 +1428,27 @@ public partial class MonacoEditorSurface : ContentView
             } else {
               window.setTimeout(() => this.scheduleAndroidFontRemeasure(), 120);
             }
+
+            var longPressTimer = null;
+            var editorDom = this.editor.getDomNode();
+            if (editorDom) {
+              editorDom.addEventListener("touchstart", function (e) {
+                if (e.touches.length !== 1) { return; }
+                longPressTimer = setTimeout(function () {
+                  longPressTimer = null;
+                  requestHostCommand("context-menu");
+                }, 500);
+              }, { passive: true });
+              editorDom.addEventListener("touchend", function () {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+              });
+              editorDom.addEventListener("touchmove", function () {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+              });
+              editorDom.addEventListener("touchcancel", function () {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+              });
+            }
           }
           this.ready = true;
           this.applyState({
@@ -2421,6 +2442,15 @@ public partial class MonacoEditorSurface : ContentView
 			_ = SyncEditorTextAsync();
 			return;
 		}
+
+#if ANDROID
+		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
+		    string.Equals(uri.AbsolutePath.Trim('/'), "context-menu", StringComparison.OrdinalIgnoreCase))
+		{
+			_ = ShowAndroidEditorContextMenuAsync();
+			return;
+		}
+#endif
 
 		if (string.Equals(uri.Host, "command", StringComparison.OrdinalIgnoreCase) &&
 		    string.Equals(uri.AbsolutePath.Trim('/'), "copy-response-var", StringComparison.OrdinalIgnoreCase) &&
