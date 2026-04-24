@@ -32,6 +32,7 @@
     <Color x:Key="ThemeMethodGetColor">#167C65</Color>
     <Color x:Key="ThemeMethodPostColor">#176AB8</Color>
     <Color x:Key="ThemeMethodPutColor">#9A5A1A</Color>
+    <Color x:Key="ThemeMethodPatchColor">#7D53C4</Color>
     <Color x:Key="ThemeMethodDeleteColor">#B2433D</Color>
     <Color x:Key="ThemeMethodNeutralColor">#5D6978</Color>
     <Color x:Key="ThemeWindowChromeBackgroundColor">#F4F8FC</Color>

@@ -210,6 +210,7 @@ public sealed class ThemeService : IThemeService, IDisposable
 			ApplyColor(resources, ThemeResourceKeys.MethodGetColor, theme.Colors.MethodGetColor);
 			ApplyColor(resources, ThemeResourceKeys.MethodPostColor, theme.Colors.MethodPostColor);
 			ApplyColor(resources, ThemeResourceKeys.MethodPutColor, theme.Colors.MethodPutColor);
+			ApplyColor(resources, ThemeResourceKeys.MethodPatchColor, theme.Colors.MethodPatchColor);
 			ApplyColor(resources, ThemeResourceKeys.MethodDeleteColor, theme.Colors.MethodDeleteColor);
 			ApplyColor(resources, ThemeResourceKeys.MethodNeutralColor, theme.Colors.MethodNeutralColor);
 			ApplyColor(resources, ThemeResourceKeys.WindowChromeBackgroundColor, theme.Colors.WindowChromeBackgroundColor);
