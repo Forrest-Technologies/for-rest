@@ -2,6 +2,7 @@ using ForRest.Services.AI;
 
 namespace ForRest.Maui.Tests.AI;
 
+[TestClass]
 public sealed class AiDocumentationSearchServiceTests
 {
     [TestMethod]

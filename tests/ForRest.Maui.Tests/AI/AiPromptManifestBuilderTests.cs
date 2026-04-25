@@ -2,6 +2,7 @@ using ForRest.Services.AI;
 
 namespace ForRest.Maui.Tests.AI;
 
+[TestClass]
 public sealed class AiPromptManifestBuilderTests
 {
     [TestMethod]
@@ -65,7 +66,7 @@ public sealed class AiPromptManifestBuilderTests
         StringAssert.Contains(manifest.SystemPrompt, "do not invent forms like `expect sent.status == 200`");
         StringAssert.Contains(manifest.SystemPrompt, "Math.*");
         StringAssert.Contains(manifest.SystemPrompt, ".Substring(...)");
-        StringAssert.Contains(manifest.SystemPrompt, "closest valid field");
+        StringAssert.Contains(manifest.SystemPrompt, "nearest valid field");
         StringAssert.Contains(manifest.SystemPrompt, "retryWithRead");
         StringAssert.Contains(manifest.SystemPrompt, "retryWithReplace");
         StringAssert.Contains(manifest.SystemPrompt, "docHints");
