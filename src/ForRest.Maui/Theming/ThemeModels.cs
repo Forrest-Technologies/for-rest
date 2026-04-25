@@ -175,6 +175,7 @@ public sealed record ThemeColorTokens(
 	string MethodGetColor,
 	string MethodPostColor,
 	string MethodPutColor,
+	string MethodPatchColor,
 	string MethodDeleteColor,
 	string MethodNeutralColor,
 	string WindowChromeBackgroundColor,
@@ -238,6 +239,7 @@ public static class ThemeResourceKeys
 	public const string MethodGetColor = "ThemeMethodGetColor";
 	public const string MethodPostColor = "ThemeMethodPostColor";
 	public const string MethodPutColor = "ThemeMethodPutColor";
+	public const string MethodPatchColor = "ThemeMethodPatchColor";
 	public const string MethodDeleteColor = "ThemeMethodDeleteColor";
 	public const string MethodNeutralColor = "ThemeMethodNeutralColor";
 	public const string WindowChromeBackgroundColor = "ThemeWindowChromeBackgroundColor";

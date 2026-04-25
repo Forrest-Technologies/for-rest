@@ -29,13 +29,13 @@
         <SolidColorBrush x:Key="ShellTextBrush" Color="#F3F6FA" />
         <SolidColorBrush x:Key="ShellMutedTextBrush" Color="#98A5B5" />
         <SolidColorBrush x:Key="ShellSubtleTextBrush" Color="#738195" />
-        <SolidColorBrush x:Key="MethodGetBrush" Color="#18794E" />
-        <SolidColorBrush x:Key="MethodPostBrush" Color="#2062D1" />
+        <SolidColorBrush x:Key="MethodGetBrush" Color="#209B75" />
+        <SolidColorBrush x:Key="MethodPostBrush" Color="#2D76FF" />
         <SolidColorBrush x:Key="MethodPutBrush" Color="#6C57FF" />
-        <SolidColorBrush x:Key="MethodPatchBrush" Color="#B66B11" />
-        <SolidColorBrush x:Key="MethodDeleteBrush" Color="#C23B4C" />
-        <SolidColorBrush x:Key="MethodHeadBrush" Color="#5F6B81" />
-        <SolidColorBrush x:Key="MethodOptionsBrush" Color="#1F7FBC" />
+        <SolidColorBrush x:Key="MethodPatchBrush" Color="#D07722" />
+        <SolidColorBrush x:Key="MethodDeleteBrush" Color="#D5425E" />
+        <SolidColorBrush x:Key="MethodHeadBrush" Color="#76869E" />
+        <SolidColorBrush x:Key="MethodOptionsBrush" Color="#2B97FF" />
 
         <Style x:Key="WorkbenchPaneTitleStyle" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{ThemeResource ShellDisplayFontFamily}" />

@@ -153,6 +153,7 @@ public partial class MainPage : ContentPage
 		}
 
 		_isInitialized = true;
+		Loaded -= OnPageLoaded;
 		try
 		{
 			AppLaunchGuard.RecordMessage("MainPage startup", "MainPage loaded; initialization starting.");

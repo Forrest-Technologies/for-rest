@@ -49,6 +49,7 @@ public sealed class MainPageViewModel : ObservableObject
 	private Color _methodGet = Color.FromArgb("#167C65");
 	private Color _methodPost = Color.FromArgb("#176AB8");
 	private Color _methodPut = Color.FromArgb("#9A5A1A");
+	private Color _methodPatch = Color.FromArgb("#7D53C4");
 	private Color _methodDelete = Color.FromArgb("#B2433D");
 	private Color _methodNeutral = Color.FromArgb("#5D6978");
 	private Color _successColor = Color.FromArgb("#1E7A5F");
@@ -351,6 +352,7 @@ public sealed class MainPageViewModel : ObservableObject
 			"GET",
 			"POST",
 			"PUT",
+			"PATCH",
 			"DELETE"
 		];
 
@@ -1475,6 +1477,7 @@ public sealed class MainPageViewModel : ObservableObject
 		"GET" => _methodGet,
 		"POST" => _methodPost,
 		"PUT" => _methodPut,
+		"PATCH" => _methodPatch,
 		"DELETE" => _methodDelete,
 		_ => _methodNeutral
 	};
@@ -3539,6 +3542,7 @@ public sealed class MainPageViewModel : ObservableObject
 		_methodGet = ThemeSupport.ToColor(theme.Colors.MethodGetColor);
 		_methodPost = ThemeSupport.ToColor(theme.Colors.MethodPostColor);
 		_methodPut = ThemeSupport.ToColor(theme.Colors.MethodPutColor);
+		_methodPatch = ThemeSupport.ToColor(theme.Colors.MethodPatchColor);
 		_methodDelete = ThemeSupport.ToColor(theme.Colors.MethodDeleteColor);
 		_methodNeutral = ThemeSupport.ToColor(theme.Colors.MethodNeutralColor);
 		_successColor = ThemeSupport.ToColor(theme.Colors.SuccessColor);
@@ -3610,7 +3614,7 @@ public sealed class MainPageViewModel : ObservableObject
 			"GET" => _methodGet,
 			"POST" => _methodPost,
 			"PUT" => _methodPut,
-			"PATCH" => _methodPut,
+			"PATCH" => _methodPatch,
 			"DELETE" => _methodDelete,
 			_ => _methodNeutral
 		};
