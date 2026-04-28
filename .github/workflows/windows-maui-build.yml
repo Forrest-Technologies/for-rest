@@ -112,18 +112,29 @@ jobs:
         shell: pwsh
         run: dotnet publish src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o artifacts/licensing-tool
 
-      - name: Build Windows app
+      - name: Publish Windows app
         shell: pwsh
         run: |
+          # `dotnet publish` (not `build`) is required so every transitive
+          # PackageReference from indirectly-referenced projects — including
+          # Microsoft.Extensions.AI*, Microsoft.Agents.AI.OpenAI, Azure.AI.OpenAI,
+          # OpenAI, etc. brought in via ForRest.Services — actually lands in
+          # the output folder. With `dotnet build`, runtime-specific package
+          # assets aren't reliably flowed into the bin output for MAUI's
+          # Windows TFM, which produced FileNotFoundException at runtime
+          # the first time the AI feature was used.
           $outputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
-          dotnet build src/ForRest.Maui/ForRest.Maui.csproj `
+          dotnet publish src/ForRest.Maui/ForRest.Maui.csproj `
             -c "${{ needs.prepare.outputs.build_configuration }}" `
             -f $env:WINDOWS_TFM `
             -r ${{ matrix.runtime_identifier }} `
+            --self-contained false `
             -p:ForRestWindowsOnly=$env:WINDOWS_ONLY_BUILD `
             -p:ContinuousIntegrationBuild=true `
             -p:Platform=${{ matrix.platform }} `
             -p:RuntimeIdentifier=${{ matrix.runtime_identifier }} `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
             -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} `
             -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} `
             -p:Version="${{ needs.prepare.outputs.version_label }}" `
@@ -141,6 +152,11 @@ jobs:
             -p:ForRestLicenseClockSkewMinutes="${{ vars.FORREST_LICENSE_CLOCK_SKEW_MINUTES }}" `
             -p:ForRestLicenseMaxActivations="${{ vars.FORREST_LICENSE_MAX_ACTIVATIONS }}" `
             -o $outputDirectory
+
+          $aiAssemblyCheck = Get-ChildItem -Path $outputDirectory -Filter 'Microsoft.Extensions.AI*.dll' -File -ErrorAction SilentlyContinue
+          if (-not $aiAssemblyCheck) {
+            throw "Publish output is missing Microsoft.Extensions.AI*.dll under $outputDirectory. The MAUI Windows publish did not flow the AI package assemblies into the artifact."
+          }
 
       - name: Restore local tools
         if: needs.prepare.outputs.build_configuration == 'Release'
@@ -162,6 +178,10 @@ jobs:
       - name: Package build output
         shell: pwsh
         run: |
+          # Only ship the .zip. The bare ForRest.Maui.exe used to be uploaded
+          # as a "standalone exe" alongside the zip, but a MAUI/WinUI apphost
+          # binary cannot run without the rest of its publish folder, so the
+          # standalone exe artifact never worked and only confused users.
           $artifactBase = "for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}"
           $buildDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
           $releaseDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\release\${{ matrix.arch }}"
@@ -172,7 +192,6 @@ jobs:
             throw "Expected executable was not found at $exePath."
           }
 
-          Copy-Item $exePath (Join-Path $releaseDirectory "$artifactBase.exe") -Force
           $zipPath = Join-Path $releaseDirectory "$artifactBase.zip"
           if (Test-Path $zipPath) {
             Remove-Item $zipPath -Force
