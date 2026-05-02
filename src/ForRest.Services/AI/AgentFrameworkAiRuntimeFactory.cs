@@ -280,7 +280,10 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         string normalized = NormalizePromptText(candidate);
         string[] tokens = TokenizePrompt(normalized);
         int methodCount = CountDistinctHttpMethods(tokens);
-        int urlCount = UrlRegex.Matches(candidate).Count;
+        // Regex.Count counts matches without materializing the full MatchCollection
+        // and Match objects — IsComplexEditPrompt runs on every AI prompt and only
+        // needs the count, so the prior `.Matches(...).Count` was pure waste.
+        int urlCount = UrlRegex.Count(candidate);
         bool explicitLoopPrompt = ContainsAny(normalized, "iterate", "enumerate", "batch", "foreach", "loop", "max_send_iterations", "max send iterations");
         bool repeatedExecutionPrompt = LooksLikeRepeatedExecutionPrompt(normalized);
         bool requestMutationPrompt =
@@ -333,7 +336,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         string normalized = NormalizePromptText(signalText);
         string[] tokens = TokenizePrompt(normalized);
         int methodCount = CountDistinctHttpMethods(tokens);
-        int urlCount = UrlRegex.Matches(signalText).Count;
+        int urlCount = UrlRegex.Count(signalText);
         bool explicitLoopPrompt = ContainsAny(
             normalizedPrompt,
             "iterate",

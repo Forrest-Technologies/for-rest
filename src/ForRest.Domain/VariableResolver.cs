@@ -105,12 +105,22 @@ public sealed class VariableResolver
             .ToList();
     }
 
-    public string RenderTemplate(string template, IEnumerable<ResolvedVariable> variables)
+    public static string RenderTemplate(string template, IEnumerable<ResolvedVariable> variables)
     {
+        // Fast path: most rendered fields (auth scheme, content-type, custom user-agent,
+        // header keys, etc.) contain no `{{token}}` markers at all. Skip building the
+        // lookup dictionary and running the regex when there's no token to substitute —
+        // RequestCompiler.Prepare calls this 20–40+ times per request, so this avoids
+        // a measurable amount of per-request allocation.
+        if (string.IsNullOrEmpty(template) || template.IndexOf("{{", StringComparison.Ordinal) < 0)
+        {
+            return template ?? string.Empty;
+        }
+
         var lookup = variables.ToDictionary(static item => item.Key, static item => item.Value, StringComparer.OrdinalIgnoreCase);
 
         return TokenPattern.Replace(
-            template ?? string.Empty,
+            template,
             match =>
             {
                 var key = match.Groups["key"].Value;

@@ -133,8 +133,6 @@ jobs:
             -p:ContinuousIntegrationBuild=true `
             -p:Platform=${{ matrix.platform }} `
             -p:RuntimeIdentifier=${{ matrix.runtime_identifier }} `
-            -p:WindowsPackageType=None `
-            -p:WindowsAppSDKSelfContained=true `
             -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} `
             -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} `
             -p:Version="${{ needs.prepare.outputs.version_label }}" `
