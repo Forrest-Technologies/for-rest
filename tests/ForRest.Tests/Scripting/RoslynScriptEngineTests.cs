@@ -292,6 +292,42 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_resolves_builtin_response_members_case_and_separator_insensitively()
+    {
+        // Pins ScriptResponseApi.NormalizeMemberName (strip non-alphanumerics +
+        // lowercase). After the StringBuilder rewrite these must all collapse to the
+        // same built-in member regardless of casing or separators.
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                tests.Equal(200, response.Status, "PascalCase resolves status");
+                tests.Equal(200, response.STATUS, "upper-case resolves status");
+                tests.Equal("application/json", response.ContentType, "PascalCase resolves content type");
+                tests.Equal("application/json", response.content_type, "separator + lower-case resolves content type");
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    StatusCode = 200,
+                    Body = """{"ok":true}""",
+                    ContentType = "application/json",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
+    }
+
+    [TestMethod]
     public async Task Run_normalizes_response_aliases_and_supports_security_utilities()
     {
         var result = await scriptEngine.Run(
