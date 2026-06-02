@@ -72,6 +72,45 @@ public sealed class VariableResolverTests
         Assert.HasCount(2, preview.Variables);
     }
 
+    [TestMethod]
+    public void RenderTemplate_returns_empty_for_null_template()
+    {
+        Assert.AreEqual(string.Empty, VariableResolver.RenderTemplate(null!, []));
+    }
+
+    [TestMethod]
+    public void RenderTemplate_returns_empty_for_empty_template()
+    {
+        Assert.AreEqual(string.Empty, VariableResolver.RenderTemplate(string.Empty, []));
+    }
+
+    [TestMethod]
+    public void RenderTemplate_returns_input_unchanged_when_no_tokens_present()
+    {
+        const string template = "https://api.example.test/users";
+        Assert.AreEqual(template, VariableResolver.RenderTemplate(template, [CreateResolved("host", "ignored")]));
+    }
+
+    [TestMethod]
+    public void RenderTemplate_leaves_unclosed_token_fragment_intact()
+    {
+        const string template = "https://{{host/users";
+        Assert.AreEqual(template, VariableResolver.RenderTemplate(template, [CreateResolved("host", "api.example.test")]));
+    }
+
+    [TestMethod]
+    public void RenderTemplate_substitutes_known_tokens_and_leaves_unknown_literal()
+    {
+        var rendered = VariableResolver.RenderTemplate(
+            "https://{{host}}/users/{{id}}?missing={{missing}}",
+            [
+                CreateResolved("host", "api.example.test"),
+                CreateResolved("id", "42"),
+            ]);
+
+        Assert.AreEqual("https://api.example.test/users/42?missing={{missing}}", rendered);
+    }
+
     #endregion
 
     #region Private Methods
@@ -84,6 +123,15 @@ public sealed class VariableResolverTests
             Value = value,
             Scope = scope,
             IsSecret = isSecret,
+        };
+    }
+
+    private static ResolvedVariable CreateResolved(string key, string value)
+    {
+        return new()
+        {
+            Key = key,
+            Value = value,
         };
     }
 

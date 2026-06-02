@@ -112,6 +112,20 @@ jobs:
         shell: pwsh
         run: dotnet publish src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o artifacts/licensing-tool
 
+      - name: Restore Windows app (deterministic assets)
+        shell: pwsh
+        run: |
+          # Explicitly restore the full ForRest.Maui graph for the exact Windows
+          # TFM/RID before publishing. Earlier steps (dotnet test on the
+          # net10.0-windows ForRest.Maui.Tests, plus the licensing build/publish)
+          # restore parts of the project graph; pinning a fresh restore here with
+          # the same ForRestWindowsOnly + RID flags guarantees every
+          # obj/project.assets.json targets this TFM and rules out NETSDK1005
+          # ("assets file doesn't have a target for net10.0") at publish time.
+          dotnet restore src/ForRest.Maui/ForRest.Maui.csproj `
+            -p:ForRestWindowsOnly=$env:WINDOWS_ONLY_BUILD `
+            -r ${{ matrix.runtime_identifier }}
+
       - name: Publish Windows app
         shell: pwsh
         run: |
@@ -133,8 +147,6 @@ jobs:
             -p:ContinuousIntegrationBuild=true `
             -p:Platform=${{ matrix.platform }} `
             -p:RuntimeIdentifier=${{ matrix.runtime_identifier }} `
-            -p:WindowsPackageType=None `
-            -p:WindowsAppSDKSelfContained=true `
             -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} `
             -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} `
             -p:Version="${{ needs.prepare.outputs.version_label }}" `

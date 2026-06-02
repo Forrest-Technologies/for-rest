@@ -70,11 +70,10 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
         List<KeyValueDefinition> queryParameters,
         IEnumerable<ResolvedVariable> variables)
     {
-        var renderer = new VariableResolver();
         switch (auth.Mode)
         {
             case AuthMode.BearerToken:
-                var token = renderer.RenderTemplate(auth.BearerToken, variables);
+                var token = VariableResolver.RenderTemplate(auth.BearerToken, variables);
                 if (!string.IsNullOrWhiteSpace(token))
                 {
                     UpsertHeader(headers, ResolveHeaderName(auth), BuildAuthValue(auth, token));
@@ -82,14 +81,14 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
 
                 break;
             case AuthMode.Basic:
-                var username = renderer.RenderTemplate(auth.Username, variables);
-                var password = renderer.RenderTemplate(auth.Password, variables);
+                var username = VariableResolver.RenderTemplate(auth.Username, variables);
+                var password = VariableResolver.RenderTemplate(auth.Password, variables);
                 var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
                 UpsertHeader(headers, ResolveHeaderName(auth), BuildAuthValue(auth, encoded));
                 break;
             case AuthMode.ApiKey:
-                var apiKeyName = renderer.RenderTemplate(auth.ApiKeyName, variables);
-                var apiKeyValue = renderer.RenderTemplate(auth.ApiKeyValue, variables);
+                var apiKeyName = VariableResolver.RenderTemplate(auth.ApiKeyName, variables);
+                var apiKeyValue = VariableResolver.RenderTemplate(auth.ApiKeyValue, variables);
                 if (auth.ApiKeyLocation == ApiKeyLocation.Query)
                 {
                     UpsertQueryParameter(queryParameters, apiKeyName, apiKeyValue);
@@ -101,8 +100,8 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
 
                 break;
             case AuthMode.Header:
-                var headerName = renderer.RenderTemplate(ResolveHeaderName(auth), variables);
-                var headerValue = renderer.RenderTemplate(auth.HeaderValue, variables);
+                var headerName = VariableResolver.RenderTemplate(ResolveHeaderName(auth), variables);
+                var headerValue = VariableResolver.RenderTemplate(auth.HeaderValue, variables);
                 if (auth.ApiKeyLocation == ApiKeyLocation.Query)
                 {
                     UpsertQueryParameter(queryParameters, ResolveQueryParameterName(auth), BuildAuthValue(auth, headerValue));
@@ -174,18 +173,17 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
 
     private static RequestBodyDefinition RenderBody(RequestBodyDefinition body, IEnumerable<ResolvedVariable> variables)
     {
-        var renderer = new VariableResolver();
         return body with
         {
-            RawContent = renderer.RenderTemplate(body.RawContent, variables),
-            ContentType = renderer.RenderTemplate(body.ContentType, variables),
+            RawContent = VariableResolver.RenderTemplate(body.RawContent, variables),
+            ContentType = VariableResolver.RenderTemplate(body.ContentType, variables),
             FormValues =
             [
                 .. body.FormValues.Select(
                     item => item with
                     {
-                        Key = renderer.RenderTemplate(item.Key, variables),
-                        Value = renderer.RenderTemplate(item.Value, variables),
+                        Key = VariableResolver.RenderTemplate(item.Key, variables),
+                        Value = VariableResolver.RenderTemplate(item.Value, variables),
                     }),
             ],
         };
@@ -193,40 +191,38 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
 
     private static List<KeyValueDefinition> RenderEntries(IEnumerable<KeyValueDefinition> entries, IEnumerable<ResolvedVariable> variables)
     {
-        var renderer = new VariableResolver();
         return
         [
             .. entries.Select(
                 item => item with
                 {
-                    Key = renderer.RenderTemplate(item.Key, variables),
-                    Value = renderer.RenderTemplate(item.Value, variables),
+                    Key = VariableResolver.RenderTemplate(item.Key, variables),
+                    Value = VariableResolver.RenderTemplate(item.Value, variables),
                 }),
         ];
     }
 
     private static RequestAuthDefinition RenderAuth(RequestAuthDefinition auth, IEnumerable<ResolvedVariable> variables)
     {
-        var renderer = new VariableResolver();
         return auth with
         {
-            Username = renderer.RenderTemplate(auth.Username, variables),
-            Password = renderer.RenderTemplate(auth.Password, variables),
-            BearerToken = renderer.RenderTemplate(auth.BearerToken, variables),
-            ApiKeyName = renderer.RenderTemplate(auth.ApiKeyName, variables),
-            ApiKeyValue = renderer.RenderTemplate(auth.ApiKeyValue, variables),
-            HeaderName = renderer.RenderTemplate(auth.HeaderName, variables),
-            HeaderValue = renderer.RenderTemplate(auth.HeaderValue, variables),
-            QueryParameterName = renderer.RenderTemplate(auth.QueryParameterName, variables),
-            Scheme = renderer.RenderTemplate(auth.Scheme, variables),
-            Domain = renderer.RenderTemplate(auth.Domain, variables),
-            Authority = renderer.RenderTemplate(auth.Authority, variables),
-            TokenUrl = renderer.RenderTemplate(auth.TokenUrl, variables),
-            ClientId = renderer.RenderTemplate(auth.ClientId, variables),
-            ClientSecret = renderer.RenderTemplate(auth.ClientSecret, variables),
-            Scopes = renderer.RenderTemplate(auth.Scopes, variables),
-            Resource = renderer.RenderTemplate(auth.Resource, variables),
-            Audience = renderer.RenderTemplate(auth.Audience, variables),
+            Username = VariableResolver.RenderTemplate(auth.Username, variables),
+            Password = VariableResolver.RenderTemplate(auth.Password, variables),
+            BearerToken = VariableResolver.RenderTemplate(auth.BearerToken, variables),
+            ApiKeyName = VariableResolver.RenderTemplate(auth.ApiKeyName, variables),
+            ApiKeyValue = VariableResolver.RenderTemplate(auth.ApiKeyValue, variables),
+            HeaderName = VariableResolver.RenderTemplate(auth.HeaderName, variables),
+            HeaderValue = VariableResolver.RenderTemplate(auth.HeaderValue, variables),
+            QueryParameterName = VariableResolver.RenderTemplate(auth.QueryParameterName, variables),
+            Scheme = VariableResolver.RenderTemplate(auth.Scheme, variables),
+            Domain = VariableResolver.RenderTemplate(auth.Domain, variables),
+            Authority = VariableResolver.RenderTemplate(auth.Authority, variables),
+            TokenUrl = VariableResolver.RenderTemplate(auth.TokenUrl, variables),
+            ClientId = VariableResolver.RenderTemplate(auth.ClientId, variables),
+            ClientSecret = VariableResolver.RenderTemplate(auth.ClientSecret, variables),
+            Scopes = VariableResolver.RenderTemplate(auth.Scopes, variables),
+            Resource = VariableResolver.RenderTemplate(auth.Resource, variables),
+            Audience = VariableResolver.RenderTemplate(auth.Audience, variables),
         };
     }
 
@@ -297,8 +293,7 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
         List<KeyValueDefinition> headers,
         IEnumerable<ResolvedVariable> variables)
     {
-        var renderer = new VariableResolver();
-        var resolved = UserAgentResolver.Resolve(kind, renderer.RenderTemplate(customValue, variables));
+        var resolved = UserAgentResolver.Resolve(kind, VariableResolver.RenderTemplate(customValue, variables));
         if (!string.IsNullOrWhiteSpace(resolved))
         {
             UpsertHeader(headers, "User-Agent", resolved);

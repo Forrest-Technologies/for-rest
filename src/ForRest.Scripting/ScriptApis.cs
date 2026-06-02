@@ -526,7 +526,20 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
             return string.Empty;
         }
 
-        return new string(value.Where(static character => char.IsLetterOrDigit(character)).ToArray()).ToLowerInvariant();
+        // Old impl: `new string(value.Where(...).ToArray()).ToLowerInvariant()` —
+        // a LINQ enumerator + char[] + string + a second lowercased string per call.
+        // Now: a single allocation sized at most to the source length, lowercased
+        // in the same pass.
+        var builder = new StringBuilder(value.Length);
+        foreach (char character in value)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return builder.ToString();
     }
 
     #endregion
