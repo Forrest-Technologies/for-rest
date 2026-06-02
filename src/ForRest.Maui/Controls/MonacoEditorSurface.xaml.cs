@@ -10,7 +10,6 @@ using ForRest.Maui.Services;
 #if ANDROID
 using Android.Content;
 using Android.Views;
-using Android.Views.InputMethods;
 using Android.Webkit;
 using Android.Widget;
 #endif
@@ -2554,7 +2553,7 @@ public partial class MonacoEditorSurface : ContentView
 				if (!_pendingIsReadOnly)
 				{
 #if ANDROID
-					await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+					await FocusAndroidEditorAsync(focusMonaco: true);
 #else
 					await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
 #endif
@@ -2933,7 +2932,7 @@ public partial class MonacoEditorSurface : ContentView
 			$"}})() : null;";
 		await EvaluateOptionalAsync(script);
 #if ANDROID
-		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: false);
+		await FocusAndroidEditorAsync(focusMonaco: false);
 #endif
 	}
 
@@ -2976,7 +2975,7 @@ public partial class MonacoEditorSurface : ContentView
 			$"window.forRestHost ? (window.forRestHost.pasteTextFromHost({JsonSerializer.Serialize(payloadBase64)}) ? 'true' : 'false') : 'false';";
 		string? result = await EvaluateOptionalAsync(script);
 #if ANDROID
-		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await FocusAndroidEditorAsync(focusMonaco: true);
 #else
 		await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
 #endif
@@ -3014,7 +3013,7 @@ public partial class MonacoEditorSurface : ContentView
 			return false;
 		}
 
-		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await FocusAndroidEditorAsync(focusMonaco: true);
 		string? result = await EvaluateOptionalAsync(
 			"window.forRestHost ? (window.forRestHost.selectAllText() ? 'true' : 'false') : 'false';");
 		bool selected = result?.Contains("true", StringComparison.OrdinalIgnoreCase) == true;
@@ -3050,7 +3049,7 @@ public partial class MonacoEditorSurface : ContentView
 			return false;
 		}
 
-		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await FocusAndroidEditorAsync(focusMonaco: true);
 		Debug.WriteLine($"[MonacoEditorSurface/Android] Copy request completed. Length={selectedText.Length}");
 		return true;
 	}
@@ -3090,7 +3089,7 @@ public partial class MonacoEditorSurface : ContentView
 
 		await EvaluateOptionalAsync(
 			"window.forRestHost ? (window.forRestHost.deleteSelectedText() ? 'true' : 'false') : 'false';");
-		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await FocusAndroidEditorAsync(focusMonaco: true);
 		Debug.WriteLine($"[MonacoEditorSurface/Android] Cut request completed. Length={selectedText.Length}");
 		return true;
 	}
@@ -3191,7 +3190,7 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		e.Handled = true;
 		Debug.WriteLine($"[MonacoEditorSurface/Android] WebView long-press detected. Showing native editor context menu. ReadOnly={_pendingIsReadOnly}");
-		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await FocusAndroidEditorAsync(focusMonaco: true);
 		await ShowAndroidEditorContextMenuAsync();
 	}
 
@@ -3199,7 +3198,7 @@ public partial class MonacoEditorSurface : ContentView
 	{
 		e.Handled = true;
 		Debug.WriteLine($"[MonacoEditorSurface/Android] WebView context-click detected. Showing native editor context menu. ReadOnly={_pendingIsReadOnly}");
-		await FocusAndroidEditorAsync(requestKeyboard: false, focusMonaco: true);
+		await FocusAndroidEditorAsync(focusMonaco: true);
 		await ShowAndroidEditorContextMenuAsync();
 	}
 
@@ -3330,10 +3329,15 @@ public partial class MonacoEditorSurface : ContentView
 	private async Task BootstrapAndroidEditorTouchAsync()
 	{
 		await Task.Delay(32);
-		await FocusAndroidEditorAsync(requestKeyboard: true, focusMonaco: false, keyboardDelayMs: 75);
+		await FocusAndroidEditorAsync(focusMonaco: true);
 	}
 
-	private async Task FocusAndroidEditorAsync(bool requestKeyboard, bool focusMonaco, int keyboardDelayMs = 40)
+	// Focus the WebView container view and (optionally) Monaco's hidden textarea.
+	// Do NOT call InputMethodManager.ShowSoftInput here: it would bind the IME to
+	// the outer WebView token instead of the contentEditable child, leaving the
+	// keyboard up with no InputConnection to Monaco. Letting the WebView raise
+	// the IME naturally once the textarea gains focus is what makes typing work.
+	private async Task FocusAndroidEditorAsync(bool focusMonaco)
 	{
 		AttachAndroidWebView();
 		if (_androidPlatformWebView is null)
@@ -3357,24 +3361,6 @@ public partial class MonacoEditorSurface : ContentView
 		{
 			await EvaluateOptionalAsync("window.forRestHost && window.forRestHost.focus();");
 		}
-
-		if (!requestKeyboard)
-		{
-			return;
-		}
-
-		await Task.Delay(keyboardDelayMs);
-		await Microsoft.Maui.ApplicationModel.MainThread.InvokeOnMainThreadAsync(() =>
-		{
-			if (_androidPlatformWebView is null)
-			{
-				return;
-			}
-
-			InputMethodManager? inputMethodManager = _androidPlatformWebView.Context?.GetSystemService(Context.InputMethodService) as InputMethodManager;
-			inputMethodManager?.RestartInput(_androidPlatformWebView);
-			inputMethodManager?.ShowSoftInput(_androidPlatformWebView, ShowFlags.Implicit);
-		});
 	}
 #endif
 
