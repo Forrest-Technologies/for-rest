@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "ForRest Script",
+  "scopeName": "source.forrest",
+  "patterns": [
+    { "match": "^##[^\\n]*", "name": "comment.line.ai-prompt.forrest" },
+    { "match": "^#>[^\\n]*", "name": "comment.line.ai-response.forrest" },
+    { "match": "^#~[^\\n]*", "name": "comment.line.ai-stale.forrest" },
+    { "match": "#[^\\n]*", "name": "comment.line.number-sign.forrest" },
+    { "match": "\\b(name|method|url|timeout|max_send_iterations|redirects|ssl|history|content_type|header|query|body|form|multipart|extract|expect|repeat|retry|auth|delay|user_agent|custom_user_agent)\\b", "name": "keyword.other.directive.forrest" },
+    { "match": "\\b(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\\b", "name": "keyword.other.method.forrest" },
+    { "match": "\\b(request\\.send)\\b", "name": "keyword.control.flow.forrest" },
+    { "match": "\\b(await|runtime|request|response|workspace|variables|json|console|encoding|crypto|regex|log|warn|error|let|if|else|while|for|foreach|in|and|or|not|break|continue|delay|payloads|time|strings|convert|random|snapshot|stash|tests)\\b", "name": "keyword.control.flow.forrest" },
+    { "match": "\\b(true|false|null)\\b", "name": "constant.language.forrest" },
+    { "match": "[A-Za-z_][A-Za-z0-9_]*(?=\\s*=)", "name": "variable.other.definition.forrest" },
+    { "match": "\\{\\{[\\w.\\-]+\\}\\}", "name": "variable.other.placeholder.forrest" },
+    { "match": "\\{[\\w.\\-]+\\}", "name": "variable.other.placeholder.forrest" },
+    { "match": "[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)", "name": "entity.other.attribute-name.forrest" },
+    { "match": "\\bhttps?://[^\\s]+", "name": "string.unquoted.url.forrest" },
+    { "begin": "\\$\"", "end": "\"", "name": "string.quoted.interpolated.forrest", "patterns": [
+      { "begin": "\\{", "end": "\\}", "name": "variable.other.placeholder.forrest" },
+      { "match": "\\\\.", "name": "constant.character.escape.forrest" }
+    ] },
+    { "match": "[“„«][^”»\\n]*[”»]", "name": "string.quoted.other.forrest" },
+    { "match": "\"([^\"\\\\]|\\\\.)*\"", "name": "string.quoted.double.forrest" },
+    { "match": "\\b\\d+\\b", "name": "constant.numeric.forrest" },
+    { "match": "[><=!]=?", "name": "keyword.operator.forrest" }
+  ]
+}

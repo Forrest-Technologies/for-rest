@@ -16,14 +16,14 @@ using Android.Widget;
 
 namespace ForRest.Maui.Controls;
 
-public partial class MonacoEditorSurface : ContentView
+public partial class MonacoEditorSurface : ContentView, ICodeEditorSurface
 {
 	public event EventHandler? SendRequested;
 	public event EventHandler? UndoRequested;
 	public event EventHandler? RedoRequested;
-	public event EventHandler<MonacoResponseVarRequestEventArgs>? ResponseVarCopyRequested;
-	public event EventHandler<MonacoCursorPositionChangedEventArgs>? CursorPositionChanged;
-	public event EventHandler<MonacoEditorFocusEventArgs>? EditorFocusChanged;
+	public event EventHandler<EditorResponseVarRequestEventArgs>? ResponseVarCopyRequested;
+	public event EventHandler<EditorCursorPositionChangedEventArgs>? CursorPositionChanged;
+	public event EventHandler<EditorFocusChangedEventArgs>? EditorFocusChanged;
 	private static readonly double DefaultEditorFontSize = OperatingSystem.IsAndroid() ? 14d : 13.5d;
 
 	private const string MonacoHostHtml = """
@@ -2409,7 +2409,7 @@ public partial class MonacoEditorSurface : ContentView
 			if (TryGetQueryValue(uri, "line", out int sendLine) &&
 			    TryGetQueryValue(uri, "column", out int sendColumn))
 			{
-				CursorPositionChanged?.Invoke(this, new MonacoCursorPositionChangedEventArgs(sendLine, sendColumn));
+				CursorPositionChanged?.Invoke(this, new EditorCursorPositionChangedEventArgs(sendLine, sendColumn));
 			}
 
 			await SyncEditorTextAsync();
@@ -2454,7 +2454,7 @@ public partial class MonacoEditorSurface : ContentView
 		    TryGetQueryValue(uri, "line", out int lineNumber) &&
 		    TryGetQueryValue(uri, "column", out int column))
 		{
-			ResponseVarCopyRequested?.Invoke(this, new MonacoResponseVarRequestEventArgs(lineNumber, column));
+			ResponseVarCopyRequested?.Invoke(this, new EditorResponseVarRequestEventArgs(lineNumber, column));
 			return;
 		}
 
@@ -2463,7 +2463,7 @@ public partial class MonacoEditorSurface : ContentView
 		    TryGetQueryValue(uri, "line", out int cursorLineNumber) &&
 		    TryGetQueryValue(uri, "column", out int cursorColumn))
 		{
-			CursorPositionChanged?.Invoke(this, new MonacoCursorPositionChangedEventArgs(cursorLineNumber, cursorColumn));
+			CursorPositionChanged?.Invoke(this, new EditorCursorPositionChangedEventArgs(cursorLineNumber, cursorColumn));
 			return;
 		}
 
@@ -2476,7 +2476,7 @@ public partial class MonacoEditorSurface : ContentView
 			// model side. The decorations themselves are managed in JS so
 			// we don't need to push any text — just relay the focus state.
 			bool focused = string.Equals(QueryString(uri, "focused"), "true", StringComparison.OrdinalIgnoreCase);
-			EditorFocusChanged?.Invoke(this, new MonacoEditorFocusEventArgs(focused));
+			EditorFocusChanged?.Invoke(this, new EditorFocusChangedEventArgs(focused));
 			return;
 		}
 	}
@@ -3402,23 +3402,4 @@ public partial class MonacoEditorSurface : ContentView
 		int RequestedCursorLineNumber,
 		int RequestedCursorColumn,
 		int RequestedCursorVersion);
-}
-
-public sealed class MonacoResponseVarRequestEventArgs(int lineNumber, int column) : EventArgs
-{
-	public int LineNumber { get; } = lineNumber;
-
-	public int Column { get; } = column;
-}
-
-public sealed class MonacoCursorPositionChangedEventArgs(int lineNumber, int column) : EventArgs
-{
-	public int LineNumber { get; } = lineNumber;
-
-	public int Column { get; } = column;
-}
-
-public sealed class MonacoEditorFocusEventArgs(bool isFocused) : EventArgs
-{
-	public bool IsFocused { get; } = isFocused;
 }

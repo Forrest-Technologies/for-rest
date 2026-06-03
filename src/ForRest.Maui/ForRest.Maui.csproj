@@ -47,7 +47,11 @@
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
 		<ForRestBuildDateUtc Condition="'$(ForRestBuildDateUtc)' == ''">$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</ForRestBuildDateUtc>
-		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == ''">https://localhost:7071/api/</ForRestLicenseServiceBaseUrl>
+		<!-- Release/store builds must point at the production licensing service. Only local Debug
+		     builds fall back to the Azure Functions dev host; on Android "localhost" resolves to the
+		     device itself, so a localhost fallback baked into a shipped APK breaks activation. -->
+		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == '' and '$(Configuration)' == 'Debug'">https://localhost:7071/api/</ForRestLicenseServiceBaseUrl>
+		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == ''">https://func-license-l7syvegxetqco.azurewebsites.net/api/</ForRestLicenseServiceBaseUrl>
 		<ForRestLicenseIssuer Condition="'$(ForRestLicenseIssuer)' == ''">forrest-license</ForRestLicenseIssuer>
 		<ForRestLicenseAudience Condition="'$(ForRestLicenseAudience)' == ''">forrest-client</ForRestLicenseAudience>
 		<ForRestLicenseSigningPublicKeyPem Condition="'$(ForRestLicenseSigningPublicKeyPem)' == ''"></ForRestLicenseSigningPublicKeyPem>
@@ -176,6 +180,15 @@
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+	</ItemGroup>
+
+	<!-- Native Sora code editor (Android only). Bound automatically from Maven Central; the
+	     language-textmate module pulls the tm4e grammar/theme stack used by SoraEditorSurface.
+	     Transitive artifacts are resolved by the Android Maven binding; pin here if CI reports an
+	     unresolved dependency. -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:editor" Version="0.23.4" />
+		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:language-textmate" Version="0.23.4" />
 	</ItemGroup>
 
 	<ItemGroup>
