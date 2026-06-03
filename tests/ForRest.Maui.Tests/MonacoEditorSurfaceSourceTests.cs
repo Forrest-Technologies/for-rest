@@ -155,9 +155,8 @@ public sealed class MonacoEditorSurfaceSourceTests
 		// C#-side: a "focus" forrest:// command is routed to the
 		// EditorFocusChanged event so the workbench host can drive the
 		// view model's IsActiveEditorFocused state.
-		StringAssert.Contains(source, "EditorFocusChanged?.Invoke(this, new MonacoEditorFocusEventArgs(focused));");
-		StringAssert.Contains(source, "public event EventHandler<MonacoEditorFocusEventArgs>? EditorFocusChanged;");
-		StringAssert.Contains(source, "public sealed class MonacoEditorFocusEventArgs(bool isFocused)");
+		StringAssert.Contains(source, "EditorFocusChanged?.Invoke(this, new EditorFocusChangedEventArgs(focused));");
+		StringAssert.Contains(source, "public event EventHandler<EditorFocusChangedEventArgs>? EditorFocusChanged;");
 	}
 
 	private static string GetMethodBody(string source, string signaturePrefix, string methodName)

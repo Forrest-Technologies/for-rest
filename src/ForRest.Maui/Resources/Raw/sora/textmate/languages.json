@@ -1,0 +1,19 @@
+{
+  "languages": [
+    {
+      "name": "forrest",
+      "scopeName": "source.forrest",
+      "grammar": "sora/textmate/forrest.tmLanguage.json"
+    },
+    {
+      "name": "json",
+      "scopeName": "source.json",
+      "grammar": "sora/textmate/json.tmLanguage.json"
+    },
+    {
+      "name": "settings-toml",
+      "scopeName": "source.toml",
+      "grammar": "sora/textmate/settings-toml.tmLanguage.json"
+    }
+  ]
+}

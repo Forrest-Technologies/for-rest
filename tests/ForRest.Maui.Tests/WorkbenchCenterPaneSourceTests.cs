@@ -61,7 +61,10 @@ public sealed class WorkbenchCenterPaneSourceTests
 		string source = File.ReadAllText(sourcePath);
 		StringAssert.Contains(source, "private async void OnPasteClicked(object? sender, EventArgs e)");
 		StringAssert.Contains(source, "public async Task PasteActiveDocumentAsync()");
-		StringAssert.Contains(source, "await monacoEditor.PasteFromClipboardAsync();");
+		// Paste is routed through the ICodeEditorSurface abstraction (covers both the Monaco
+		// and native Sora editors) with the simple native EditorSurface handled separately.
+		StringAssert.Contains(source, "case ICodeEditorSurface editor:");
+		StringAssert.Contains(source, "await editor.PasteFromClipboardAsync();");
 		StringAssert.Contains(source, "await editorSurface.PasteFromClipboardAsync();");
 	}
 }

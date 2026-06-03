@@ -31,6 +31,7 @@ public static class MauiProgram
 			{
 				handlers.AddHandler<Editor, ForRest.Maui.Platforms.Android.Handlers.SelectableEditorHandler>();
 				handlers.AddHandler<WebView, ForRest.Maui.Platforms.Android.Handlers.ForRestWebViewHandler>();
+				handlers.AddHandler<ForRest.Maui.Controls.SoraCodeEditorView, ForRest.Maui.Platforms.Android.Handlers.SoraCodeEditorViewHandler>();
 			})
 #endif
 			;

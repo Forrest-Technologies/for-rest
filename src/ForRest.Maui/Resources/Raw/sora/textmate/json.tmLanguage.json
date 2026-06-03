@@ -1,0 +1,40 @@
+{
+  "name": "JSON",
+  "scopeName": "source.json",
+  "patterns": [
+    { "include": "#value" }
+  ],
+  "repository": {
+    "value": {
+      "patterns": [
+        { "include": "#constant" },
+        { "include": "#number" },
+        { "include": "#string" },
+        { "include": "#property" },
+        { "include": "#comment" }
+      ]
+    },
+    "constant": {
+      "match": "\\b(true|false|null)\\b",
+      "name": "constant.language.json"
+    },
+    "number": {
+      "match": "-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?",
+      "name": "constant.numeric.json"
+    },
+    "property": {
+      "match": "(\"(?:[^\"\\\\]|\\\\.)*\")\\s*(?=:)",
+      "name": "support.type.property-name.json"
+    },
+    "string": {
+      "match": "\"(?:[^\"\\\\]|\\\\.)*\"",
+      "name": "string.quoted.double.json"
+    },
+    "comment": {
+      "patterns": [
+        { "match": "//[^\\n]*", "name": "comment.line.double-slash.json" },
+        { "begin": "/\\*", "end": "\\*/", "name": "comment.block.json" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Settings TOML",
+  "scopeName": "source.toml",
+  "patterns": [
+    { "match": "#[^\\n]*", "name": "comment.line.number-sign.toml" },
+    { "match": "\\[[^\\]]+\\]", "name": "keyword.other.directive.toml" },
+    { "match": "[A-Za-z][\\w-]*(?=\\s*=)", "name": "entity.other.attribute-name.toml" },
+    { "match": "(?i)\\b(true|false)\\b", "name": "constant.language.toml" },
+    { "match": "\"([^\"\\\\]|\\\\.)*\"", "name": "string.quoted.double.toml" },
+    { "match": "\\b\\d+\\b", "name": "constant.numeric.toml" }
+  ]
+}

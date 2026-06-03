@@ -47,7 +47,11 @@
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
 		<ForRestBuildDateUtc Condition="'$(ForRestBuildDateUtc)' == ''">$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</ForRestBuildDateUtc>
-		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == ''">https://localhost:7071/api/</ForRestLicenseServiceBaseUrl>
+		<!-- Release/store builds must point at the production licensing service. Only local Debug
+		     builds fall back to the Azure Functions dev host; on Android "localhost" resolves to the
+		     device itself, so a localhost fallback baked into a shipped APK breaks activation. -->
+		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == '' and '$(Configuration)' == 'Debug'">https://localhost:7071/api/</ForRestLicenseServiceBaseUrl>
+		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == ''">https://func-license-l7syvegxetqco.azurewebsites.net/api/</ForRestLicenseServiceBaseUrl>
 		<ForRestLicenseIssuer Condition="'$(ForRestLicenseIssuer)' == ''">forrest-license</ForRestLicenseIssuer>
 		<ForRestLicenseAudience Condition="'$(ForRestLicenseAudience)' == ''">forrest-client</ForRestLicenseAudience>
 		<ForRestLicenseSigningPublicKeyPem Condition="'$(ForRestLicenseSigningPublicKeyPem)' == ''"></ForRestLicenseSigningPublicKeyPem>
@@ -176,6 +180,44 @@
 		<PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+	</ItemGroup>
+
+	<!-- Native Sora code editor (Android only). Bound automatically from Maven Central; the
+	     language-textmate module pulls the tm4e grammar/theme stack used by SoraEditorSurface.
+	     Transitive artifacts are resolved by the Android Maven binding; pin here if CI reports an
+	     unresolved dependency. -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<!-- ForRestSoraEditor.java is the bound facade over the native Sora editor. It lives under
+		     Platforms/Android, which MAUI's default-item globbing excludes (it only re-adds .cs/.xaml
+		     per platform), so it must be registered explicitly. Bind="true" generates the C# wrapper
+		     consumed by SoraCodeEditorViewHandler. -->
+		<AndroidJavaSource Include="Platforms\Android\Editor\ForRestSoraEditor.java" Bind="true" />
+
+		<!-- Sora editor + TextMate engine are consumed through the ForRestSoraEditor.java facade
+		     (AndroidJavaSource), not bound directly: the auto-generated C# binding for these large
+		     Kotlin libraries does not compile. Bind="false" includes them as runtime Java libraries
+		     (and on the facade's javac classpath) without generating C# bindings. -->
+		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:editor" Version="0.23.4" Bind="false" />
+		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:language-textmate" Version="0.23.4" Bind="false" />
+
+		<!-- Transitive Java runtime dependencies of the TextMate stack that the .NET MAUI Android
+		     runtime does not already ship. Included as plain Java libraries (no C# binding needed),
+		     so the tm4e grammar/theme parser can resolve them at runtime. Gson is intentionally NOT
+		     listed here: MAUI already ships it as GoogleGson.aar, so adding it again duplicates
+		     com.google.gson.* and breaks D8 dexing. -->
+		<AndroidMavenLibrary Include="org.jruby.jcodings:jcodings" Version="1.0.58" Bind="false" />
+		<AndroidMavenLibrary Include="org.jruby.joni:joni" Version="2.2.1" Bind="false" />
+		<AndroidMavenLibrary Include="org.snakeyaml:snakeyaml-engine" Version="2.7" Bind="false" />
+
+		<!-- Already provided at runtime by the MAUI Android runtime (AndroidX + Kotlin stdlib +
+		     GoogleGson), plus a compile-time-only annotations jar. Ignored for Java dependency
+		     verification to avoid pulling conflicting copies alongside MAUI's own train. The full
+		     group:artifact:version coordinate is required in Include. -->
+		<AndroidIgnoredJavaDependency Include="com.google.code.gson:gson:2.10.1" />
+		<AndroidIgnoredJavaDependency Include="androidx.annotation:annotation:1.7.1" />
+		<AndroidIgnoredJavaDependency Include="androidx.collection:collection:1.4.0" />
+		<AndroidIgnoredJavaDependency Include="org.jetbrains.kotlin:kotlin-stdlib:1.9.22" />
+		<AndroidIgnoredJavaDependency Include="org.eclipse.jdt:org.eclipse.jdt.annotation:2.2.800" />
 	</ItemGroup>
 
 	<ItemGroup>

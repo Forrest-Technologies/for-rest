@@ -13,9 +13,22 @@ public sealed class PlatformExperienceTests
 	}
 
 	[TestMethod]
-	public void UseWebCodeEditors_returns_true_for_android()
+	public void UseWebCodeEditors_returns_false_for_android()
 	{
-		Assert.IsTrue(PlatformExperience.UseWebCodeEditors(DevicePlatform.Android));
+		// Android now hosts the native Sora editor, not the Monaco WebView.
+		Assert.IsFalse(PlatformExperience.UseWebCodeEditors(DevicePlatform.Android));
+	}
+
+	[TestMethod]
+	public void UseSoraEditor_returns_true_for_android()
+	{
+		Assert.IsTrue(PlatformExperience.UseSoraEditor(DevicePlatform.Android));
+	}
+
+	[TestMethod]
+	public void UseSoraEditor_returns_false_for_windows()
+	{
+		Assert.IsFalse(PlatformExperience.UseSoraEditor(DevicePlatform.WinUI));
 	}
 
 	[TestMethod]

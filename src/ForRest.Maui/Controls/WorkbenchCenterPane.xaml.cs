@@ -68,7 +68,7 @@ public partial class WorkbenchCenterPane : ContentView
 		await RedoActiveDocumentAsync();
 	}
 
-	private void OnEditorCursorPositionChanged(object? sender, MonacoCursorPositionChangedEventArgs e)
+	private void OnEditorCursorPositionChanged(object? sender, EditorCursorPositionChangedEventArgs e)
 	{
 		ViewModel.UpdateActiveEditorCursor(e.LineNumber, e.Column);
 	}
@@ -161,6 +161,11 @@ public partial class WorkbenchCenterPane : ContentView
 			return BuildFallbackEditor();
 		}
 
+		if (PlatformExperience.UseSoraEditor())
+		{
+			return BuildSoraEditor();
+		}
+
 		return PlatformExperience.UseWebCodeEditors()
 			? BuildMonacoEditor()
 			: BuildNativeEditor();
@@ -168,9 +173,9 @@ public partial class WorkbenchCenterPane : ContentView
 
 	public async Task FlushActiveEditorAsync()
 	{
-		if (EditorHost.Content is MonacoEditorSurface monacoEditor)
+		if (EditorHost.Content is ICodeEditorSurface editor)
 		{
-			await monacoEditor.FlushTextSyncAsync();
+			await editor.FlushTextSyncAsync();
 		}
 	}
 
@@ -178,12 +183,13 @@ public partial class WorkbenchCenterPane : ContentView
 	{
 		await FlushActiveEditorAsync();
 
-		if (EditorHost.Content is MonacoEditorSurface monacoEditor)
+		if (EditorHost.Content is ICodeEditorSurface editor)
 		{
-			monacoEditor.SendRequested -= OnEditorSendRequested;
-			monacoEditor.UndoRequested -= OnEditorUndoRequested;
-			monacoEditor.RedoRequested -= OnEditorRedoRequested;
-			monacoEditor.CursorPositionChanged -= OnEditorCursorPositionChanged;
+			editor.SendRequested -= OnEditorSendRequested;
+			editor.UndoRequested -= OnEditorUndoRequested;
+			editor.RedoRequested -= OnEditorRedoRequested;
+			editor.CursorPositionChanged -= OnEditorCursorPositionChanged;
+			editor.EditorFocusChanged -= OnMonacoEditorFocusChanged;
 		}
 
 		if (_viewModelNotifier is not null)
@@ -220,8 +226,8 @@ public partial class WorkbenchCenterPane : ContentView
 	{
 		switch (EditorHost.Content)
 		{
-			case MonacoEditorSurface monacoEditor:
-				await monacoEditor.PasteFromClipboardAsync();
+			case ICodeEditorSurface editor:
+				await editor.PasteFromClipboardAsync();
 				break;
 			case EditorSurface editorSurface:
 				await editorSurface.PasteFromClipboardAsync();
@@ -231,7 +237,7 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private async Task ApplyPendingCursorRequestAsync()
 	{
-		if (EditorHost.Content is not MonacoEditorSurface monacoEditor)
+		if (EditorHost.Content is not ICodeEditorSurface editor)
 		{
 			return;
 		}
@@ -241,7 +247,7 @@ public partial class WorkbenchCenterPane : ContentView
 			return;
 		}
 
-		await monacoEditor.MoveCursorToAsync(lineNumber, column);
+		await editor.MoveCursorToAsync(lineNumber, column);
 	}
 
 	private View BuildMonacoEditor()
@@ -270,7 +276,30 @@ public partial class WorkbenchCenterPane : ContentView
 		return editor;
 	}
 
-	private void OnMonacoEditorFocusChanged(object? sender, MonacoEditorFocusEventArgs e)
+	private View BuildSoraEditor()
+	{
+		SoraEditorSurface editor = new();
+		editor.SetBinding(SoraEditorSurface.LanguageProperty, nameof(MainPageViewModel.ActiveEditorLanguage));
+		editor.SetBinding(SoraEditorSurface.DiagnosticsJsonProperty, nameof(MainPageViewModel.ActiveEditorDiagnosticsJson));
+		editor.SetBinding(SoraEditorSurface.EditableRangesJsonProperty, nameof(MainPageViewModel.ActiveEditorEditableRangesJson));
+		editor.SetBinding(SoraEditorSurface.EditorFontSizeProperty, nameof(MainPageViewModel.ActiveEditorFontSize));
+		editor.SetBinding(SoraEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		// Like Monaco, the native Sora editor stays bound to the raw ActiveEditorText; secret
+		// masking is driven by the focus events relayed through the view-model.
+		editor.SetBinding(SoraEditorSurface.TextProperty, nameof(MainPageViewModel.ActiveEditorText), mode: BindingMode.TwoWay);
+		editor.SetBinding(SoraEditorSurface.LanguageHelpJsonProperty, nameof(MainPageViewModel.LanguageHelpCatalogJson));
+		editor.SetBinding(SoraEditorSurface.RequestedCursorLineNumberProperty, nameof(MainPageViewModel.ActiveEditorRequestedCursorLineNumber));
+		editor.SetBinding(SoraEditorSurface.RequestedCursorColumnProperty, nameof(MainPageViewModel.ActiveEditorRequestedCursorColumn));
+		editor.SetBinding(SoraEditorSurface.RequestedCursorVersionProperty, nameof(MainPageViewModel.ActiveEditorRequestedCursorVersion));
+		editor.SendRequested += OnEditorSendRequested;
+		editor.UndoRequested += OnEditorUndoRequested;
+		editor.RedoRequested += OnEditorRedoRequested;
+		editor.CursorPositionChanged += OnEditorCursorPositionChanged;
+		editor.EditorFocusChanged += OnMonacoEditorFocusChanged;
+		return editor;
+	}
+
+	private void OnMonacoEditorFocusChanged(object? sender, EditorFocusChangedEventArgs e)
 	{
 		if (BindingContext is MainPageViewModel viewModel)
 		{
@@ -280,7 +309,24 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private View BuildLanguageHelpExampleSurface()
 	{
-		if (AppLaunchGuard.IsSafeModeEnabled || !PlatformExperience.UseWebCodeEditors())
+		if (AppLaunchGuard.IsSafeModeEnabled)
+		{
+			return BuildLanguageHelpFallbackEditor();
+		}
+
+		if (PlatformExperience.UseSoraEditor())
+		{
+			SoraEditorSurface soraEditor = new()
+			{
+				IsReadOnly = true,
+				Language = "forrest",
+			};
+			soraEditor.SetBinding(SoraEditorSurface.TextProperty, nameof(MainPageViewModel.SelectedLanguageHelpExample));
+			soraEditor.SetBinding(SoraEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+			return soraEditor;
+		}
+
+		if (!PlatformExperience.UseWebCodeEditors())
 		{
 			return BuildLanguageHelpFallbackEditor();
 		}

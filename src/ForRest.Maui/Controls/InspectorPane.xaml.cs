@@ -272,7 +272,7 @@ public partial class InspectorPane : ContentView
 		ViewModel.ExecutionStatus = e.Message;
 	}
 
-	private async void OnResponseVarCopyRequested(object? sender, MonacoResponseVarRequestEventArgs e)
+	private async void OnResponseVarCopyRequested(object? sender, EditorResponseVarRequestEventArgs e)
 	{
 		await ViewModel.CopyResponseVariableAsync(e.LineNumber, e.Column);
 	}
@@ -323,7 +323,17 @@ public partial class InspectorPane : ContentView
 			return BuildHtmlPreviewViewer();
 		}
 
-		return PlatformExperience.UseWebCodeEditors() && !AppLaunchGuard.IsSafeModeEnabled
+		if (AppLaunchGuard.IsSafeModeEnabled)
+		{
+			return BuildNativeResponseViewer();
+		}
+
+		if (PlatformExperience.UseSoraEditor())
+		{
+			return BuildSoraResponseViewer();
+		}
+
+		return PlatformExperience.UseWebCodeEditors()
 			? BuildMonacoResponseViewer()
 			: BuildNativeResponseViewer();
 	}
@@ -348,7 +358,22 @@ public partial class InspectorPane : ContentView
 			return;
 		}
 
-		RequestBodyViewerHost.Content = PlatformExperience.UseWebCodeEditors() && !AppLaunchGuard.IsSafeModeEnabled
+		RequestBodyViewerHost.Content = BuildRequestBodyViewer();
+	}
+
+	private View BuildRequestBodyViewer()
+	{
+		if (AppLaunchGuard.IsSafeModeEnabled)
+		{
+			return BuildNativeRequestViewer();
+		}
+
+		if (PlatformExperience.UseSoraEditor())
+		{
+			return BuildSoraRequestViewer();
+		}
+
+		return PlatformExperience.UseWebCodeEditors()
 			? BuildMonacoRequestViewer()
 			: BuildNativeRequestViewer();
 	}
@@ -528,6 +553,20 @@ public partial class InspectorPane : ContentView
 		return viewer;
 	}
 
+	private View BuildSoraResponseViewer()
+	{
+		SoraEditorSurface viewer = new()
+		{
+			Language = "json",
+			IsReadOnly = true,
+			EnableResponseActions = true,
+		};
+		viewer.SetBinding(SoraEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		viewer.SetBinding(SoraEditorSurface.TextProperty, nameof(MainPageViewModel.ResponseBodyText));
+		viewer.ResponseVarCopyRequested += OnResponseVarCopyRequested;
+		return viewer;
+	}
+
 	private View BuildNativeResponseViewer()
 	{
 		EditorSurface viewer = new()
@@ -550,6 +589,18 @@ public partial class InspectorPane : ContentView
 		};
 		viewer.SetBinding(MonacoEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
 		viewer.SetBinding(MonacoEditorSurface.TextProperty, nameof(MainPageViewModel.RequestBodyText));
+		return viewer;
+	}
+
+	private View BuildSoraRequestViewer()
+	{
+		SoraEditorSurface viewer = new()
+		{
+			Language = "json",
+			IsReadOnly = true,
+		};
+		viewer.SetBinding(SoraEditorSurface.ThemeKeyProperty, nameof(MainPageViewModel.EditorThemeKey));
+		viewer.SetBinding(SoraEditorSurface.TextProperty, nameof(MainPageViewModel.RequestBodyText));
 		return viewer;
 	}
 
