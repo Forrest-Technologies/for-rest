@@ -187,6 +187,12 @@
 	     Transitive artifacts are resolved by the Android Maven binding; pin here if CI reports an
 	     unresolved dependency. -->
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<!-- ForRestSoraEditor.java is the bound facade over the native Sora editor. It lives under
+		     Platforms/Android, which MAUI's default-item globbing excludes (it only re-adds .cs/.xaml
+		     per platform), so it must be registered explicitly. Bind="true" generates the C# wrapper
+		     consumed by SoraCodeEditorViewHandler. -->
+		<AndroidJavaSource Include="Platforms\Android\Editor\ForRestSoraEditor.java" Bind="true" />
+
 		<!-- Sora editor + TextMate engine are consumed through the ForRestSoraEditor.java facade
 		     (AndroidJavaSource), not bound directly: the auto-generated C# binding for these large
 		     Kotlin libraries does not compile. Bind="false" includes them as runtime Java libraries

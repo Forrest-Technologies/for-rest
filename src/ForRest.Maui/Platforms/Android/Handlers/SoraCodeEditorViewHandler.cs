@@ -26,7 +26,7 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
             [nameof(SoraCodeEditorView.DiagnosticsJson)] = MapDiagnostics,
         };
 
-    public static readonly CommandMapper<SoraCodeEditorView, SoraCodeEditorViewHandler> ViewCommandMapper =
+    public static readonly CommandMapper<SoraCodeEditorView, SoraCodeEditorViewHandler> CommandMapper =
         new(ViewCommandMapper)
         {
             [SoraCodeEditorView.MoveCursorCommand] = MapMoveCursor,
@@ -45,7 +45,7 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
     #region Constructors
 
     public SoraCodeEditorViewHandler()
-        : base(PropertyMapper, ViewCommandMapper)
+        : base(PropertyMapper, CommandMapper)
     {
     }
 
