@@ -202,16 +202,18 @@
 
 		<!-- Transitive Java runtime dependencies of the TextMate stack that the .NET MAUI Android
 		     runtime does not already ship. Included as plain Java libraries (no C# binding needed),
-		     so the tm4e grammar/theme parser can resolve them at runtime. -->
-		<AndroidMavenLibrary Include="com.google.code.gson:gson" Version="2.10.1" Bind="false" />
+		     so the tm4e grammar/theme parser can resolve them at runtime. Gson is intentionally NOT
+		     listed here: MAUI already ships it as GoogleGson.aar, so adding it again duplicates
+		     com.google.gson.* and breaks D8 dexing. -->
 		<AndroidMavenLibrary Include="org.jruby.jcodings:jcodings" Version="1.0.58" Bind="false" />
 		<AndroidMavenLibrary Include="org.jruby.joni:joni" Version="2.2.1" Bind="false" />
 		<AndroidMavenLibrary Include="org.snakeyaml:snakeyaml-engine" Version="2.7" Bind="false" />
 
-		<!-- Already provided at runtime by the MAUI Android runtime (AndroidX + Kotlin stdlib),
-		     plus a compile-time-only annotations jar. Ignored for Java dependency verification to
-		     avoid pulling conflicting copies alongside MAUI's own AndroidX/Kotlin train. The full
+		<!-- Already provided at runtime by the MAUI Android runtime (AndroidX + Kotlin stdlib +
+		     GoogleGson), plus a compile-time-only annotations jar. Ignored for Java dependency
+		     verification to avoid pulling conflicting copies alongside MAUI's own train. The full
 		     group:artifact:version coordinate is required in Include. -->
+		<AndroidIgnoredJavaDependency Include="com.google.code.gson:gson:2.10.1" />
 		<AndroidIgnoredJavaDependency Include="androidx.annotation:annotation:1.7.1" />
 		<AndroidIgnoredJavaDependency Include="androidx.collection:collection:1.4.0" />
 		<AndroidIgnoredJavaDependency Include="org.jetbrains.kotlin:kotlin-stdlib:1.9.22" />
