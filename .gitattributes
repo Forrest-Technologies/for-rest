@@ -1,0 +1,52 @@
+# Set default behavior to auto.
+* text=auto
+
+# C# / .NET source and project files - CRLF on Windows
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.slnx text eol=crlf
+*.xaml text eol=crlf
+*.resx text eol=crlf
+*.config text eol=crlf
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.manifest text eol=crlf
+
+# Cross-platform / Linux-deployed files - always LF
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.bicep text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+*.editorconfig text eol=lf
+*.template text eol=lf
+*.local.json text eol=lf
+*.txt text eol=lf
+
+# Binary files - do not touch
+*.dll binary
+*.exe binary
+*.so binary
+*.dylib binary
+*.a binary
+*.lib binary
+*.pdb binary
+*.nupkg binary
+*.snupkg binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.ttf binary
+*.woff* binary
+*.eot binary
+*.dat binary
+*.bin binary
