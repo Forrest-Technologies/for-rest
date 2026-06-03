@@ -261,20 +261,19 @@ public final class ForRestSoraEditor extends FrameLayout {
     }
 
     private void handleKey(EditorKeyEvent event) {
-        KeyEvent keyEvent = event.getKeyEvent();
-        if (keyEvent == null || keyEvent.getAction() != KeyEvent.ACTION_DOWN || listener == null) {
+        if (event.getEventType() != EditorKeyEvent.Type.DOWN || listener == null) {
             return;
         }
-        boolean ctrl = keyEvent.isCtrlPressed();
-        int code = keyEvent.getKeyCode();
+        boolean ctrl = event.isCtrlPressed();
+        int code = event.getKeyCode();
         if ((ctrl && code == KeyEvent.KEYCODE_ENTER) || code == KeyEvent.KEYCODE_F5) {
             listener.onSendRequested();
             event.intercept();
-        } else if (ctrl && code == KeyEvent.KEYCODE_Z && !keyEvent.isShiftPressed()) {
+        } else if (ctrl && code == KeyEvent.KEYCODE_Z && !event.isShiftPressed()) {
             listener.onUndoRequested();
             event.intercept();
         } else if (ctrl && (code == KeyEvent.KEYCODE_Y
-                || (code == KeyEvent.KEYCODE_Z && keyEvent.isShiftPressed()))) {
+                || (code == KeyEvent.KEYCODE_Z && event.isShiftPressed()))) {
             listener.onRedoRequested();
             event.intercept();
         }
