@@ -187,8 +187,12 @@
 	     Transitive artifacts are resolved by the Android Maven binding; pin here if CI reports an
 	     unresolved dependency. -->
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:editor" Version="0.23.4" />
-		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:language-textmate" Version="0.23.4" />
+		<!-- Sora editor + TextMate engine are consumed through the ForRestSoraEditor.java facade
+		     (AndroidJavaSource), not bound directly: the auto-generated C# binding for these large
+		     Kotlin libraries does not compile. Bind="false" includes them as runtime Java libraries
+		     (and on the facade's javac classpath) without generating C# bindings. -->
+		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:editor" Version="0.23.4" Bind="false" />
+		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:language-textmate" Version="0.23.4" Bind="false" />
 
 		<!-- Transitive Java runtime dependencies of the TextMate stack that the .NET MAUI Android
 		     runtime does not already ship. Included as plain Java libraries (no C# binding needed),

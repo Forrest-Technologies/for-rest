@@ -1,18 +1,17 @@
 using Android.Content;
-using Android.Graphics;
-using Microsoft.Maui.Handlers;
+using Com.Forrest.Maui.Sora;
 using ForRest.Maui.Controls;
-using ForRest.Maui.Platforms.Android.Editor;
-using IO.Github.Rosemoe.Sora.Widget;
+using Microsoft.Maui.Handlers;
 
 namespace ForRest.Maui.Platforms.Android.Handlers;
 
 /// <summary>
-/// Hosts the native Sora <c>CodeEditor</c> for <see cref="SoraCodeEditorView"/> on Android.
-/// Property/command mappers translate the cross-platform view state onto the widget and the
-/// editor's event stream is relayed back to the view (and from there to the workbench panes).
+/// Hosts the native Sora editor for <see cref="SoraCodeEditorView"/> on Android via the
+/// <c>ForRestSoraEditor</c> Java facade (AndroidJavaSource). The facade wraps the Sora
+/// <c>CodeEditor</c> and the tm4e TextMate stack behind a small primitive API, so this handler only
+/// maps cross-platform state onto the facade and relays its listener callbacks back to the view.
 /// </summary>
-public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, CodeEditor>
+public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, ForRestSoraEditor>
 {
     #region Mappers
 
@@ -24,10 +23,7 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
             [nameof(SoraCodeEditorView.ThemeKey)] = MapTheme,
             [nameof(SoraCodeEditorView.FontSize)] = MapFontSize,
             [nameof(SoraCodeEditorView.IsReadOnly)] = MapIsReadOnly,
-            [nameof(SoraCodeEditorView.EditableRangesJson)] = MapEditableRanges,
             [nameof(SoraCodeEditorView.DiagnosticsJson)] = MapDiagnostics,
-            [nameof(SoraCodeEditorView.LanguageHelpJson)] = MapLanguageHelp,
-            [nameof(SoraCodeEditorView.EnableResponseActions)] = MapEnableResponseActions,
         };
 
     public static readonly CommandMapper<SoraCodeEditorView, SoraCodeEditorViewHandler> ViewCommandMapper =
@@ -42,7 +38,7 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
 
     #region Private Fields
 
-    private ForRestSoraEditorController? controller;
+    private SoraEditorListener? listener;
 
     #endregion
 
@@ -57,27 +53,32 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
 
     #region Lifecycle
 
-    protected override CodeEditor CreatePlatformView()
+    protected override ForRestSoraEditor CreatePlatformView()
     {
         Context context = Context
             ?? throw new InvalidOperationException("A platform Context is required to create the Sora editor.");
-        CodeEditor editor = new(context);
-        controller = new ForRestSoraEditorController(editor);
-        controller.Configure();
-        return editor;
+        return new ForRestSoraEditor(context);
     }
 
-    protected override void ConnectHandler(CodeEditor platformView)
+    protected override void ConnectHandler(ForRestSoraEditor platformView)
     {
         base.ConnectHandler(platformView);
-        controller?.Attach(VirtualView);
+        listener = new SoraEditorListener(VirtualView);
+        platformView.SetListener(listener);
+
+        // Apply the state the view already carries (object-initializer values, early bindings).
+        platformView.SetLanguageId(VirtualView.LanguageId);
+        platformView.SetThemeKey(VirtualView.ThemeKey);
+        platformView.SetFontSize(VirtualView.FontSize);
+        platformView.SetReadOnly(VirtualView.IsReadOnly);
+        platformView.SetText(VirtualView.Text);
     }
 
-    protected override void DisconnectHandler(CodeEditor platformView)
+    protected override void DisconnectHandler(ForRestSoraEditor platformView)
     {
-        controller?.Detach();
-        controller?.Dispose();
-        controller = null;
+        platformView.SetListener(null);
+        listener?.Dispose();
+        listener = null;
         base.DisconnectHandler(platformView);
     }
 
@@ -86,31 +87,22 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
     #region Property Mappers
 
     private static void MapText(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetText(view.Text);
+        handler.PlatformView?.SetText(view.Text);
 
     private static void MapLanguage(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetLanguage(view.LanguageId);
+        handler.PlatformView?.SetLanguageId(view.LanguageId);
 
     private static void MapTheme(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetTheme(view.ThemeKey);
+        handler.PlatformView?.SetThemeKey(view.ThemeKey);
 
     private static void MapFontSize(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetFontSize(view.FontSize);
+        handler.PlatformView?.SetFontSize(view.FontSize);
 
     private static void MapIsReadOnly(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetReadOnly(view.IsReadOnly);
-
-    private static void MapEditableRanges(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetEditableRanges(view.EditableRangesJson);
+        handler.PlatformView?.SetReadOnly(view.IsReadOnly);
 
     private static void MapDiagnostics(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetDiagnostics(view.DiagnosticsJson);
-
-    private static void MapLanguageHelp(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetLanguageHelp(view.LanguageHelpJson);
-
-    private static void MapEnableResponseActions(SoraCodeEditorViewHandler handler, SoraCodeEditorView view) =>
-        handler.controller?.SetResponseActionsEnabled(view.EnableResponseActions);
+        handler.PlatformView?.SetDiagnostics(view.DiagnosticsJson);
 
     #endregion
 
@@ -120,7 +112,7 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
     {
         if (args is EditorCursorPositionChangedEventArgs position)
         {
-            handler.controller?.MoveCursor(position.LineNumber, position.Column);
+            handler.PlatformView?.MoveCursor(position.LineNumber, position.Column);
         }
     }
 
@@ -128,12 +120,31 @@ public sealed class SoraCodeEditorViewHandler : ViewHandler<SoraCodeEditorView, 
     {
         if (args is string clipboardText)
         {
-            handler.controller?.PasteText(clipboardText);
+            handler.PlatformView?.PasteText(clipboardText);
         }
     }
 
     private static void MapFocusEditor(SoraCodeEditorViewHandler handler, SoraCodeEditorView view, object? args) =>
-        handler.controller?.FocusEditor();
+        handler.PlatformView?.FocusEditor();
 
     #endregion
+}
+
+/// <summary>
+/// Bridges the Java facade's listener callbacks to the cross-platform <see cref="SoraCodeEditorView"/>.
+/// </summary>
+internal sealed class SoraEditorListener(SoraCodeEditorView view)
+    : Java.Lang.Object, ForRestSoraEditor.IListener
+{
+    public void OnTextChanged(string? text) => view.NotifyTextChanged(text ?? string.Empty);
+
+    public void OnCursorChanged(int line, int column) => view.NotifyCursorChanged(line, column);
+
+    public void OnFocusChanged(bool focused) => view.NotifyFocusChanged(focused);
+
+    public void OnSendRequested() => view.NotifySendRequested();
+
+    public void OnUndoRequested() => view.NotifyUndoRequested();
+
+    public void OnRedoRequested() => view.NotifyRedoRequested();
 }
