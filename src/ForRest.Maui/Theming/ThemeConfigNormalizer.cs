@@ -303,8 +303,8 @@ public sealed class ThemeConfigNormalizer
 	private static void AppendMcpSection(List<string> output, ForRestMcpSettings mcp)
 	{
 		output.Add(mcp.Enabled
-			? "# MCP server (desktop-only). Exposes a Model Context Protocol endpoint over TCP so external agents can read the docs, list workspaces, and edit the active request."
-			: "# MCP server is disabled by default. Set mcp.enabled = true on a desktop build to expose For-Rest over the Model Context Protocol.");
+			? "# MCP server (desktop-only). Exposes a Model Context Protocol endpoint over Streamable HTTP (http://<bind_address>:<port>/) so external agents can read the docs, list workspaces, and edit the active request."
+			: "# MCP server is disabled by default. Set mcp.enabled = true on a desktop build to expose For-Rest over the Model Context Protocol (Streamable HTTP).");
 		output.Add("[mcp]");
 		output.Add($"enabled = {(mcp.Enabled ? "true" : "false")}");
 		if (!mcp.Enabled && !mcp.HasConfiguredValues)

@@ -229,7 +229,7 @@
 	</ItemGroup>
 
 	<!-- MCP server is desktop-only: Windows and Mac Catalyst. Android excluded
-	     because TCP listeners + long-lived background hosts don't play well
+	     because the HTTP listener + long-lived background host don't play well
 	     with the mobile lifecycle and the user explicitly scoped MCP to desktop. -->
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' or $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
 		<ProjectReference Include="..\ForRest.Mcp\ForRest.Mcp.csproj" />
