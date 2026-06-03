@@ -189,6 +189,22 @@
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
 		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:editor" Version="0.23.4" />
 		<AndroidMavenLibrary Include="io.github.Rosemoe.sora-editor:language-textmate" Version="0.23.4" />
+
+		<!-- Transitive Java runtime dependencies of the TextMate stack that the .NET MAUI Android
+		     runtime does not already ship. Included as plain Java libraries (no C# binding needed),
+		     so the tm4e grammar/theme parser can resolve them at runtime. -->
+		<AndroidMavenLibrary Include="com.google.code.gson:gson" Version="2.10.1" Bind="false" />
+		<AndroidMavenLibrary Include="org.jruby.jcodings:jcodings" Version="1.0.58" Bind="false" />
+		<AndroidMavenLibrary Include="org.jruby.joni:joni" Version="2.2.1" Bind="false" />
+		<AndroidMavenLibrary Include="org.snakeyaml:snakeyaml-engine" Version="2.7" Bind="false" />
+
+		<!-- Already provided at runtime by the MAUI Android runtime (AndroidX + Kotlin stdlib),
+		     plus a compile-time-only annotations jar. Ignored for Java dependency verification to
+		     avoid pulling conflicting copies alongside MAUI's own AndroidX/Kotlin train. -->
+		<AndroidIgnoredJavaDependency Include="androidx.annotation:annotation" Version="1.7.1" />
+		<AndroidIgnoredJavaDependency Include="androidx.collection:collection" Version="1.4.0" />
+		<AndroidIgnoredJavaDependency Include="org.jetbrains.kotlin:kotlin-stdlib" Version="1.9.22" />
+		<AndroidIgnoredJavaDependency Include="org.eclipse.jdt:org.eclipse.jdt.annotation" Version="2.2.800" />
 	</ItemGroup>
 
 	<ItemGroup>
