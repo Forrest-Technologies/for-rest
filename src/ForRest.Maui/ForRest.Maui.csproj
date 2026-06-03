@@ -200,11 +200,12 @@
 
 		<!-- Already provided at runtime by the MAUI Android runtime (AndroidX + Kotlin stdlib),
 		     plus a compile-time-only annotations jar. Ignored for Java dependency verification to
-		     avoid pulling conflicting copies alongside MAUI's own AndroidX/Kotlin train. -->
-		<AndroidIgnoredJavaDependency Include="androidx.annotation:annotation" Version="1.7.1" />
-		<AndroidIgnoredJavaDependency Include="androidx.collection:collection" Version="1.4.0" />
-		<AndroidIgnoredJavaDependency Include="org.jetbrains.kotlin:kotlin-stdlib" Version="1.9.22" />
-		<AndroidIgnoredJavaDependency Include="org.eclipse.jdt:org.eclipse.jdt.annotation" Version="2.2.800" />
+		     avoid pulling conflicting copies alongside MAUI's own AndroidX/Kotlin train. The full
+		     group:artifact:version coordinate is required in Include. -->
+		<AndroidIgnoredJavaDependency Include="androidx.annotation:annotation:1.7.1" />
+		<AndroidIgnoredJavaDependency Include="androidx.collection:collection:1.4.0" />
+		<AndroidIgnoredJavaDependency Include="org.jetbrains.kotlin:kotlin-stdlib:1.9.22" />
+		<AndroidIgnoredJavaDependency Include="org.eclipse.jdt:org.eclipse.jdt.annotation:2.2.800" />
 	</ItemGroup>
 
 	<ItemGroup>
