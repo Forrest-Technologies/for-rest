@@ -21,20 +21,19 @@ public sealed record ForRestMcpServerSettings
     public string BindAddress { get; init; } = "127.0.0.1";
 
     /// <summary>
-    /// TCP port to listen on.
+    /// TCP port the Streamable HTTP endpoint listens on.
     /// </summary>
     public int Port { get; init; } = 7341;
 
     /// <summary>
-    /// Optional shared secret. When set, the first line a client sends on
-    /// a new MCP session must be `forrest-mcp-auth: &lt;token&gt;`.
-    /// Leaving this blank disables the check but is only recommended when
-    /// the server is bound to `127.0.0.1`.
+    /// Optional shared secret. When set, every request must carry an
+    /// `Authorization: Bearer &lt;token&gt;` header. Leaving this blank disables the
+    /// check but is only recommended when the server is bound to `127.0.0.1`.
     /// </summary>
     public string AuthToken { get; init; } = string.Empty;
 
     /// <summary>
-    /// Hard cap on simultaneous client sessions. Protects the desktop app
+    /// Hard cap on simultaneous in-flight requests. Protects the desktop app
     /// from a runaway reconnect loop.
     /// </summary>
     public int MaxConcurrentSessions { get; init; } = 4;

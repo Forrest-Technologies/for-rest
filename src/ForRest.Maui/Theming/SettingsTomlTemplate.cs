@@ -465,8 +465,8 @@ public sealed class SettingsTomlTemplate
 	private static string BuildMcpComment(ForRestMcpSettings mcp)
 	{
 		return mcp.Enabled
-			? "# MCP server (desktop-only). Exposes a Model Context Protocol endpoint over TCP so external agents can read the docs, list workspaces, and edit the active request. Bind to 127.0.0.1 unless you understand the exposure. Set auth_token to require `forrest-mcp-auth: <token>` as the first line of every incoming session."
-			: "# MCP server is disabled by default. Set mcp.enabled = true on a desktop build to expose For-Rest over the Model Context Protocol. bind_address defaults to 127.0.0.1 and port defaults to 7341.";
+			? "# MCP server (desktop-only). Exposes a Model Context Protocol endpoint over Streamable HTTP (http://<bind_address>:<port>/) so external agents (Claude Desktop, mcp-remote, etc.) can read the docs, list workspaces, and edit the active request. Bind to 127.0.0.1 unless you understand the exposure. Set auth_token to require an `Authorization: Bearer <token>` header on every request."
+			: "# MCP server is disabled by default. Set mcp.enabled = true on a desktop build to expose For-Rest over the Model Context Protocol (Streamable HTTP). bind_address defaults to 127.0.0.1 and port defaults to 7341.";
 	}
 
 	private static IReadOnlyList<string> BuildMcpSection(ForRestMcpSettings mcp)
