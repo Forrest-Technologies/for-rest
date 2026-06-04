@@ -81,6 +81,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private bool _isCompactLayout;
 	private bool _isExplorerOverlayOpen;
 	private bool _isInspectorOverlayOpen;
+	private bool _isWorkspaceSwitcherOpen;
 	private string _selectedWorkspace;
 	private string _selectedEnvironment;
 	private string _selectedMethod;
@@ -411,6 +412,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			if (SetProperty(ref _selectedWorkspace, value))
 			{
 				OnPropertyChanged(nameof(WorkspaceBadge));
+				OnPropertyChanged(nameof(ActiveWorkspaceName));
 				if (_isInitialized && !_suppressRequestAutosave)
 				{
 					ScheduleRequestAutosave();
@@ -1113,6 +1115,14 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	public string WorkspaceBadge => SelectedWorkspace;
 
+	public string ActiveWorkspaceName => string.IsNullOrWhiteSpace(SelectedWorkspace) ? "Workspace" : SelectedWorkspace;
+
+	public bool IsWorkspaceSwitcherOpen
+	{
+		get => _isWorkspaceSwitcherOpen;
+		private set => SetProperty(ref _isWorkspaceSwitcherOpen, value);
+	}
+
 	public string EnvironmentBadge => $"Env {SelectedEnvironment}";
 
 	public string ShellDescriptor => "Fluid three-pane engineering workbench";
@@ -1764,6 +1774,16 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 	}
 
+	public void ToggleWorkspaceSwitcher()
+	{
+		IsWorkspaceSwitcherOpen = !IsWorkspaceSwitcherOpen;
+	}
+
+	public void CloseWorkspaceSwitcher()
+	{
+		IsWorkspaceSwitcherOpen = false;
+	}
+
 	public void ToggleLeftPane()
 	{
 		if (_isCompactLayout)
@@ -1968,9 +1988,11 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	{
 		if (workspace is null || workspace.Id == _selectedWorkspaceId)
 		{
+			CloseWorkspaceSwitcher();
 			return;
 		}
 
+		CloseWorkspaceSwitcher();
 		PersistActiveRequestInBackground();
 		ApplyWorkspaceSelection(workspace.Id);
 		if (_isInitialized)

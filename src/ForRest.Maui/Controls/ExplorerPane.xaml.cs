@@ -4,12 +4,31 @@ namespace ForRest.Maui.Controls;
 
 public partial class ExplorerPane : ContentView
 {
+	#region Constants
+
+	private const string RenameAction = "Rename";
+	private const string DeleteAction = "Delete";
+	private const string OpenAction = "Open";
+	private const string CancelAction = "Cancel";
+
+	#endregion
+
+	#region Constructors
+
 	public ExplorerPane()
 	{
 		InitializeComponent();
 	}
 
+	#endregion
+
+	#region Properties
+
 	private MainPageViewModel ViewModel => (MainPageViewModel)BindingContext;
+
+	#endregion
+
+	#region Pane And Tab Handlers
 
 	private void OnHideClicked(object? sender, EventArgs e)
 	{
@@ -24,17 +43,23 @@ public partial class ExplorerPane : ContentView
 		}
 	}
 
-	private void OnItemTapped(object? sender, TappedEventArgs e)
+	#endregion
+
+	#region Workspace Switcher Handlers
+
+	private void OnWorkspaceSwitcherTapped(object? sender, TappedEventArgs e)
 	{
-		if (e.Parameter is NavigationItemViewModel item)
-		{
-			ViewModel.SelectExplorerItem(item);
-		}
+		ViewModel.ToggleWorkspaceSwitcher();
 	}
 
-	private void OnWorkspaceClicked(object? sender, EventArgs e)
+	private void OnWorkspaceSwitcherBackdropTapped(object? sender, TappedEventArgs e)
 	{
-		if (sender is Button { CommandParameter: WorkspaceItemViewModel workspace })
+		ViewModel.CloseWorkspaceSwitcher();
+	}
+
+	private void OnWorkspaceTapped(object? sender, TappedEventArgs e)
+	{
+		if (e.Parameter is WorkspaceItemViewModel workspace)
 		{
 			ViewModel.SelectWorkspace(workspace);
 		}
@@ -43,19 +68,6 @@ public partial class ExplorerPane : ContentView
 	private void OnAddWorkspaceClicked(object? sender, EventArgs e)
 	{
 		ViewModel.AddWorkspace();
-	}
-
-	private async void OnDeleteWorkspaceClicked(object? sender, EventArgs e)
-	{
-		if (!await ConfirmDeletionAsync(
-			    "Delete Workspace",
-			    $"Delete workspace '{ViewModel.SelectedWorkspace}'? This cannot be undone.",
-			    "Delete"))
-		{
-			return;
-		}
-
-		ViewModel.DeleteSelectedWorkspace();
 	}
 
 	private void OnMoveWorkspaceLeftClicked(object? sender, EventArgs e)
@@ -68,31 +80,95 @@ public partial class ExplorerPane : ContentView
 		ViewModel.MoveSelectedWorkspaceRight();
 	}
 
+	private async void OnWorkspaceActionsClicked(object? sender, EventArgs e)
+	{
+		if (sender is not Button { CommandParameter: WorkspaceItemViewModel workspace })
+		{
+			return;
+		}
+
+		ViewModel.SelectWorkspace(workspace);
+
+		string? action = await ShowActionSheetAsync(workspace.Title, RenameAction, DeleteAction);
+		switch (action)
+		{
+			case RenameAction:
+				string? renamed = await PromptAsync("Rename Workspace", "Workspace name", workspace.Title);
+				if (!string.IsNullOrWhiteSpace(renamed))
+				{
+					ViewModel.RenameSelectedWorkspace(renamed);
+				}
+
+				break;
+			case DeleteAction:
+				if (await ConfirmDeletionAsync(
+					    "Delete Workspace",
+					    $"Delete workspace '{workspace.Title}'? This cannot be undone.",
+					    DeleteAction))
+				{
+					ViewModel.DeleteSelectedWorkspace();
+				}
+
+				break;
+		}
+	}
+
+	#endregion
+
+	#region Explorer Item Handlers
+
+	private void OnItemTapped(object? sender, TappedEventArgs e)
+	{
+		if (e.Parameter is NavigationItemViewModel item)
+		{
+			ViewModel.SelectExplorerItem(item);
+		}
+	}
+
 	private void OnAddRequestClicked(object? sender, EventArgs e)
 	{
 		ViewModel.AddRequest();
 	}
 
-	private async void OnDeleteRequestClicked(object? sender, EventArgs e)
+	private async void OnItemActionsClicked(object? sender, EventArgs e)
 	{
-		if (!await ConfirmDeletionAsync(
-			    "Delete Request",
-			    $"Delete request '{ViewModel.RequestName}'? This cannot be undone.",
-			    "Delete"))
+		if (sender is not Button { CommandParameter: NavigationItemViewModel item })
 		{
 			return;
 		}
 
-		ViewModel.DeleteSelectedRequest();
-	}
+		ViewModel.SelectExplorerItem(item);
 
-	private void OnWorkspaceTapped(object? sender, TappedEventArgs e)
-	{
-		if (e.Parameter is WorkspaceItemViewModel workspace)
+		string? action = await ShowActionSheetAsync(item.Title, OpenAction, RenameAction, DeleteAction);
+		switch (action)
 		{
-			ViewModel.SelectWorkspace(workspace);
+			case OpenAction:
+				ViewModel.SelectExplorerItem(item);
+				break;
+			case RenameAction:
+				string? renamed = await PromptAsync("Rename", "Name", ViewModel.RequestName);
+				if (!string.IsNullOrWhiteSpace(renamed))
+				{
+					ViewModel.RequestName = renamed.Trim();
+				}
+
+				break;
+			case DeleteAction:
+				if (await ConfirmDeletionAsync(
+					    "Delete Request",
+					    $"Delete '{item.Title}'? This cannot be undone.",
+					    DeleteAction))
+				{
+					ViewModel.DeleteSelectedRequest();
+				}
+
+				break;
 		}
 	}
+
+	#endregion
+
+	#region History Handlers
 
 	private void OnHistoryTapped(object? sender, TappedEventArgs e)
 	{
@@ -102,31 +178,9 @@ public partial class ExplorerPane : ContentView
 		}
 	}
 
-	private void OnMoveRequestUpClicked(object? sender, EventArgs e)
-	{
-		ViewModel.MoveSelectedRequestUp();
-	}
+	#endregion
 
-	private void OnMoveRequestDownClicked(object? sender, EventArgs e)
-	{
-		ViewModel.MoveSelectedRequestDown();
-	}
-
-	private void OnWorkspaceNameCompleted(object? sender, EventArgs e)
-	{
-		if (sender is Entry entry)
-		{
-			ViewModel.RenameSelectedWorkspace(entry.Text);
-		}
-	}
-
-	private void OnWorkspaceNameUnfocused(object? sender, FocusEventArgs e)
-	{
-		if (sender is Entry entry)
-		{
-			ViewModel.RenameSelectedWorkspace(entry.Text);
-		}
-	}
+	#region Dialog Helpers
 
 	private async Task<bool> ConfirmDeletionAsync(string title, string message, string acceptText)
 	{
@@ -136,7 +190,35 @@ public partial class ExplorerPane : ContentView
 			return false;
 		}
 
-		return await page.DisplayAlert(title, message, acceptText, "Cancel");
+		return await page.DisplayAlert(title, message, acceptText, CancelAction);
+	}
+
+	private async Task<string?> ShowActionSheetAsync(string title, params string[] actions)
+	{
+		Page? page = FindParentPage();
+		if (page is null)
+		{
+			return null;
+		}
+
+		return await page.DisplayActionSheet(title, CancelAction, null, actions);
+	}
+
+	private async Task<string?> PromptAsync(string title, string placeholder, string initialValue)
+	{
+		Page? page = FindParentPage();
+		if (page is null)
+		{
+			return null;
+		}
+
+		return await page.DisplayPromptAsync(
+			title,
+			null,
+			accept: "Save",
+			cancel: CancelAction,
+			placeholder: placeholder,
+			initialValue: initialValue);
 	}
 
 	private Page? FindParentPage()
@@ -154,4 +236,6 @@ public partial class ExplorerPane : ContentView
 
 		return null;
 	}
+
+	#endregion
 }

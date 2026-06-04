@@ -5,248 +5,257 @@
              x:Name="ExplorerRoot">
 
     <Border Style="{StaticResource PaneBorderStyle}">
-        <Grid RowDefinitions="Auto,Auto,Auto,*">
-            <Grid Padding="10,8,10,6"
-                  ColumnDefinitions="*,Auto"
-                  ColumnSpacing="8">
-                <VerticalStackLayout Spacing="0">
-                    <Label Text="Workspace" Style="{StaticResource PaneTitleStyle}" />
-                </VerticalStackLayout>
-                <Button Grid.Column="1"
-                        Text="Hide"
-                        Style="{StaticResource SubtleToolbarButtonStyle}"
-                        Clicked="OnHideClicked" />
-            </Grid>
-
-            <Grid Grid.Row="1">
-                <ScrollView Orientation="Horizontal"
-                            HorizontalScrollBarVisibility="Never">
-                    <HorizontalStackLayout Padding="10,0,10,8"
-                                           Spacing="4"
-                                           BindableLayout.ItemsSource="{Binding LeftPaneTabs}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate>
-                                <Button Text="{Binding Title}"
-                                        Style="{StaticResource DenseTabButtonStyle}"
-                                        Clicked="OnTabClicked"
-                                        CommandParameter="{Binding .}">
-                                    <Button.Triggers>
-                                        <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
-                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
-                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
-                                        </DataTrigger>
-                                    </Button.Triggers>
-                                </Button>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </HorizontalStackLayout>
-                </ScrollView>
-            </Grid>
-
-            <Grid Grid.Row="2"
-                  Padding="10,0,10,8"
-                  RowDefinitions="Auto,Auto,Auto"
-                  RowSpacing="6">
-                <Grid ColumnDefinitions="*,Auto"
+        <!-- Outer grid layers the pane content (Row 0) and the workspace popup overlay (Row 0 too). -->
+        <Grid>
+            <Grid RowDefinitions="Auto,Auto,Auto,*">
+                <!-- Workspace switcher -->
+                <Grid Padding="10,8,10,6"
+                      ColumnDefinitions="*,Auto"
                       ColumnSpacing="8">
-                    <Label Text="WORKSPACES"
-                           VerticalTextAlignment="Center"
-                           Style="{StaticResource MonoMetaStyle}" />
-                    <HorizontalStackLayout Grid.Column="1"
-                                           Spacing="4">
-                        <Button Text="^"
-                                Style="{StaticResource DenseTabButtonStyle}"
-                                Clicked="OnMoveWorkspaceLeftClicked"
-                                SemanticProperties.Description="Move selected workspace up"
-                                IsEnabled="{Binding CanMoveWorkspaceLeft}" />
-                        <Button Text="v"
-                                Style="{StaticResource DenseTabButtonStyle}"
-                                Clicked="OnMoveWorkspaceRightClicked"
-                                SemanticProperties.Description="Move selected workspace down"
-                                IsEnabled="{Binding CanMoveWorkspaceRight}" />
-                        <Button Text="+"
-                                Style="{StaticResource DenseTabButtonStyle}"
-                                Clicked="OnAddWorkspaceClicked"
-                                SemanticProperties.Description="Add workspace" />
-                        <Button Text="-"
-                                Style="{StaticResource DenseTabButtonStyle}"
-                                Clicked="OnDeleteWorkspaceClicked"
-                                SemanticProperties.Description="Delete selected workspace"
-                                IsEnabled="{Binding CanDeleteWorkspace}" />
-                    </HorizontalStackLayout>
+                    <Border Style="{StaticResource WorkspaceSwitcherStyle}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnWorkspaceSwitcherTapped" />
+                        </Border.GestureRecognizers>
+                        <Grid ColumnDefinitions="Auto,*,Auto"
+                              ColumnSpacing="8">
+                            <Label Text="&#x2302;"
+                                   Style="{StaticResource WorkspaceSwitcherGlyphStyle}" />
+                            <Label Grid.Column="1"
+                                   Text="{Binding ActiveWorkspaceName}"
+                                   Style="{StaticResource WorkspaceSwitcherNameStyle}" />
+                            <Label Grid.Column="2"
+                                   Text="&#x25BE;"
+                                   Style="{StaticResource WorkspaceSwitcherChevronStyle}" />
+                        </Grid>
+                    </Border>
+                    <Button Grid.Column="1"
+                            Text="Hide"
+                            Style="{StaticResource SubtleToolbarButtonStyle}"
+                            Clicked="OnHideClicked" />
                 </Grid>
 
-                <Entry Grid.Row="1"
-                       Text="{Binding SelectedWorkspace}"
-                       Placeholder="Selected workspace name"
-                       ClearButtonVisibility="WhileEditing"
-                       Completed="OnWorkspaceNameCompleted"
-                       Unfocused="OnWorkspaceNameUnfocused" />
+                <!-- Left pane tabs (Explorer / History) -->
+                <Grid Grid.Row="1">
+                    <ScrollView Orientation="Horizontal"
+                                HorizontalScrollBarVisibility="Never">
+                        <HorizontalStackLayout Padding="10,0,10,8"
+                                               Spacing="4"
+                                               BindableLayout.ItemsSource="{Binding LeftPaneTabs}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Text="{Binding Title}"
+                                            Style="{StaticResource DenseTabButtonStyle}"
+                                            Clicked="OnTabClicked"
+                                            CommandParameter="{Binding .}">
+                                        <Button.Triggers>
+                                            <DataTrigger TargetType="Button" Binding="{Binding IsSelected}" Value="True">
+                                                <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                                <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                                <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
+                                            </DataTrigger>
+                                        </Button.Triggers>
+                                    </Button>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </HorizontalStackLayout>
+                    </ScrollView>
+                </Grid>
 
-                <ScrollView Grid.Row="2"
-                            MaximumHeightRequest="168">
-                    <VerticalStackLayout Spacing="2"
-                                         BindableLayout.ItemsSource="{Binding Workspaces}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource NavigationRowBorderStyle}"
-                                        Margin="0">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Tapped="OnWorkspaceTapped"
-                                                              CommandParameter="{Binding .}" />
-                                    </Border.GestureRecognizers>
+                <BoxView Grid.Row="2"
+                         HeightRequest="1"
+                         Margin="10,0,10,0"
+                         Color="{DynamicResource ThemeDividerColor}" />
+
+                <!-- Explorer / History content -->
+                <Grid Grid.Row="3">
+                    <ScrollView IsVisible="{Binding IsExplorerTabVisible}">
+                        <VerticalStackLayout Padding="0,8,0,12"
+                                             Spacing="6"
+                                             BindableLayout.ItemsSource="{Binding ExplorerSections}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
                                     <VerticalStackLayout Spacing="1">
-                                        <Label Text="{Binding Title}"
-                                               FontFamily="OpenSansSemibold"
-                                               FontSize="12"
-                                               LineBreakMode="TailTruncation" />
-                                        <Label Text="{Binding Subtitle}"
-                                               Style="{StaticResource PaneMetaStyle}"
-                                               LineBreakMode="TailTruncation" />
-                                    </VerticalStackLayout>
-                                    <Border.Triggers>
-                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
-                                            <Setter Property="Stroke" Value="{DynamicResource ThemeSelectionBorderColor}" />
-                                            <Setter Property="StrokeThickness" Value="1" />
-                                        </DataTrigger>
-                                    </Border.Triggers>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </VerticalStackLayout>
-                </ScrollView>
-            </Grid>
-
-            <Grid Grid.Row="3">
-                <ScrollView IsVisible="{Binding IsExplorerTabVisible}">
-                    <VerticalStackLayout Padding="0,0,0,12"
-                                         Spacing="10"
-                                         BindableLayout.ItemsSource="{Binding ExplorerSections}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate>
-                                <VerticalStackLayout Spacing="2">
-                                    <Grid Margin="12,6,12,4"
-                                          ColumnDefinitions="*,Auto"
-                                          ColumnSpacing="8">
-                                        <VerticalStackLayout Spacing="0">
+                                        <Grid Margin="12,4,10,2"
+                                              ColumnDefinitions="*,Auto"
+                                              ColumnSpacing="6">
                                             <Label Text="{Binding Title}"
-                                                   Style="{StaticResource SectionTitleStyle}" />
-                                            <Label Text="{Binding Subtitle}"
-                                                   Style="{StaticResource MonoMetaStyle}" />
-                                        </VerticalStackLayout>
-                                        <HorizontalStackLayout Grid.Column="1"
-                                                               Spacing="4"
-                                                               IsVisible="{Binding SupportsRequestActions}">
-                                            <Button Text="^"
-                                                    Style="{StaticResource DenseTabButtonStyle}"
-                                                    Clicked="OnMoveRequestUpClicked"
-                                                    SemanticProperties.Description="Move selected file up"
-                                                    IsEnabled="{Binding BindingContext.CanMoveRequestUp, Source={x:Reference ExplorerRoot}}" />
-                                            <Button Text="v"
-                                                    Style="{StaticResource DenseTabButtonStyle}"
-                                                    Clicked="OnMoveRequestDownClicked"
-                                                    SemanticProperties.Description="Move selected file down"
-                                                    IsEnabled="{Binding BindingContext.CanMoveRequestDown, Source={x:Reference ExplorerRoot}}" />
-                                            <Button Text="+"
-                                                    Style="{StaticResource DenseTabButtonStyle}"
+                                                   Style="{StaticResource ExplorerGroupHeaderStyle}" />
+                                            <Button Grid.Column="1"
+                                                    Text="+"
+                                                    Style="{StaticResource ExplorerGroupAddButtonStyle}"
                                                     Clicked="OnAddRequestClicked"
+                                                    IsVisible="{Binding SupportsRequestActions}"
                                                     SemanticProperties.Description="Add request or script file" />
-                                            <Button Text="-"
-                                                    Style="{StaticResource DenseTabButtonStyle}"
-                                                    Clicked="OnDeleteRequestClicked"
-                                                    SemanticProperties.Description="Delete selected request"
-                                                    IsEnabled="{Binding BindingContext.CanDeleteRequest, Source={x:Reference ExplorerRoot}}" />
-                                        </HorizontalStackLayout>
-                                    </Grid>
-                                    <VerticalStackLayout Spacing="0"
-                                                         BindableLayout.ItemsSource="{Binding Items}">
-                                        <BindableLayout.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border Style="{StaticResource NavigationRowBorderStyle}"
-                                                        Margin="{Binding Indent}">
+                                        </Grid>
+                                        <VerticalStackLayout Spacing="0"
+                                                             BindableLayout.ItemsSource="{Binding Items}">
+                                            <BindableLayout.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Style="{StaticResource ExplorerRowBorderStyle}"
+                                                            Margin="{Binding Indent}">
                                                         <Border.GestureRecognizers>
                                                             <TapGestureRecognizer Tapped="OnItemTapped"
-                                                                              CommandParameter="{Binding .}" />
+                                                                                  CommandParameter="{Binding .}" />
                                                         </Border.GestureRecognizers>
-                                                    <Grid ColumnDefinitions="Auto,*"
-                                                          ColumnSpacing="10">
-                                                        <Label Text="{Binding Kind}"
-                                                               TextColor="{Binding AccentColor}"
-                                                               Style="{StaticResource MonoMetaStyle}"
-                                                               VerticalTextAlignment="Start" />
-                                                        <VerticalStackLayout Grid.Column="1"
-                                                                             Spacing="2">
-                                                            <Label Text="{Binding Title}"
-                                                                   FontFamily="OpenSansSemibold"
-                                                                   FontSize="12"
-                                                                   LineBreakMode="TailTruncation" />
-                                                            <Label Text="{Binding Detail}"
-                                                                   Style="{StaticResource PaneMetaStyle}"
-                                                                   LineBreakMode="TailTruncation" />
-                                                            <Label Text="{Binding ContextDisplay}"
-                                                               LineBreakMode="TailTruncation"
-                                                               Style="{StaticResource MonoMetaStyle}" />
-                                                        </VerticalStackLayout>
-                                                    </Grid>
-                                                    <Border.Triggers>
-                                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
-                                                            <Setter Property="Stroke" Value="{DynamicResource ThemeSelectionBorderColor}" />
-                                                            <Setter Property="StrokeThickness" Value="1" />
-                                                        </DataTrigger>
-                                                    </Border.Triggers>
-                                                </Border>
-                                            </DataTemplate>
-                                        </BindableLayout.ItemTemplate>
-                                    </VerticalStackLayout>
-                                </VerticalStackLayout>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </VerticalStackLayout>
-                </ScrollView>
-
-                <ScrollView IsVisible="{Binding IsHistoryTabVisible}">
-                    <VerticalStackLayout Padding="0,6,0,12"
-                                         Spacing="0"
-                                         BindableLayout.ItemsSource="{Binding HistoryItems}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate>
-                                <Border Style="{StaticResource NavigationRowBorderStyle}">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Tapped="OnHistoryTapped"
-                                                              CommandParameter="{Binding .}" />
-                                    </Border.GestureRecognizers>
-                                    <Grid ColumnDefinitions="Auto,*,Auto"
-                                          ColumnSpacing="8">
-                                        <Label Text="{Binding Method}"
-                                               TextColor="{Binding AccentColor}"
-                                               Style="{StaticResource MonoMetaStyle}" />
-                                        <VerticalStackLayout Grid.Column="1"
-                                                             Spacing="1">
-                                            <Label Text="{Binding Title}"
-                                                   FontFamily="OpenSansSemibold"
-                                                   FontSize="12" />
-                                            <Label Text="{Binding Summary}"
-                                                   Style="{StaticResource PaneMetaStyle}" />
+                                                        <Grid ColumnDefinitions="Auto,*,Auto"
+                                                              ColumnSpacing="9">
+                                                            <Label Text="{Binding Kind}"
+                                                                   TextColor="{Binding AccentColor}"
+                                                                   Style="{StaticResource MonoMetaStyle}"
+                                                                   VerticalTextAlignment="Center" />
+                                                            <Label Grid.Column="1"
+                                                                   Text="{Binding Title}"
+                                                                   Style="{StaticResource ExplorerRowTitleStyle}" />
+                                                            <Button Grid.Column="2"
+                                                                    Text="&#x22EF;"
+                                                                    Style="{StaticResource ExplorerRowActionStyle}"
+                                                                    Clicked="OnItemActionsClicked"
+                                                                    CommandParameter="{Binding .}"
+                                                                    SemanticProperties.Description="Row actions" />
+                                                        </Grid>
+                                                        <Border.Triggers>
+                                                            <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                                                <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
+                                                            </DataTrigger>
+                                                        </Border.Triggers>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </BindableLayout.ItemTemplate>
                                         </VerticalStackLayout>
-                                        <Label Grid.Column="2"
-                                               Text="{Binding When}"
-                                               Style="{StaticResource MonoMetaStyle}" />
-                                    </Grid>
-                                    <Border.Triggers>
-                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
-                                            <Setter Property="Stroke" Value="{DynamicResource ThemeSelectionBorderColor}" />
-                                            <Setter Property="StrokeThickness" Value="1" />
-                                        </DataTrigger>
-                                    </Border.Triggers>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </VerticalStackLayout>
-                </ScrollView>
+                                    </VerticalStackLayout>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </ScrollView>
+
+                    <ScrollView IsVisible="{Binding IsHistoryTabVisible}">
+                        <VerticalStackLayout Padding="0,8,0,12"
+                                             Spacing="0"
+                                             BindableLayout.ItemsSource="{Binding HistoryItems}">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource ExplorerRowBorderStyle}">
+                                        <Border.GestureRecognizers>
+                                            <TapGestureRecognizer Tapped="OnHistoryTapped"
+                                                                  CommandParameter="{Binding .}" />
+                                        </Border.GestureRecognizers>
+                                        <Grid ColumnDefinitions="Auto,*,Auto"
+                                              ColumnSpacing="8">
+                                            <Label Text="{Binding Method}"
+                                                   TextColor="{Binding AccentColor}"
+                                                   Style="{StaticResource MonoMetaStyle}"
+                                                   VerticalTextAlignment="Center" />
+                                            <VerticalStackLayout Grid.Column="1"
+                                                                 Spacing="1">
+                                                <Label Text="{Binding Title}"
+                                                       Style="{StaticResource ExplorerRowTitleStyle}" />
+                                                <Label Text="{Binding Summary}"
+                                                       Style="{StaticResource PaneMetaStyle}"
+                                                       LineBreakMode="TailTruncation" />
+                                            </VerticalStackLayout>
+                                            <Label Grid.Column="2"
+                                                   Text="{Binding When}"
+                                                   Style="{StaticResource MonoMetaStyle}"
+                                                   VerticalTextAlignment="Center" />
+                                        </Grid>
+                                        <Border.Triggers>
+                                            <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                                <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
+                                            </DataTrigger>
+                                        </Border.Triggers>
+                                    </Border>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </ScrollView>
+                </Grid>
+            </Grid>
+
+            <!-- Workspace switcher popup overlay -->
+            <Grid IsVisible="{Binding IsWorkspaceSwitcherOpen}">
+                <!-- Backdrop dismisses the popup on tap. -->
+                <BoxView BackgroundColor="{DynamicResource ThemeOverlayBackdropColor}">
+                    <BoxView.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnWorkspaceSwitcherBackdropTapped" />
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+                <Border Style="{StaticResource WorkspacePopupBorderStyle}"
+                        Margin="10,46,10,0"
+                        VerticalOptions="Start"
+                        MaximumHeightRequest="360">
+                    <Grid RowDefinitions="Auto,Auto,*,Auto">
+                        <Grid Padding="12,10,10,8"
+                              ColumnDefinitions="*,Auto">
+                            <Label Text="WORKSPACES"
+                                   Style="{StaticResource ExplorerGroupHeaderStyle}"
+                                   VerticalTextAlignment="Center" />
+                            <HorizontalStackLayout Grid.Column="1"
+                                                   Spacing="2">
+                                <Button Text="&#x2303;"
+                                        Style="{StaticResource ExplorerRowActionStyle}"
+                                        Clicked="OnMoveWorkspaceLeftClicked"
+                                        IsEnabled="{Binding CanMoveWorkspaceLeft}"
+                                        SemanticProperties.Description="Move selected workspace up" />
+                                <Button Text="&#x2304;"
+                                        Style="{StaticResource ExplorerRowActionStyle}"
+                                        Clicked="OnMoveWorkspaceRightClicked"
+                                        IsEnabled="{Binding CanMoveWorkspaceRight}"
+                                        SemanticProperties.Description="Move selected workspace down" />
+                            </HorizontalStackLayout>
+                        </Grid>
+
+                        <BoxView Grid.Row="1"
+                                 HeightRequest="1"
+                                 Margin="10,0,10,0"
+                                 Color="{DynamicResource ThemeDividerColor}" />
+
+                        <ScrollView Grid.Row="2">
+                            <VerticalStackLayout Padding="6,6,6,6"
+                                                 Spacing="1"
+                                                 BindableLayout.ItemsSource="{Binding Workspaces}">
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource WorkspacePopupRowBorderStyle}">
+                                            <Border.GestureRecognizers>
+                                                <TapGestureRecognizer Tapped="OnWorkspaceTapped"
+                                                                      CommandParameter="{Binding .}" />
+                                            </Border.GestureRecognizers>
+                                            <Grid ColumnDefinitions="*,Auto"
+                                                  ColumnSpacing="6">
+                                                <VerticalStackLayout Spacing="1">
+                                                    <Label Text="{Binding Title}"
+                                                           Style="{StaticResource ExplorerRowTitleStyle}" />
+                                                    <Label Text="{Binding Subtitle}"
+                                                           Style="{StaticResource PaneMetaStyle}"
+                                                           LineBreakMode="TailTruncation" />
+                                                </VerticalStackLayout>
+                                                <Button Grid.Column="1"
+                                                        Text="&#x22EF;"
+                                                        Style="{StaticResource ExplorerRowActionStyle}"
+                                                        Clicked="OnWorkspaceActionsClicked"
+                                                        CommandParameter="{Binding .}"
+                                                        SemanticProperties.Description="Workspace actions" />
+                                            </Grid>
+                                            <Border.Triggers>
+                                                <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionStrongColor}" />
+                                                </DataTrigger>
+                                            </Border.Triggers>
+                                        </Border>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </VerticalStackLayout>
+                        </ScrollView>
+
+                        <Button Grid.Row="3"
+                                Text="+ New workspace"
+                                HorizontalOptions="Fill"
+                                Margin="10,4,10,12"
+                                Style="{StaticResource SubtleToolbarButtonStyle}"
+                                Clicked="OnAddWorkspaceClicked"
+                                SemanticProperties.Description="Add workspace" />
+                    </Grid>
+                </Border>
             </Grid>
         </Grid>
     </Border>
