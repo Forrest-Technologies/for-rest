@@ -67,7 +67,7 @@ public sealed class ThemeService : IThemeService, IDisposable
 		{
 			string rawText = ThemeConfigStore.NormalizeLineEndings(text);
 			ThemeConfigDocument parsedDocument = _themeConfigParser.Parse(rawText);
-			ThemeNormalizationResult normalizationResult = _themeConfigNormalizer.Normalize(parsedDocument);
+			ThemeNormalizationResult normalizationResult = _themeConfigNormalizer.Normalize(parsedDocument, CurrentSettings.Theme);
 			ShellThemeDefinition theme = _themeCatalog.GetTheme(normalizationResult.Settings.Theme);
 			string statusMessage = BuildStatusMessage(theme, normalizationResult.Messages, "preview", configNormalized: false);
 			ApplyTheme(theme, normalizationResult.Settings, statusMessage, configNormalized: false, isPreview: true);
@@ -151,7 +151,7 @@ public sealed class ThemeService : IThemeService, IDisposable
 	{
 		string rawText = _themeConfigStore.ReadAllText();
 		ThemeConfigDocument parsedDocument = _themeConfigParser.Parse(rawText);
-		ThemeNormalizationResult normalizationResult = _themeConfigNormalizer.Normalize(parsedDocument);
+		ThemeNormalizationResult normalizationResult = _themeConfigNormalizer.Normalize(parsedDocument, CurrentSettings.Theme);
 		string normalizedText = ThemeConfigStore.NormalizeLineEndings(normalizationResult.NormalizedText);
 		string currentText = ThemeConfigStore.NormalizeLineEndings(rawText);
 		bool requiresRewrite = !string.Equals(currentText.Trim(), normalizedText.Trim(), StringComparison.Ordinal);

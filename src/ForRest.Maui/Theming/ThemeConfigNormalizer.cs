@@ -14,6 +14,11 @@ public sealed class ThemeConfigNormalizer
 
 	public ThemeNormalizationResult Normalize(ThemeConfigDocument document)
 	{
+		return Normalize(document, currentTheme: null);
+	}
+
+	public ThemeNormalizationResult Normalize(ThemeConfigDocument document, ShellThemeName? currentTheme)
+	{
 		List<string> messages = [.. document.Messages];
 		List<ThemeConfigEntry> knownEntries = document.Entries.Where(entry => entry.IsKnown).ToList();
 		List<ThemeConfigEntry> selectedEntries = knownEntries.Where(entry => entry.SelectedValue == true).ToList();
@@ -22,7 +27,14 @@ public sealed class ThemeConfigNormalizer
 		ShellThemeName selectedTheme;
 		if (selectedEntries.Count > 1)
 		{
-			ThemeConfigEntry winningEntry = selectedEntries[0];
+			// Multiple theme flags are true. Prefer the one the user just turned
+			// on — the selected flag that differs from the current theme — so
+			// flipping any theme to true switches to it and the canonical writer
+			// clears the rest. Without a current theme (e.g. first load) keep the
+			// historical first-in-document behaviour.
+			ThemeConfigEntry winningEntry = currentTheme is null
+				? selectedEntries[0]
+				: selectedEntries.LastOrDefault(entry => !MatchesTheme(entry, currentTheme.Value)) ?? selectedEntries[0];
 			selectedTheme = Enum.Parse<ShellThemeName>(winningEntry.RawName, ignoreCase: true);
 			settingsNormalized = true;
 		}
@@ -57,6 +69,12 @@ public sealed class ThemeConfigNormalizer
 		string normalizedText = Render(document, settings);
 
 		return new ThemeNormalizationResult(settings, normalizedText, messages);
+	}
+
+	private static bool MatchesTheme(ThemeConfigEntry entry, ShellThemeName currentTheme)
+	{
+		return Enum.TryParse(entry.RawName, ignoreCase: true, out ShellThemeName parsed)
+			&& parsed == currentTheme;
 	}
 
 	public string Render(ThemeConfigDocument document, ForRestSettings settings)
