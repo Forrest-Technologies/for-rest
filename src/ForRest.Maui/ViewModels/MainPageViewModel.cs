@@ -38,6 +38,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private static readonly TimeSpan SettingsEditorProjectionRefreshQuietPeriod = TimeSpan.FromMilliseconds(1000);
 	private const string RequestDocumentKind = "request";
 	private const string SettingsDocumentKind = "settings";
+	private const string BrowserRecordingLocationPrefix = "browser/";
 
 	private enum StashSortMode
 	{
@@ -287,7 +288,8 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 		CenterTabs =
 		[
-			new PaneTabViewModel("request", "Request", true)
+			new PaneTabViewModel("request", "Request", true),
+			new PaneTabViewModel("browser", "Browser")
 		];
 
 		RightPaneTabs =
@@ -1512,6 +1514,8 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	public bool IsVariablesTabVisible => IsTabSelected(CenterTabs, "variables");
 
+	public bool IsBrowserTabVisible => IsTabSelected(CenterTabs, "browser");
+
 	public bool IsInspectorResponseVisible => IsTabSelected(RightPaneTabs, "response");
 
 	public bool IsInspectorRequestVisible => IsTabSelected(RightPaneTabs, "requests");
@@ -1932,6 +1936,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		OnPropertyChanged(nameof(IsScriptTabVisible));
 		OnPropertyChanged(nameof(IsTestsTabVisible));
 		OnPropertyChanged(nameof(IsVariablesTabVisible));
+		OnPropertyChanged(nameof(IsBrowserTabVisible));
 		OnPropertyChanged(nameof(CenterSurfaceStatus));
 		ActivateCurrentCenterTabEditor();
 	}
@@ -2064,6 +2069,96 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		{
 			_ = PersistWorkbenchStateInBackground();
 		}
+	}
+
+	/// <summary>
+	/// Persists a recorded browser automation session as a new runnable <c>.frs</c> document under the
+	/// active workspace's <c>browser/</c> location, then opens it in the request editor. Called by the
+	/// live browser pane when the user stops recording. Returns the new document location, or
+	/// <c>null</c> when there is no active workspace or the source is empty.
+	/// </summary>
+	public string? CreateBrowserRecordingDocument(string source)
+	{
+		if (string.IsNullOrWhiteSpace(source))
+		{
+			return null;
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return null;
+		}
+
+		string name = BuildNextBrowserRecordingName(workspace);
+		string location = BuildBrowserRecordingLocation(workspace, name);
+		(string method, string summary) = McpDeriveScriptMetadata(workspace.Id, source, name);
+		RequestWorkbenchDocumentState document = new()
+		{
+			Title = name,
+			Method = method,
+			Summary = string.IsNullOrWhiteSpace(summary) ? "Recorded browser automation flow" : summary,
+			Location = location,
+			RequestSource = source,
+		};
+
+		UpdateSelectedWorkspaceState(
+			currentWorkspace => currentWorkspace with
+			{
+				SelectedDocumentLocation = location,
+				Documents =
+				[
+					.. currentWorkspace.Documents,
+					document
+				]
+			});
+
+		ApplyWorkspaceSelection(workspace.Id);
+		SelectCenterTab(CenterTabs.FirstOrDefault(static tab => string.Equals(tab.Key, "request", StringComparison.Ordinal)));
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+		}
+
+		return location;
+	}
+
+	private static string BuildNextBrowserRecordingName(RequestWorkbenchWorkspaceState workspace)
+	{
+		HashSet<string> existing = workspace.Documents
+			.Where(document => IsExplorerLocationInBucket(document.Location, "browser"))
+			.Select(document => document.Title)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		int suffix = 1;
+		string candidate = $"Recording {suffix}";
+		while (existing.Contains(candidate))
+		{
+			suffix++;
+			candidate = $"Recording {suffix}";
+		}
+
+		return candidate;
+	}
+
+	private static string BuildBrowserRecordingLocation(RequestWorkbenchWorkspaceState workspace, string name)
+	{
+		string scriptSlug = BuildSlug(name, "recording");
+		string baseLocation = $"/{BrowserRecordingLocationPrefix}{scriptSlug}.frs";
+		HashSet<string> taken = workspace.Documents
+			.Select(document => document.Location)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		string candidate = baseLocation;
+		int suffix = 2;
+		while (taken.Contains(candidate))
+		{
+			candidate = $"/{BrowserRecordingLocationPrefix}{scriptSlug}-{suffix}.frs";
+			suffix++;
+		}
+
+		return candidate;
 	}
 
 	public void DeleteSelectedWorkspace()
@@ -3196,6 +3291,12 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			ref supportsRequestActionsAssigned);
 		AddExplorerSection(
 			sections,
+			"Browser",
+			"Recorded browser automation flows",
+			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "browser")),
+			ref supportsRequestActionsAssigned);
+		AddExplorerSection(
+			sections,
 			"Files",
 			"Other workspace documents",
 			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "files")),
@@ -3246,9 +3347,11 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			"requests" => normalized.StartsWith("requests/", StringComparison.OrdinalIgnoreCase),
 			"scratch" => normalized.StartsWith("scratch/", StringComparison.OrdinalIgnoreCase),
 			"scripts" => normalized.StartsWith("scripts/", StringComparison.OrdinalIgnoreCase),
+			"browser" => normalized.StartsWith("browser/", StringComparison.OrdinalIgnoreCase),
 			"files" => !normalized.StartsWith("requests/", StringComparison.OrdinalIgnoreCase)
 			           && !normalized.StartsWith("scratch/", StringComparison.OrdinalIgnoreCase)
-			           && !normalized.StartsWith("scripts/", StringComparison.OrdinalIgnoreCase),
+			           && !normalized.StartsWith("scripts/", StringComparison.OrdinalIgnoreCase)
+			           && !normalized.StartsWith("browser/", StringComparison.OrdinalIgnoreCase),
 			_ => false
 		};
 	}
