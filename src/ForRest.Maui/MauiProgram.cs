@@ -7,6 +7,7 @@ using ForRest.Maui.ViewModels;
 using ForRest.Repositories;
 using ForRest.Services;
 using ForRest.Services.AI;
+using ForRest.Services.AI.OAuth;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging;
 #if WINDOWS || MACCATALYST
@@ -46,6 +47,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton<SettingsTomlDocumentService>();
 		builder.Services.AddSingleton<IWorkbenchAiSettingsProvider, WorkbenchAiSettingsProvider>();
 		builder.Services.AddSingleton<IWorkbenchMcpSettingsProvider, WorkbenchMcpSettingsProvider>();
+		builder.Services.AddSingleton<IProviderTokenStore, SecureStorageProviderTokenStore>();
+		builder.Services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
 		builder.Services.AddSingleton<ILicenseLeaseCacheStore, FileLicenseLeaseCacheStore>();
