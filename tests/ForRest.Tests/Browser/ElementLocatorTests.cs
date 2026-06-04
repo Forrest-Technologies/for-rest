@@ -63,4 +63,50 @@ public sealed class ElementLocatorTests
     {
         Assert.AreEqual(1, ElementLocator.Path(new CursorPoint(0, 0), new CursorPoint(10, 10), 0).Count);
     }
+
+    [TestMethod]
+    public void HumanPath_ends_exactly_on_target_and_is_deterministic_with_seed()
+    {
+        CursorMotion motion = CursorMotion.Default with { Steps = 30, Seed = 7 };
+        CursorPoint from = new(0, 0);
+        CursorPoint to = new(400, 120);
+
+        IReadOnlyList<CursorPoint> first = ElementLocator.HumanPath(from, to, motion);
+        IReadOnlyList<CursorPoint> second = ElementLocator.HumanPath(from, to, motion);
+
+        Assert.AreEqual(30, first.Count);
+        Assert.AreEqual(to.X, first[^1].X, 0.0001);
+        Assert.AreEqual(to.Y, first[^1].Y, 0.0001);
+        // Same seed => identical replay.
+        CollectionAssert.AreEqual(first.ToArray(), second.ToArray());
+    }
+
+    [TestMethod]
+    public void HumanPath_curves_off_the_straight_line()
+    {
+        CursorMotion motion = CursorMotion.Default with { Steps = 20, Jitter = 0, Seed = 1 };
+        IReadOnlyList<CursorPoint> path = ElementLocator.HumanPath(new CursorPoint(0, 0), new CursorPoint(200, 0), motion);
+
+        // A straight ease would keep y at 0; the human arc must bow away from the line somewhere.
+        Assert.IsTrue(path.Any(point => Math.Abs(point.Y) > 1), "human path should arc off the straight line");
+        Assert.AreEqual(0, path[^1].Y, 0.0001, "but still land exactly on the target");
+    }
+
+    [TestMethod]
+    public void HumanPath_instant_motion_is_a_single_jump()
+    {
+        IReadOnlyList<CursorPoint> path = ElementLocator.HumanPath(new CursorPoint(5, 5), new CursorPoint(99, 42), CursorMotion.Instant);
+
+        Assert.AreEqual(1, path.Count);
+        Assert.AreEqual(99, path[0].X, 0.0001);
+    }
+
+    [TestMethod]
+    public void StepDelay_lingers_at_the_ends()
+    {
+        int mid = ElementLocator.StepDelay(10, 0.5);
+        int start = ElementLocator.StepDelay(10, 0.02);
+        Assert.IsTrue(start > mid, "cursor should move slower at the start than mid-travel");
+        Assert.AreEqual(0, ElementLocator.StepDelay(0, 0.5));
+    }
 }

@@ -39,8 +39,14 @@ public sealed class CdpBrowserDriver(CdpClient client) : IBrowserAutomationBridg
 
     public async Task Click(BrowserTarget target, CursorMotion? motion = null, CancellationToken cancellationToken = default)
     {
+        CursorMotion resolved = motion ?? CursorMotion.Default;
         BrowserElementInfo info = await RequireElement(target, cancellationToken);
-        await MoveTo(info.X, info.Y, motion ?? CursorMotion.Default, cancellationToken);
+        await MoveTo(info.X, info.Y, resolved, cancellationToken);
+        if (resolved.Visible)
+        {
+            await client.Evaluate(BrowserJs.ClickRipple(info.X, info.Y), cancellationToken: cancellationToken);
+        }
+
         await client.DispatchMouse("mousePressed", info.X, info.Y, "left", 1, cancellationToken);
         await client.DispatchMouse("mouseReleased", info.X, info.Y, "left", 1, cancellationToken);
     }
@@ -146,17 +152,20 @@ public sealed class CdpBrowserDriver(CdpClient client) : IBrowserAutomationBridg
 
     private async Task MoveTo(double x, double y, CursorMotion motion, CancellationToken cancellationToken)
     {
-        foreach (CursorPoint point in ElementLocator.Path(cursor, new CursorPoint(x, y), motion.Steps))
+        IReadOnlyList<CursorPoint> path = ElementLocator.HumanPath(cursor, new CursorPoint(x, y), motion);
+        for (int i = 0; i < path.Count; i++)
         {
+            CursorPoint point = path[i];
             await client.DispatchMouse("mouseMoved", point.X, point.Y, cancellationToken: cancellationToken);
             if (motion.Visible)
             {
                 await client.Evaluate(BrowserJs.MoveCursor(point.X, point.Y), cancellationToken: cancellationToken);
             }
 
-            if (motion.StepDelayMs > 0)
+            int delay = ElementLocator.StepDelay(motion.StepDelayMs, (double)(i + 1) / path.Count);
+            if (delay > 0)
             {
-                await Task.Delay(motion.StepDelayMs, cancellationToken);
+                await Task.Delay(delay, cancellationToken);
             }
         }
 

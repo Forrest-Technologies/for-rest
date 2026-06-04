@@ -61,24 +61,46 @@ public sealed record BrowserSnapshot
 
 /// <summary>
 /// Controls how the synthetic cursor travels to a target so replayed automation looks human and the
-/// visible red pointer animates. Tuned per action; replay never needs an LLM to drive it.
+/// visible red pointer animates. Tuned per action; replay never needs an LLM to drive it. The default
+/// is deliberately human-like: a gently curved, accelerating-then-decelerating path with a touch of
+/// wobble and a small overshoot that settles onto the target.
 /// </summary>
 public sealed record CursorMotion
 {
     /// <summary>Number of interpolated points between the current and target position.</summary>
-    public int Steps { get; init; } = 24;
+    public int Steps { get; init; } = 28;
 
-    /// <summary>Delay between interpolated points in milliseconds.</summary>
-    public int StepDelayMs { get; init; } = 8;
+    /// <summary>Base delay between interpolated points in milliseconds (actual delay eases at both ends).</summary>
+    public int StepDelayMs { get; init; } = 9;
 
     /// <summary>Whether the visible cursor overlay should be shown while moving.</summary>
     public bool Visible { get; init; } = true;
 
+    /// <summary>Sideways arc of the path as a fraction of travel distance; gives the hand-like curve. 0 = straight.</summary>
+    public double Curviness { get; init; } = 0.16;
+
+    /// <summary>Maximum per-point random wobble in pixels; small values read as a natural unsteady hand.</summary>
+    public double Jitter { get; init; } = 1.1;
+
+    /// <summary>How far past the target the cursor drifts before settling, as a fraction of distance. 0 = none.</summary>
+    public double Overshoot { get; init; } = 0.08;
+
+    /// <summary>Optional seed so jitter is deterministic for tests and exact replays.</summary>
+    public int? Seed { get; init; }
+
     /// <summary>Smooth, human-like default motion.</summary>
     public static CursorMotion Default { get; } = new();
 
-    /// <summary>A single instantaneous jump with no delay or visible animation; ideal for tests and fast replays.</summary>
-    public static CursorMotion Instant { get; } = new() { Steps = 1, StepDelayMs = 0, Visible = false };
+    /// <summary>A single instantaneous jump with no delay, wobble, or visible animation; ideal for tests and fast replays.</summary>
+    public static CursorMotion Instant { get; } = new()
+    {
+        Steps = 1,
+        StepDelayMs = 0,
+        Visible = false,
+        Curviness = 0,
+        Jitter = 0,
+        Overshoot = 0,
+    };
 }
 
 /// <summary>A single point along a cursor path.</summary>

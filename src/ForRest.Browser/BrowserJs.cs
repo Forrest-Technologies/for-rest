@@ -39,6 +39,14 @@ internal static class BrowserJs
     /// <summary>Hides the visible red cursor overlay.</summary>
     internal static string HideCursor() => $"({CursorFunction})(0,0,false)";
 
+    /// <summary>Plays a brief click ripple at a page coordinate so taps read clearly to a watching human.</summary>
+    internal static string ClickRipple(double x, double y)
+    {
+        string xs = x.ToString("0.##", CultureInfo.InvariantCulture);
+        string ys = y.ToString("0.##", CultureInfo.InvariantCulture);
+        return $"({RippleFunction})({xs},{ys})";
+    }
+
     #endregion
 
     #region Private Methods
@@ -148,13 +156,28 @@ internal static class BrowserJs
         function(x,y,show){
           var id='__forrest_cursor__';
           var c=document.getElementById(id);
-          if(!show){if(c){c.style.display='none';}return true;}
+          if(!show){if(c){c.style.opacity='0';}return true;}
           if(!c){
             c=document.createElement('div');c.id=id;
-            c.style.cssText='position:fixed;z-index:2147483647;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:rgba(220,53,69,0.85);border:2px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.4);pointer-events:none;transition:left 60ms linear,top 60ms linear;';
+            c.style.cssText='position:fixed;z-index:2147483647;left:0;top:0;width:22px;height:30px;pointer-events:none;will-change:transform;transition:transform 70ms cubic-bezier(0.22,0.61,0.36,1),opacity 120ms ease;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45));transform:translate(0px,0px);';
+            c.innerHTML='<svg width="22" height="30" viewBox="0 0 22 30" xmlns="http://www.w3.org/2000/svg"><path d="M1 1 L1 22 L6.5 16.5 L10 25 L13 23.7 L9.6 15.4 L17 15 Z" fill="#dc3545" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/></svg>';
             document.body.appendChild(c);
           }
-          c.style.display='block';c.style.left=x+'px';c.style.top=y+'px';
+          c.style.opacity='1';
+          // Tip of the arrow sits at the requested coordinate (svg hotspot is at its top-left).
+          c.style.transform='translate('+x+'px,'+y+'px)';
+          return true;
+        }
+        """;
+
+    private const string RippleFunction =
+        """
+        function(x,y){
+          var r=document.createElement('div');
+          r.style.cssText='position:fixed;z-index:2147483646;left:'+(x-7)+'px;top:'+(y-7)+'px;width:14px;height:14px;border-radius:50%;border:2px solid rgba(220,53,69,0.9);background:rgba(220,53,69,0.18);pointer-events:none;';
+          document.body.appendChild(r);
+          var anim=r.animate([{transform:'scale(0.4)',opacity:0.9},{transform:'scale(2.6)',opacity:0}],{duration:420,easing:'ease-out'});
+          anim.onfinish=function(){if(r&&r.parentNode){r.parentNode.removeChild(r);}};
           return true;
         }
         """;
