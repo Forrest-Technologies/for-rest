@@ -7,13 +7,17 @@ public sealed class RequestExecutionService(
     IRepeatRunnerService repeatRunnerService,
     IScriptEngine scriptEngine,
     ILogger<RequestExecutionService> logger,
-    IRequestAuthenticationService? requestAuthenticationService = null) : IRequestExecutionService
+    IRequestAuthenticationService? requestAuthenticationService = null,
+    IBrowserAutomationProvider? browserProvider = null) : IRequestExecutionService
 {
     private const string DefaultRequestFlowScript = "await request.send();";
 
     private readonly IRequestAuthenticationService _requestAuthenticationService =
         requestAuthenticationService
         ?? new RequestAuthenticationService(Microsoft.Extensions.Logging.Abstractions.NullLogger<RequestAuthenticationService>.Instance);
+
+    private readonly IBrowserAutomationProvider _browserProvider =
+        browserProvider ?? NullBrowserAutomationProvider.Instance;
 
     #region Public Methods
 
@@ -162,6 +166,7 @@ public sealed class RequestExecutionService(
                     RuntimeVariables = runtimeVariables,
                     SendAsync = ExecuteScriptSend,
                     ExecuteWorkspaceRequestAsync = ExecuteWorkspaceRequestAsync,
+                    BrowserBridge = _browserProvider.Current,
                     MaxSendIterations = request.MaxSendIterations,
                 },
                 iterationCancellationToken);

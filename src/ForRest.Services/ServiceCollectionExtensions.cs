@@ -1,9 +1,13 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 namespace ForRest.Services;
 
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddForRestCore(this IServiceCollection services)
     {
+        // Fallback only: the MAUI app registers a provider backed by the live browser pane before this runs.
+        services.TryAddSingleton<IBrowserAutomationProvider>(NullBrowserAutomationProvider.Instance);
         services.AddSingleton<VariableResolver>();
         services.AddSingleton<JsonEditorService>();
         services.AddSingleton<JsonNodeSelector>();

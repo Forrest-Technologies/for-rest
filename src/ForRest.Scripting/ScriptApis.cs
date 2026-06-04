@@ -2145,6 +2145,70 @@ public sealed class WorkspaceApi
     }
 }
 
+/// <summary>
+/// The script-facing <c>browser</c> object. Wraps the engine-agnostic <see cref="IBrowserAutomationBridge"/>
+/// so authored and recorded scripts can drive an embedded browser page (navigate, click, type, read,
+/// assert) deterministically — no LLM in the loop at replay time. Targets are compact strings such as
+/// <c>"#id"</c>, <c>"css=.row"</c>, <c>"xpath=//a"</c>, <c>"text=Save"</c>, <c>"role=button:Save"</c>,
+/// or <c>"testid=submit"</c>. Mouse-motion dynamics are tunable via <see cref="MouseSteps"/> and
+/// <see cref="MouseStepDelayMs"/>.
+/// </summary>
+public sealed class ScriptBrowserApi(IBrowserAutomationBridge bridge)
+{
+    #region Properties
+
+    /// <summary>Number of interpolated points the cursor travels through on its way to a target.</summary>
+    public int MouseSteps { get; set; } = 24;
+
+    /// <summary>Delay between cursor steps in milliseconds; raise for slower, more human-like motion.</summary>
+    public int MouseStepDelayMs { get; set; } = 8;
+
+    /// <summary>Whether the visible red cursor overlay animates during moves.</summary>
+    public bool ShowCursor { get; set; } = true;
+
+    /// <summary>Whether a live browser pane is connected.</summary>
+    public bool IsAvailable => bridge.IsAvailable;
+
+    private CursorMotion Motion => new() { Steps = MouseSteps, StepDelayMs = MouseStepDelayMs, Visible = ShowCursor };
+
+    #endregion
+
+    #region Public Methods
+
+    public Task navigate(string url) => bridge.Navigate(url);
+
+    public Task click(string target) => bridge.Click(BrowserTarget.Parse(target), Motion);
+
+    public Task type(string target, string text) => bridge.Type(BrowserTarget.Parse(target), text, Motion);
+
+    public Task press(string keys) => bridge.Press(keys);
+
+    public Task hover(string target) => bridge.Hover(BrowserTarget.Parse(target), Motion);
+
+    public Task<string> getText(string target) => bridge.GetText(BrowserTarget.Parse(target));
+
+    public Task<string> getAttribute(string target, string name) => bridge.GetAttribute(BrowserTarget.Parse(target), name);
+
+    public Task<bool> exists(string target) => bridge.Exists(BrowserTarget.Parse(target));
+
+    public Task<BrowserElementInfo> waitFor(string target, int timeoutMs = 5000) =>
+        bridge.WaitFor(BrowserTarget.Parse(target), timeoutMs);
+
+    public Task scrollTo(string target) => bridge.ScrollTo(BrowserTarget.Parse(target));
+
+    public Task select(string target, string value) => bridge.Select(BrowserTarget.Parse(target), value);
+
+    public Task<BrowserElementInfo> find(string target) => bridge.Query(BrowserTarget.Parse(target));
+
+    public Task<BrowserSnapshot> snapshot() => bridge.Snapshot();
+
+    public Task<string> screenshot() => bridge.Screenshot();
+
+    public Task<string> evaluate(string expression) => bridge.Evaluate(expression);
+
+    #endregion
+}
+
 public sealed class ScriptGlobals
 {
     public required ScriptRequestApi request { get; init; }
@@ -2180,6 +2244,8 @@ public sealed class ScriptGlobals
     public required dynamic stash { get; init; }
 
     public required SnapshotApi snapshot { get; init; }
+
+    public required ScriptBrowserApi browser { get; init; }
 }
 
 public static class CollectionApi

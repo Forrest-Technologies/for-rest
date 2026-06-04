@@ -4,6 +4,7 @@
     <ProjectReference Include="..\ForRest.Shared\ForRest.Shared.csproj" />
     <ProjectReference Include="..\ForRest.Models\ForRest.Models.csproj" />
     <ProjectReference Include="..\ForRest.Domain\ForRest.Domain.csproj" />
+    <ProjectReference Include="..\ForRest.Browser\ForRest.Browser.csproj" />
   </ItemGroup>
 
   <ItemGroup>

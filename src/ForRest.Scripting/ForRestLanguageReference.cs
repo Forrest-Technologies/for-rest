@@ -1285,6 +1285,26 @@ internal static class ForRestLanguageReference
             "payloads.${1|sqli,xss,path_traversal,command_injection,ssti,open_redirect,xxe,nosqli,crlf_injection,ssrf|}",
             true),
         new(
+            "browser",
+            "browser",
+            "Browser",
+            "Drive an embedded browser page for UI testing and automation: eyes and hands without an LLM at replay time.",
+            "`browser` is a script-facing helper that drives the embedded For-Rest browser pane. The agent can explore a site and then *record* the actions as a script, which replays deterministically with no model in the loop. Targets are compact strings: `\"#id\"`, `\"css=.row\"`, `\"xpath=//a\"`, `\"text=Save\"`, `\"role=button:Save\"`, or `\"testid=submit\"`. Core actions: `await browser.navigate(url)`, `await browser.click(target)`, `await browser.type(target, text)`, `await browser.press(keys)`, `await browser.hover(target)`, `await browser.scrollTo(target)`, `await browser.select(target, value)`. Reads: `await browser.getText(target)`, `await browser.getAttribute(target, name)`, `await browser.exists(target)`, `await browser.waitFor(target, timeoutMs)`, `await browser.find(target)` (returns stable selectors), `await browser.snapshot()` (interactive elements), `await browser.screenshot()` (base64 PNG), `await browser.evaluate(js)`. Tune cursor motion with `browser.MouseSteps` and `browser.MouseStepDelayMs`. Requires the desktop Browser pane to be open.",
+            """
+            # Log in, then verify the dashboard loaded
+            await browser.navigate("https://app.example.test/login")
+            await browser.type("#email", "{{user}}")
+            await browser.type("#password", "{{password}}")
+            await browser.click("role=button:Sign in")
+            await browser.waitFor("text=Dashboard", 8000)
+            expect await browser.exists("#welcome") == true "dashboard is visible"
+            """,
+            ["browser", "ui test", "ui testing", "automation", "click", "type", "navigate", "selenium", "playwright", "xpath", "css selector", "screenshot", "record", "replay", "end to end", "e2e"],
+            ["browser"],
+            "Value",
+            "browser.${1|navigate,click,type,press,hover,getText,getAttribute,exists,waitFor,scrollTo,select,find,snapshot,screenshot,evaluate|}",
+            true),
+        new(
             "fuzz-loop",
             "fuzz loop",
             "Security",
