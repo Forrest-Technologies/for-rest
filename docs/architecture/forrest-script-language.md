@@ -215,6 +215,54 @@ foreach index in range(0, 3) {
 
 `switch`, `case`, and `default` are not currently part of the flow compiler. Keep the docs honest about that gap until the compiler supports it.
 
+## Response and Error Handlers
+
+Two top-level handler blocks run around the main flow:
+
+- `on status <code> { ... }` runs after the main flow when the response status matches the code.
+- `on error { ... }` runs when the main flow throws an unhandled exception.
+
+```frs
+runtime trace_id = guid()
+
+on status 429 {
+  warn $"rate limited for {trace_id}"
+}
+
+on error {
+  error $"request {trace_id} failed"
+}
+```
+
+Handlers share the main flow's runtime variables and seeds. A value like `trace_id` declared as a `runtime` seed (or any known variable) is already in scope inside every handler — you reference it directly and must **not** redeclare it. Handlers can also declare their own local `let`/`runtime` values, which stay scoped to the handler block.
+
+## Security Payloads
+
+`payloads` is a built-in corpus of curated fuzzing wordlists for authorized security testing. Named categories are exposed as properties and there are helpers for dynamic lookups:
+
+- `payloads.sqli`, `payloads.xss`, `payloads.path_traversal`, `payloads.command_injection`, `payloads.ssti`, `payloads.open_redirect`, `payloads.xxe`, `payloads.nosqli`, `payloads.crlf_injection`, `payloads.ssrf`
+- `payloads.Category(name)` for a dynamic category lookup
+- `payloads.Combine("xss", "ssti", "custom-literal")` to merge categories (and extra literals) with duplicates removed
+- `payloads.Categories()` to list every available category name
+
+```frs
+foreach p in payloads.sqli {
+  request.url = $"https://api.example.test/search?q={p}"
+  let sent = request.send()
+  if sent.status >= 500 { warn $"possible sqli: {p}" }
+}
+```
+
+There is no dedicated `fuzz` block; the documented pattern is `foreach` over a payload category. Each element is a plain string, accessible positionally (`payloads.sqli[0]`) or through the collection helpers.
+
+## Working With Dynamic Values
+
+Flow variables, response members, and extracted values are all dynamic. A few practical rules keep scripts compiling:
+
+- Helper surfaces that take text — including `crypto.Md5/Sha1/Sha256` — coerce any dynamic value (string, number, bool, JSON scalar) to its stable text form, so `crypto.Sha256(trace_id)` works whether or not `trace_id` is typed as a string.
+- Collections (JSON arrays, ranges, `strings.Split(...)` results) support both positional indexing — `items[0]` — and the LINQ-like collection helpers such as `.first()`, `.last()`, and `.first(x => ...)`.
+- Use string interpolation (`$"...{value}..."`) to splice dynamic values into URLs, headers, and bodies.
+
 ## Request Sending
 
 `request.send()` updates the global `response` and also returns the latest response snapshot so the caller can keep a local handle to each send.
@@ -278,6 +326,12 @@ The runtime currently includes these helper surfaces:
 - `time`
 - `tests`
 - `console`
+- `payloads`
+- `workspace`
+- `snapshot`
+- `stash`
+
+Every helper surface above is a global that is always in scope inside flow code — you reference it directly (`crypto.Sha256(...)`, `payloads.sqli`) without importing or declaring it.
 
 Common patterns they already support:
 

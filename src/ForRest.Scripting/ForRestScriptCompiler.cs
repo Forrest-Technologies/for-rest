@@ -114,8 +114,9 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
         }
 
         var templateBoundVariableNames = CollectTemplateBoundVariableNames(urlTemplate ?? string.Empty, headers, queryParameters, body, auth);
-        var flowScript = ForRestFlowScriptCompiler.Compile(document.Flow, flowVariableNames, templateBoundVariableNames, diagnostics);
-        flowScript = WrapWithHandlers(flowScript, document.Handlers, flowVariableNames, templateBoundVariableNames, diagnostics);
+        var flowScript = document.Handlers.Count > 0
+            ? WrapWithHandlers(document.Flow, document.Handlers, flowVariableNames, templateBoundVariableNames, diagnostics)
+            : ForRestFlowScriptCompiler.Compile(document.Flow, flowVariableNames, templateBoundVariableNames, diagnostics);
 
         var request = new RequestDefinition
         {
@@ -620,32 +621,43 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
     }
 
     private static string WrapWithHandlers(
-        string flowScript,
+        string flowSource,
         List<ForRestScriptHandler> handlers,
         List<string> flowVariableNames,
         IReadOnlyCollection<string>? templateBoundVariableNames,
         List<ForRestScriptDiagnostic> diagnostics)
     {
-        if (handlers.Count == 0 || string.IsNullOrWhiteSpace(flowScript))
+        if (handlers.Count == 0)
         {
-            return flowScript;
+            return ForRestFlowScriptCompiler.Compile(flowSource, flowVariableNames, templateBoundVariableNames, diagnostics);
         }
-
-        var builder = new StringBuilder();
 
         var onErrorHandlers = handlers.Where(static handler => handler.Kind == ForRestScriptHandlerKind.OnError).ToList();
         var onStatusHandlers = handlers.Where(static handler => handler.Kind == ForRestScriptHandlerKind.OnStatus).ToList();
+
+        // The main flow, the on-status if-blocks, and the on-error catch block are all
+        // emitted into the same generated method. Declare the runtime preamble (__flow and
+        // the known-variable locals) exactly once at method scope so every section can
+        // share it. The main flow and each handler body are then compiled as preamble-free
+        // fragments — re-declaring __flow or a known variable inside a nested if-block or
+        // sibling catch-block would otherwise be a CS0128/CS0136 compile error.
+        var builder = new StringBuilder();
+        builder.AppendLine(ForRestFlowScriptCompiler.BuildRuntimePreamble(flowVariableNames));
 
         if (onErrorHandlers.Count > 0)
         {
             builder.AppendLine("try {");
         }
 
-        builder.AppendLine(flowScript);
+        var mainFlow = ForRestFlowScriptCompiler.Compile(flowSource, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false);
+        if (!string.IsNullOrWhiteSpace(mainFlow))
+        {
+            builder.AppendLine(mainFlow);
+        }
 
         foreach (var statusHandler in onStatusHandlers)
         {
-            var handlerScript = ForRestFlowScriptCompiler.Compile(statusHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics);
+            var handlerScript = ForRestFlowScriptCompiler.Compile(statusHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false);
             builder.Append("if (response.Status == ");
             builder.Append(statusHandler.StatusCode);
             builder.AppendLine(") {");
@@ -659,7 +671,7 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             builder.AppendLine("var __errorMessage = __onErrorEx.Message;");
             foreach (var errorHandler in onErrorHandlers)
             {
-                var handlerScript = ForRestFlowScriptCompiler.Compile(errorHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics);
+                var handlerScript = ForRestFlowScriptCompiler.Compile(errorHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false);
                 builder.AppendLine(handlerScript);
             }
 

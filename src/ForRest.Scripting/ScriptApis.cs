@@ -1708,27 +1708,30 @@ public sealed class EncodingApi
 
 public sealed class CryptoApi
 {
-    public string Md5(string value)
+    public string Md5(object? value)
     {
         using var algorithm = System.Security.Cryptography.MD5.Create();
         return Hash(value, algorithm);
     }
 
-    public string Sha1(string value)
+    public string Sha1(object? value)
     {
         using var algorithm = SHA1.Create();
         return Hash(value, algorithm);
     }
 
-    public string Sha256(string value)
+    public string Sha256(object? value)
     {
         using var algorithm = SHA256.Create();
         return Hash(value, algorithm);
     }
 
-    private static string Hash(string value, HashAlgorithm algorithm)
+    private static string Hash(object? value, HashAlgorithm algorithm)
     {
-        byte[] input = Encoding.UTF8.GetBytes(value ?? string.Empty);
+        // Flow variables arrive as dynamic values (strings, numbers, bools, JSON nodes),
+        // so coerce through the shared formatter instead of demanding a compile-time string.
+        // This keeps crypto.Sha256(trace_id) working when trace_id is not typed as string.
+        byte[] input = Encoding.UTF8.GetBytes(ConvertApi.FormatValue(value));
         byte[] hash = algorithm.ComputeHash(input);
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
