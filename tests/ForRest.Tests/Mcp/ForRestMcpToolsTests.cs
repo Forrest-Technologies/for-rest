@@ -1,5 +1,8 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using ForRest.Mcp;
 using ForRest.Services.AI;
 
@@ -8,6 +11,8 @@ namespace ForRest.Tests.Mcp;
 [TestClass]
 public sealed class ForRestMcpToolsTests
 {
+    #region Passive tools
+
     [TestMethod]
     public void Get_instructions_returns_markdown_language_reference()
     {
@@ -81,59 +86,108 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
-    public void Get_active_request_reports_missing_host_when_no_bridge_registered()
+    public void Build_attack_script_emits_runnable_query_fuzz_harness()
     {
         ForRestMcpTools tools = CreateTools(host: null);
 
-        string result = tools.get_active_request();
+        string script = tools.build_attack_script("https://target.test/items", "sqli");
 
-        StringAssert.Contains(result, "No desktop canvas host");
+        StringAssert.Contains(script, "request {");
+        StringAssert.Contains(script, "flow {");
+        StringAssert.Contains(script, "foreach payload in payloads.Category(\"sqli\")");
+        StringAssert.Contains(script, "request.send()");
+        StringAssert.Contains(script, "stash.Commit()");
+        StringAssert.Contains(script, "?q=");
     }
 
     [TestMethod]
-    public void Get_active_request_returns_json_when_host_supplies_snapshot()
+    public void Build_attack_script_supports_body_injection_with_post_default()
     {
-        ForRestMcpDocumentSnapshot snapshot = new(
-            DocumentId: "/requests/demo",
-            Title: "Demo",
-            Language: "forrest",
-            SourceText: "name \"Demo\"\nmethod GET\nurl \"https://example.test\"\n",
-            WorkspaceName: "Demo Workspace");
+        ForRestMcpTools tools = CreateTools(host: null);
 
-        ForRestMcpTools tools = CreateTools(host: new FakeHost(snapshot));
+        string script = tools.build_attack_script("https://target.test/items", "xss", injection: "body");
 
-        string json = tools.get_active_request();
+        StringAssert.Contains(script, "method = POST");
+        StringAssert.Contains(script, "request.body = json.Stringify(new { value = payload })");
+    }
+
+    [TestMethod]
+    public void Build_attack_script_rejects_unknown_category()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string result = tools.build_attack_script("https://target.test", "not-a-category");
+
+        StringAssert.Contains(result, "No payloads");
+    }
+
+    #endregion
+
+    #region Host-less degradation
+
+    [TestMethod]
+    public async Task Workbench_tools_report_missing_host_without_a_bridge()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        StringAssert.Contains(await tools.list_workspaces(), "No desktop canvas host");
+        StringAssert.Contains(await tools.get_active_request(), "No desktop canvas host");
+        StringAssert.Contains(await tools.create_workspace("Demo"), "No desktop canvas host");
+        StringAssert.Contains(await tools.execute_script("ws", "name \"x\""), "No desktop canvas host");
+    }
+
+    #endregion
+
+    #region Active document & workspace listing
+
+    [TestMethod]
+    public async Task Get_active_request_returns_json_and_redacts_secrets()
+    {
+        FakeHost host = new()
+        {
+            ActiveDocument = new ForRestMcpDocumentSnapshot(
+                DocumentId: "/requests/demo",
+                Title: "Demo",
+                Language: "forrest",
+                SourceText: "secret token = \"super-secret\"\nname \"Demo\"\n",
+                WorkspaceName: "Demo Workspace"),
+        };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.get_active_request();
 
         using JsonDocument parsed = JsonDocument.Parse(json);
         Assert.AreEqual("/requests/demo", parsed.RootElement.GetProperty("id").GetString());
-        Assert.AreEqual("Demo", parsed.RootElement.GetProperty("title").GetString());
         Assert.AreEqual("Demo Workspace", parsed.RootElement.GetProperty("workspace").GetString());
+        string source = parsed.RootElement.GetProperty("source").GetString()!;
+        StringAssert.Contains(source, "secret token = \"***\"");
+        Assert.IsFalse(source.Contains("super-secret", System.StringComparison.Ordinal));
     }
 
     [TestMethod]
-    public void Replace_active_request_rejects_empty_payload()
+    public async Task Replace_active_request_rejects_empty_payload()
     {
-        ForRestMcpTools tools = CreateTools(host: new FakeHost());
+        ForRestMcpTools tools = CreateTools(new FakeHost());
 
-        string result = tools.replace_active_request("");
+        string result = await tools.replace_active_request("");
 
         StringAssert.Contains(result, "must not be empty");
     }
 
     [TestMethod]
-    public void Replace_active_request_applies_host_update_on_success()
+    public async Task Replace_active_request_forwards_to_host()
     {
         FakeHost host = new();
         ForRestMcpTools tools = CreateTools(host);
 
-        string result = tools.replace_active_request("name \"New\"");
+        string result = await tools.replace_active_request("name \"New\"");
 
         StringAssert.Contains(result, "replaced");
         Assert.AreEqual("name \"New\"", host.LastReplacement);
     }
 
     [TestMethod]
-    public void List_workspaces_json_describes_host_workspaces()
+    public async Task List_workspaces_json_describes_host_workspaces()
     {
         FakeHost host = new()
         {
@@ -142,23 +196,195 @@ public sealed class ForRestMcpToolsTests
                 new ForRestMcpWorkspaceSummary(
                     Id: "ws-1",
                     Name: "Demo",
-                    Scripts: new List<ForRestMcpScriptSummary>
-                    {
-                        new("Get Users", "GET", "https://example.test/users"),
-                    }),
+                    Scripts: [new ForRestMcpScriptSummary("Get Users", "GET", "https://example.test/users", "/requests/get-users")]),
             ],
         };
-
         ForRestMcpTools tools = CreateTools(host);
 
-        string json = tools.list_workspaces();
+        string json = await tools.list_workspaces();
 
         using JsonDocument parsed = JsonDocument.Parse(json);
         JsonElement workspace = parsed.RootElement[0];
         Assert.AreEqual("ws-1", workspace.GetProperty("id").GetString());
         Assert.AreEqual("Demo", workspace.GetProperty("name").GetString());
-        Assert.AreEqual("Get Users", workspace.GetProperty("scripts")[0].GetProperty("name").GetString());
+        JsonElement script = workspace.GetProperty("scripts")[0];
+        Assert.AreEqual("Get Users", script.GetProperty("name").GetString());
+        Assert.AreEqual("/requests/get-users", script.GetProperty("location").GetString());
     }
+
+    #endregion
+
+    #region CRUD passthrough
+
+    [TestMethod]
+    public async Task Create_workspace_reports_new_id()
+    {
+        FakeHost host = new();
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.create_workspace("Fuzzing");
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.IsTrue(parsed.RootElement.GetProperty("succeeded").GetBoolean());
+        Assert.AreEqual("new-id", parsed.RootElement.GetProperty("id").GetString());
+        Assert.AreEqual("Fuzzing", host.LastCreatedWorkspaceName);
+    }
+
+    [TestMethod]
+    public async Task Create_script_rejects_empty_source_before_touching_host()
+    {
+        FakeHost host = new();
+        ForRestMcpTools tools = CreateTools(host);
+
+        string result = await tools.create_script("ws", "Probe", "");
+
+        StringAssert.Contains(result, "must not be empty");
+        Assert.IsNull(host.LastCreatedScriptName);
+    }
+
+    #endregion
+
+    #region Execution & results
+
+    [TestMethod]
+    public async Task Execute_script_maps_response_tests_logs_and_stash()
+    {
+        FakeHost host = new()
+        {
+            Execution = new ForRestMcpExecutionResult(
+                Succeeded: true,
+                State: "Completed",
+                Diagnostics: [],
+                RunId: "run-1",
+                Response: new ForRestMcpResponseView(
+                    Status: 200,
+                    ReasonPhrase: "OK",
+                    ContentType: "application/json",
+                    SizeBytes: 12,
+                    DurationMilliseconds: 42,
+                    Headers: [new ForRestMcpHeaderView("Content-Type", "application/json")],
+                    Cookies: [],
+                    Body: "{\"ok\":true}",
+                    RawResponse: "HTTP/1.1 200 OK",
+                    Label: null),
+                Tests: [new ForRestMcpTestView("status is ok", "Passed", "")],
+                Logs: [new ForRestMcpLogView("Info", "done", System.DateTimeOffset.UtcNow)],
+                Stash: new ForRestMcpStashView(["Status"], [new Dictionary<string, string> { ["Status"] = "200" }]),
+                ErrorMessage: null),
+        };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.execute_script("ws", "name \"x\"\nmethod GET\nurl \"https://x.test\"");
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.IsTrue(parsed.RootElement.GetProperty("succeeded").GetBoolean());
+        Assert.AreEqual("run-1", parsed.RootElement.GetProperty("runId").GetString());
+        Assert.AreEqual(200, parsed.RootElement.GetProperty("response").GetProperty("status").GetInt32());
+        Assert.AreEqual(1, parsed.RootElement.GetProperty("tests").GetArrayLength());
+        Assert.AreEqual("Status", parsed.RootElement.GetProperty("stash").GetProperty("columns")[0].GetString());
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_finds_matching_lines()
+    {
+        FakeHost host = new()
+        {
+            Run = SampleRun("alpha\nBETA token=abc\ngamma"),
+        };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.grep_run_response("ws", "run-1", "token", ignore_case: true);
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(1, parsed.RootElement.GetProperty("totalMatches").GetInt32());
+        JsonElement match = parsed.RootElement.GetProperty("matches")[0];
+        Assert.AreEqual(2, match.GetProperty("line").GetInt32());
+        StringAssert.Contains(match.GetProperty("text").GetString(), "token=abc");
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_reports_invalid_regex()
+    {
+        FakeHost host = new() { Run = SampleRun("anything") };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string result = await tools.grep_run_response("ws", "run-1", "[", is_regex: true);
+
+        StringAssert.Contains(result, "Invalid regular expression");
+    }
+
+    [TestMethod]
+    public async Task Get_run_response_truncates_body_when_requested()
+    {
+        FakeHost host = new() { Run = SampleRun("0123456789abcdef") };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.get_run_response("ws", "run-1", max_body_chars: 4);
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("0123", parsed.RootElement.GetProperty("body").GetString());
+        Assert.IsTrue(parsed.RootElement.GetProperty("bodyTruncated").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task Get_run_logs_returns_tests_and_console_entries()
+    {
+        FakeHost host = new() { Run = SampleRun("body") };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.get_run_logs("ws", "run-1");
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("Completed", parsed.RootElement.GetProperty("state").GetString());
+        Assert.AreEqual(1, parsed.RootElement.GetProperty("logs").GetArrayLength());
+    }
+
+    [TestMethod]
+    public async Task Get_run_reports_missing_run()
+    {
+        ForRestMcpTools tools = CreateTools(new FakeHost());
+
+        string result = await tools.get_run("ws", "missing");
+
+        StringAssert.Contains(result, "No run found");
+    }
+
+    #endregion
+
+    #region Settings
+
+    [TestMethod]
+    public void Get_server_settings_never_returns_the_token()
+    {
+        FakeHost host = new()
+        {
+            Settings = new ForRestMcpServerSettingsView(true, "127.0.0.1", 7341, HasAuthToken: true, 4, "http://127.0.0.1:7341/"),
+        };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = tools.get_server_settings();
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.IsTrue(parsed.RootElement.GetProperty("hasAuthToken").GetBoolean());
+        // The boolean flag is exposed, but the raw token value/field never is.
+        List<string> propertyNames = [.. parsed.RootElement.EnumerateObject().Select(static property => property.Name)];
+        CollectionAssert.DoesNotContain(propertyNames, "authToken");
+        CollectionAssert.DoesNotContain(propertyNames, "token");
+    }
+
+    [TestMethod]
+    public void Update_settings_text_rejects_empty_input()
+    {
+        ForRestMcpTools tools = CreateTools(new FakeHost());
+
+        string result = tools.update_settings_text("   ");
+
+        StringAssert.Contains(result, "must not be empty");
+    }
+
+    #endregion
+
+    #region Helpers
 
     private static ForRestMcpTools CreateTools(IForRestMcpHost? host)
     {
@@ -167,31 +393,130 @@ public sealed class ForRestMcpToolsTests
         return new ForRestMcpTools(catalog, search, () => host);
     }
 
+    private static ForRestMcpRunDetail SampleRun(string body)
+    {
+        ForRestMcpResponseView response = new(
+            Status: 200,
+            ReasonPhrase: "OK",
+            ContentType: "text/plain",
+            SizeBytes: body.Length,
+            DurationMilliseconds: 5,
+            Headers: [],
+            Cookies: [],
+            Body: body,
+            RawResponse: "HTTP/1.1 200 OK\n\n" + body,
+            Label: null);
+
+        ForRestMcpRunSummary summary = new(
+            Id: "run-1",
+            RequestName: "Sample",
+            State: "Completed",
+            Iteration: 1,
+            StartedUtc: System.DateTimeOffset.UtcNow,
+            CompletedUtc: System.DateTimeOffset.UtcNow,
+            TargetUri: "https://x.test",
+            Status: 200,
+            DurationMilliseconds: 5,
+            ErrorMessage: "");
+
+        return new ForRestMcpRunDetail(
+            Summary: summary,
+            Response: response,
+            Responses: [response],
+            Tests: [new ForRestMcpTestView("ok", "Passed", "")],
+            Logs: [new ForRestMcpLogView("Info", "log line", System.DateTimeOffset.UtcNow)],
+            Stash: null,
+            RawRequest: "GET https://x.test");
+    }
+
     private sealed class FakeHost : IForRestMcpHost
     {
-        public ForRestMcpDocumentSnapshot? Snapshot { get; set; }
+        public ForRestMcpDocumentSnapshot? ActiveDocument { get; set; }
 
         public List<ForRestMcpWorkspaceSummary> Workspaces { get; set; } = [];
 
-        public string? LastReplacement { get; set; }
+        public ForRestMcpExecutionResult? Execution { get; set; }
 
-        public FakeHost()
-        {
-        }
+        public ForRestMcpRunDetail? Run { get; set; }
 
-        public FakeHost(ForRestMcpDocumentSnapshot snapshot)
-        {
-            Snapshot = snapshot;
-        }
+        public ForRestMcpServerSettingsView Settings { get; set; } =
+            new(false, "127.0.0.1", 7341, false, 4, "http://127.0.0.1:7341/");
 
-        public ForRestMcpDocumentSnapshot? GetActiveDocument() => Snapshot;
+        public string? LastReplacement { get; private set; }
 
-        public ForRestMcpUpdateResult ReplaceActiveDocument(string newSource)
+        public string? LastCreatedWorkspaceName { get; private set; }
+
+        public string? LastCreatedScriptName { get; private set; }
+
+        public Task<ForRestMcpDocumentSnapshot?> GetActiveDocument(CancellationToken cancellationToken)
+            => Task.FromResult(ActiveDocument);
+
+        public Task<ForRestMcpUpdateResult> ReplaceActiveDocument(string newSource, CancellationToken cancellationToken)
         {
             LastReplacement = newSource;
-            return ForRestMcpUpdateResult.Success();
+            return Task.FromResult(ForRestMcpUpdateResult.Success());
         }
 
-        public IReadOnlyList<ForRestMcpWorkspaceSummary> ListWorkspaces() => Workspaces;
+        public Task<ForRestMcpMutationResult> SetActiveDocument(string workspaceId, string location, CancellationToken cancellationToken)
+            => Task.FromResult(ForRestMcpMutationResult.Ok("selected", location));
+
+        public Task<IReadOnlyList<ForRestMcpWorkspaceSummary>> ListWorkspaces(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<ForRestMcpWorkspaceSummary>>(Workspaces);
+
+        public Task<ForRestMcpWorkspaceSummary?> GetWorkspace(string workspaceId, CancellationToken cancellationToken)
+            => Task.FromResult(Workspaces.FirstOrDefault(workspace => workspace.Id == workspaceId));
+
+        public Task<ForRestMcpMutationResult> CreateWorkspace(string name, CancellationToken cancellationToken)
+        {
+            LastCreatedWorkspaceName = name;
+            return Task.FromResult(ForRestMcpMutationResult.Ok("created", "new-id"));
+        }
+
+        public Task<ForRestMcpMutationResult> RenameWorkspace(string workspaceId, string newName, CancellationToken cancellationToken)
+            => Task.FromResult(ForRestMcpMutationResult.Ok("renamed", workspaceId));
+
+        public Task<ForRestMcpMutationResult> DeleteWorkspace(string workspaceId, CancellationToken cancellationToken)
+            => Task.FromResult(ForRestMcpMutationResult.Ok("deleted"));
+
+        public Task<ForRestMcpScriptDetail?> GetScript(string workspaceId, string location, CancellationToken cancellationToken)
+            => Task.FromResult<ForRestMcpScriptDetail?>(null);
+
+        public Task<ForRestMcpMutationResult> CreateScript(string workspaceId, string name, string source, CancellationToken cancellationToken)
+        {
+            LastCreatedScriptName = name;
+            return Task.FromResult(ForRestMcpMutationResult.Ok("created", "/requests/probe"));
+        }
+
+        public Task<ForRestMcpMutationResult> UpdateScript(string workspaceId, string location, string newSource, CancellationToken cancellationToken)
+            => Task.FromResult(ForRestMcpMutationResult.Ok("updated", location));
+
+        public Task<ForRestMcpMutationResult> RenameScript(string workspaceId, string location, string newName, CancellationToken cancellationToken)
+            => Task.FromResult(ForRestMcpMutationResult.Ok("renamed", location));
+
+        public Task<ForRestMcpMutationResult> DeleteScript(string workspaceId, string location, CancellationToken cancellationToken)
+            => Task.FromResult(ForRestMcpMutationResult.Ok("deleted"));
+
+        public ForRestMcpCompileResult CompileScript(string workspaceId, string source)
+            => new(true, [], "GET", "https://x.test", "Sample");
+
+        public Task<ForRestMcpExecutionResult> ExecuteScript(string workspaceId, string source, string? requestName, CancellationToken cancellationToken)
+            => Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));
+
+        public Task<ForRestMcpExecutionResult> ExecuteStoredScript(string workspaceId, string location, CancellationToken cancellationToken)
+            => Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));
+
+        public Task<IReadOnlyList<ForRestMcpRunSummary>> ListRuns(string workspaceId, int max, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<ForRestMcpRunSummary>>(Run is null ? [] : [Run.Summary]);
+
+        public Task<ForRestMcpRunDetail?> GetRun(string workspaceId, string runId, CancellationToken cancellationToken)
+            => Task.FromResult(Run is not null && Run.Summary.Id == runId ? Run : null);
+
+        public ForRestMcpServerSettingsView GetServerSettings() => Settings;
+
+        public string GetSettingsText() => "[mcp]\nenabled = true\n";
+
+        public ForRestMcpMutationResult UpdateSettingsText(string rawToml) => ForRestMcpMutationResult.Ok("saved");
     }
+
+    #endregion
 }
