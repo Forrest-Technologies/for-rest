@@ -187,35 +187,29 @@ jobs:
             -KeepPublicApi `
             -MappingOutputPath $mappingPath
 
-      - name: Package build output
+      - name: Verify publish output
         shell: pwsh
         run: |
-          # Only ship the .zip. The bare ForRest.Maui.exe used to be uploaded
-          # as a "standalone exe" alongside the zip, but a MAUI/WinUI apphost
-          # binary cannot run without the rest of its publish folder, so the
-          # standalone exe artifact never worked and only confused users.
-          $artifactBase = "for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}"
+          # Do NOT pre-zip the publish folder here. actions/upload-artifact
+          # always compresses whatever it is given into the downloadable
+          # artifact, so handing it a .zip produces a zip-inside-a-zip. When
+          # users extract that nested archive, Windows Explorer reports the
+          # inner zip as "invalid or password protected". Uploading the raw
+          # publish folder instead lets GitHub produce exactly one zip. The
+          # bare ForRest.Maui.exe is intentionally shipped inside that folder
+          # (a MAUI/WinUI apphost cannot run without its sibling files), not
+          # as a standalone asset.
           $buildDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
-          $releaseDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\release\${{ matrix.arch }}"
-          New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
-
           $exePath = Join-Path $buildDirectory 'ForRest.Maui.exe'
           if (-not (Test-Path $exePath)) {
             throw "Expected executable was not found at $exePath."
           }
 
-          $zipPath = Join-Path $releaseDirectory "$artifactBase.zip"
-          if (Test-Path $zipPath) {
-            Remove-Item $zipPath -Force
-          }
-
-          Compress-Archive -Path (Join-Path $buildDirectory '*') -DestinationPath $zipPath
-
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}
-          path: artifacts/release/${{ matrix.arch }}/*
+          path: artifacts/ci/${{ matrix.arch }}
           if-no-files-found: error
           retention-days: 3
 
@@ -249,6 +243,26 @@ jobs:
         with:
           path: artifacts/downloaded
 
+      - name: Assemble release assets
+        shell: pwsh
+        run: |
+          # download-artifact unwraps each artifact into its own subfolder
+          # named after the artifact, leaving the raw publish files. Compress
+          # each subfolder into a single, properly named .zip so every release
+          # asset is exactly one zip deep (no nested archives) and the app
+          # folders are not attached as dozens of loose DLLs.
+          $downloaded = Join-Path $env:GITHUB_WORKSPACE 'artifacts\downloaded'
+          $assetsDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifacts\release-assets'
+          New-Item -ItemType Directory -Force -Path $assetsDirectory | Out-Null
+
+          Get-ChildItem -Path $downloaded -Directory | ForEach-Object {
+            $zipPath = Join-Path $assetsDirectory "$($_.Name).zip"
+            if (Test-Path $zipPath) {
+              Remove-Item $zipPath -Force
+            }
+            Compress-Archive -Path (Join-Path $_.FullName '*') -DestinationPath $zipPath
+          }
+
       - name: Create or update GitHub release
         shell: pwsh
         env:
@@ -256,7 +270,7 @@ jobs:
         run: |
           $tag = '${{ needs.prepare.outputs.release_tag }}'
           $title = '${{ needs.prepare.outputs.release_title }}'
-          $assets = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'artifacts\downloaded') -File -Recurse | Select-Object -ExpandProperty FullName
+          $assets = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'artifacts\release-assets') -File | Select-Object -ExpandProperty FullName
           if (-not $assets) {
             throw 'No release assets were downloaded.'
           }

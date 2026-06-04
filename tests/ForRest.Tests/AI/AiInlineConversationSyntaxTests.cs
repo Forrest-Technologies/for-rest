@@ -101,6 +101,69 @@ public sealed class AiInlineConversationSyntaxTests
     }
 
     [TestMethod]
+    public void ResolveActionablePrompt_resolves_pending_prompt_when_cursor_is_on_blank_line_beneath_it()
+    {
+        // Mirrors the Android Sora editor: typing `## question` then pressing Enter lands
+        // the caret on a plain blank line (no `## ` continuation), with request flow below.
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## do you work??",
+                "",
+                "",
+                "foreach attempt in [0..1] {",
+                "}",
+            ]);
+
+        AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 4);
+
+        Assert.IsNotNull(prompt);
+        Assert.AreEqual("do you work??", prompt.PromptText);
+        Assert.AreEqual(2, prompt.LineNumber);
+    }
+
+    [TestMethod]
+    public void ResolveActionablePrompt_ignores_answered_prompt_when_cursor_is_on_blank_line_beneath_it()
+    {
+        // An already-answered prompt must not hijack a normal send: the nearest non-blank
+        // line above the caret is the `#>` response, not the prompt.
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## do you work??",
+                "#> yes, I do",
+                "",
+                "foreach attempt in [0..1] {",
+                "}",
+            ]);
+
+        AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 4);
+
+        Assert.IsNull(prompt);
+    }
+
+    [TestMethod]
+    public void ResolveActionablePrompt_ignores_blank_cursor_when_nearest_line_above_is_flow_code()
+    {
+        // Sitting on a blank line under request flow (not under a pending prompt) must
+        // execute the request, not route to the AI.
+        string source = string.Join(
+            "\n",
+            [
+                "## do you work??",
+                "#> yes, I do",
+                "method GET",
+                "",
+            ]);
+
+        AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 4);
+
+        Assert.IsNull(prompt);
+    }
+
+    [TestMethod]
     public void RenderResponseBlock_preserves_multiline_structure()
     {
         string rendered = AiInlineConversationFormatter.RenderResponseBlock("first\n\nthird", "\n");

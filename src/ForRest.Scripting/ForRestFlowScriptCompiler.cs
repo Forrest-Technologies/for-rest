@@ -100,21 +100,15 @@ internal static class ForRestFlowScriptCompiler
         string flowSource,
         IEnumerable<string> knownVariableNames,
         IEnumerable<string>? templateBoundVariableNames,
-        List<ForRestScriptDiagnostic> diagnostics)
+        List<ForRestScriptDiagnostic> diagnostics,
+        bool emitRuntimePreamble = true)
     {
         if (string.IsNullOrWhiteSpace(flowSource))
         {
             return string.Empty;
         }
 
-        var builder = new StringBuilder();
-        builder.AppendLine("var __flow = new ForRest.Scripting.ForRestFlowRuntime(variables);");
-
-        var knownIdentifiers = knownVariableNames
-            .Where(IsFlowIdentifier)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static item => item, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var knownIdentifiers = NormalizeIdentifiers(knownVariableNames);
         HashSet<string> templateBoundIdentifiers =
         [
             .. (templateBoundVariableNames ?? [])
@@ -122,6 +116,50 @@ internal static class ForRestFlowScriptCompiler
                 .Distinct(StringComparer.OrdinalIgnoreCase),
         ];
 
+        var builder = new StringBuilder();
+
+        // The runtime preamble declares __flow and lifts every known variable into a
+        // dynamic local. It must be emitted exactly once per generated C# scope. Handler
+        // fragments (on status / on error) are spliced into a scope that already carries
+        // the preamble, so they opt out via emitRuntimePreamble: false to avoid
+        // redeclaring __flow and the known variables (which would be a CS0128/CS0136).
+        if (emitRuntimePreamble)
+        {
+            AppendRuntimePreamble(builder, knownIdentifiers);
+        }
+
+        var lines = Normalize(flowSource).Split('\n');
+        var index = 0;
+        var tempCounter = 0;
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(knownIdentifiers, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: false);
+        return builder.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Builds the standalone runtime preamble (the <c>__flow</c> runtime plus a dynamic
+    /// local for every known variable). Use this when a generated scope needs the
+    /// preamble but the flow body itself is compiled with <c>emitRuntimePreamble: false</c>
+    /// (for example, the catch block that hosts on-error handlers).
+    /// </summary>
+    public static string BuildRuntimePreamble(IEnumerable<string> knownVariableNames)
+    {
+        var builder = new StringBuilder();
+        AppendRuntimePreamble(builder, NormalizeIdentifiers(knownVariableNames));
+        return builder.ToString();
+    }
+
+    private static List<string> NormalizeIdentifiers(IEnumerable<string> identifiers)
+    {
+        return identifiers
+            .Where(IsFlowIdentifier)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static item => item, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AppendRuntimePreamble(StringBuilder builder, IReadOnlyList<string> knownIdentifiers)
+    {
+        builder.AppendLine("var __flow = new ForRest.Scripting.ForRestFlowRuntime(variables);");
         foreach (var identifier in knownIdentifiers)
         {
             builder.Append("dynamic ");
@@ -130,12 +168,6 @@ internal static class ForRestFlowScriptCompiler
             builder.Append(RenderString(identifier));
             builder.AppendLine(");");
         }
-
-        var lines = Normalize(flowSource).Split('\n');
-        var index = 0;
-        var tempCounter = 0;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(knownIdentifiers, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: false);
-        return builder.ToString().Trim();
     }
 
     private static void CompileBlock(
