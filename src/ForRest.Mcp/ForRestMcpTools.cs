@@ -790,6 +790,18 @@ public sealed class ForRestMcpTools
 
     #endregion
 
+    #region App surface
+
+    [Description("Focuses a pane/tab in the running For-Rest desktop app so the user looks at it before you respond — making the experience feel seamless (e.g. flip to the live browser, or show the response after a run). Center targets: 'browser', 'request'. Inspector targets: 'response', 'requests', 'stash', 'headers', 'trace', 'raw', 'debug'. To open a specific document instead, use set_active_request. Requires the desktop app to be running.")]
+    public Task<string> show_in_app(
+        [Description("Which pane/tab to focus: browser, request, response, requests, stash, headers, trace, raw, or debug.")] string target,
+        [Description("Reserved for future targets; leave empty.")] string id = "")
+    {
+        return WithHostAsync(async host => Describe(await host.ShowInApp(target, string.IsNullOrWhiteSpace(id) ? null : id, CancellationToken.None)));
+    }
+
+    #endregion
+
     #region Settings
 
     [Description("Returns the current For-Rest MCP server settings (enabled, bind address, port, whether an auth token is set, max concurrent sessions, and the active endpoint). The token value itself is never returned.")]

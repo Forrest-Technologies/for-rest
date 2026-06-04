@@ -9,24 +9,60 @@ public sealed class CdpClient(ICdpTransport transport)
 {
     #region Private Fields
 
+    private const int NavigationTimeoutSeconds = 30;
+
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     #endregion
 
     #region Public Methods
 
-    /// <summary>Enables the protocol domains the engine relies on. Safe to call repeatedly.</summary>
+    /// <summary>Enables the protocol domains the engine relies on and subscribes to load events. Safe to call repeatedly.</summary>
     public async Task EnableDomains(CancellationToken cancellationToken = default)
     {
         await transport.Send("Page.enable", "{}", cancellationToken);
         await transport.Send("DOM.enable", "{}", cancellationToken);
         await transport.Send("Runtime.enable", "{}", cancellationToken);
+        transport.Subscribe("Page.loadEventFired");
+        transport.Subscribe("Page.frameStoppedLoading");
     }
 
-    public Task Navigate(string url, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Navigates the page and waits for it to finish loading, so subsequent reads (snapshot/query) see
+    /// the real DOM rather than the previous/blank page. Never hangs: it returns after the load event
+    /// or a bounded timeout, and honors cancellation.
+    /// </summary>
+    public async Task Navigate(string url, CancellationToken cancellationToken = default)
     {
-        JsonObject parameters = new() { ["url"] = url };
-        return transport.Send("Page.navigate", parameters.ToJsonString(), cancellationToken);
+        TaskCompletionSource loaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnEvent(object? sender, CdpEvent cdpEvent)
+        {
+            if (cdpEvent.Method is "Page.loadEventFired" or "Page.frameStoppedLoading")
+            {
+                loaded.TrySetResult();
+            }
+        }
+
+        transport.EventReceived += OnEvent;
+        try
+        {
+            JsonObject parameters = new() { ["url"] = url };
+            await transport.Send("Page.navigate", parameters.ToJsonString(), cancellationToken);
+
+            try
+            {
+                await loaded.Task.WaitAsync(TimeSpan.FromSeconds(NavigationTimeoutSeconds), cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                // The page did not signal load within the budget; proceed so callers are never stuck.
+            }
+        }
+        finally
+        {
+            transport.EventReceived -= OnEvent;
+        }
     }
 
     /// <summary>Evaluates a JavaScript expression in the page and returns the result value as raw JSON (or null).</summary>

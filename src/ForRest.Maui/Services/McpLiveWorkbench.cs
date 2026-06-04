@@ -69,6 +69,9 @@ public interface IMcpWorkbenchBridge
     Task<McpWorkbenchResult> SetActiveDocument(string workspaceId, string location);
 
     Task<McpWorkbenchResult> ReplaceActiveDocument(string newSource);
+
+    /// <summary>Brings a tab, document, run, or workspace into view so the user looks at it.</summary>
+    Task<McpWorkbenchResult> ShowInApp(string target, string? id);
 }
 
 /// <summary>

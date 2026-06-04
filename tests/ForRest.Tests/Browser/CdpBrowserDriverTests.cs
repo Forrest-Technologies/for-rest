@@ -8,6 +8,20 @@ namespace ForRest.Tests.Browser;
 public sealed class CdpBrowserDriverTests
 {
     [TestMethod]
+    public async Task Navigate_posts_page_navigate_and_waits_for_load()
+    {
+        FakeCdpTransport transport = new();
+        CdpBrowserDriver driver = new(new CdpClient(transport));
+
+        // FakeCdpTransport raises Page.frameStoppedLoading on navigate, so this completes promptly.
+        await driver.Navigate("https://example.test/");
+
+        (string method, string parameters) = transport.Calls.Single(call => call.Method == "Page.navigate");
+        Assert.AreEqual("Page.navigate", method);
+        StringAssert.Contains(parameters, "https://example.test/");
+    }
+
+    [TestMethod]
     public async Task Click_locates_then_moves_and_presses()
     {
         FakeCdpTransport transport = new()

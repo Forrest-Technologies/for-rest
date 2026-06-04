@@ -27,6 +27,8 @@ public sealed class SettingsTomlTemplate
 	private const string McpPortKeyName = "port";
 	private const string McpAuthTokenKeyName = "auth_token";
 	private const string McpMaxConcurrentSessionsKeyName = "max_concurrent_sessions";
+	private const string OAuthSectionHeader = "[oauth]";
+	private const string OAuthUseInternalBrowserKeyName = "use_internal_browser";
 	private const string StyleEditorFontSizeKeyName = "editor_font_size";
 	private const string StyleResultPaneTabFontSizeKeyName = "result_pane_tab_font_size";
 	private static readonly Regex ThemeLinePattern = new(
@@ -54,7 +56,10 @@ public sealed class SettingsTomlTemplate
 				.. BuildAiSection(settings.Ai),
 				string.Empty,
 				BuildMcpComment(settings.Mcp),
-				.. BuildMcpSection(settings.Mcp)
+				.. BuildMcpSection(settings.Mcp),
+				string.Empty,
+				BuildOAuthComment(settings.OAuth),
+				.. BuildOAuthSection(settings.OAuth)
 			]);
 	}
 
@@ -201,6 +206,7 @@ public sealed class SettingsTomlTemplate
 		bool inStyleSection = false;
 		bool inAiSection = false;
 		bool inMcpSection = false;
+		bool inOAuthSection = false;
 
 		for (int index = 0; index < lines.Length; index++)
 		{
@@ -213,10 +219,11 @@ public sealed class SettingsTomlTemplate
 				inStyleSection = string.Equals(trimmedLine, StyleSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inMcpSection = string.Equals(trimmedLine, McpSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inOAuthSection = string.Equals(trimmedLine, OAuthSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection)
+			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection && !inOAuthSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -260,6 +267,13 @@ public sealed class SettingsTomlTemplate
 					continue;
 				}
 			}
+			else if (inOAuthSection)
+			{
+				if (!IsKnownOAuthKey(key))
+				{
+					continue;
+				}
+			}
 			else if (!IsKnownAiKey(key))
 			{
 				continue;
@@ -281,6 +295,7 @@ public sealed class SettingsTomlTemplate
 		bool inStyleSection = false;
 		bool inAiSection = false;
 		bool inMcpSection = false;
+		bool inOAuthSection = false;
 		HashSet<ShellThemeName> seenThemes = [];
 		HashSet<string> seenStyleKeys = [];
 		HashSet<string> seenAiKeys = [];
@@ -301,10 +316,11 @@ public sealed class SettingsTomlTemplate
 				inStyleSection = string.Equals(trimmedLine, StyleSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inAiSection = string.Equals(trimmedLine, AiSectionHeader, StringComparison.OrdinalIgnoreCase);
 				inMcpSection = string.Equals(trimmedLine, McpSectionHeader, StringComparison.OrdinalIgnoreCase);
+				inOAuthSection = string.Equals(trimmedLine, OAuthSectionHeader, StringComparison.OrdinalIgnoreCase);
 				continue;
 			}
 
-			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection)
+			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection && !inOAuthSection)
 			{
 				Match topLevelMatch = ThemeLinePattern.Match(line);
 				if (topLevelMatch.Success &&
@@ -392,6 +408,21 @@ public sealed class SettingsTomlTemplate
 				}
 
 				if (!IsValidStringScalarForAutosave(value))
+				{
+					return false;
+				}
+
+				continue;
+			}
+
+			if (inOAuthSection)
+			{
+				if (!IsKnownOAuthKey(key))
+				{
+					return false;
+				}
+
+				if (!bool.TryParse(value, out _))
 				{
 					return false;
 				}
@@ -489,6 +520,22 @@ public sealed class SettingsTomlTemplate
 		return lines;
 	}
 
+	private static string BuildOAuthComment(ForRestOAuthSettings oauth)
+	{
+		return oauth.UseInternalBrowser
+			? "# OAuth interactive sign-in runs in the embedded browser pane. The authorization_code redirect is intercepted inside the WebView (no loopback server), so it works for loopback and non-loopback redirect URIs (e.g. https://oauth.pstmn.io/v1/callback). For-Rest saves your current tab, drives the sign-in, then restores it."
+			: "# OAuth interactive sign-in opens the system browser by default. Set oauth.use_internal_browser = true to run the authorization_code flow inside the embedded browser pane instead, returning you to your previous tab afterward.";
+	}
+
+	private static IReadOnlyList<string> BuildOAuthSection(ForRestOAuthSettings oauth)
+	{
+		return
+		[
+			OAuthSectionHeader,
+			$"{OAuthUseInternalBrowserKeyName} = {(oauth.UseInternalBrowser ? "true" : "false")}"
+		];
+	}
+
 	private static bool IsKnownAiKey(string key)
 	{
 		return string.Equals(key, AiEnabledKeyName, StringComparison.OrdinalIgnoreCase) ||
@@ -510,6 +557,11 @@ public sealed class SettingsTomlTemplate
 		       string.Equals(key, McpPortKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, McpAuthTokenKeyName, StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(key, McpMaxConcurrentSessionsKeyName, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool IsKnownOAuthKey(string key)
+	{
+		return string.Equals(key, OAuthUseInternalBrowserKeyName, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static bool IsKnownStyleKey(string key)

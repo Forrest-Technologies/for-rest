@@ -700,6 +700,12 @@ public sealed class RequestAuthenticationService(
 /// </summary>
 public sealed class SystemBrowserLoopbackBroker(ILogger logger) : IInteractiveAuthorizationBroker
 {
+    #region Private Fields
+
+    private const int SignInTimeoutMinutes = 5;
+
+    #endregion
+
     #region Public Methods
 
     public async Task<string> AcquireAuthorizationCode(InteractiveAuthorizationContext context, CancellationToken cancellationToken)
@@ -717,8 +723,20 @@ public sealed class SystemBrowserLoopbackBroker(ILogger logger) : IInteractiveAu
 
         OpenSystemBrowser(context.AuthorizationUrl);
 
-        OAuthRedirectResult result = await listener.CaptureCode(cancellationToken);
-        return result.Code;
+        // Never wait forever: cancel on the caller's token (e.g. a Stop button) or a bounded timeout.
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(SignInTimeoutMinutes));
+
+        try
+        {
+            OAuthRedirectResult result = await listener.CaptureCode(timeout.Token);
+            return result.Code;
+        }
+        catch (Exception exception) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "Browser sign-in timed out after {Minutes} minutes without a redirect.", SignInTimeoutMinutes);
+            throw new TimeoutException($"Browser sign-in timed out after {SignInTimeoutMinutes} minutes without a redirect. Try again.");
+        }
     }
 
     #endregion

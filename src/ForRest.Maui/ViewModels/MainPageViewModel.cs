@@ -147,6 +147,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private CancellationTokenSource? _settingsProjectionRefreshSource;
 	private CancellationTokenSource? _requestSaveSource;
 	private CancellationTokenSource? _requestMetadataRefreshSource;
+	private CancellationTokenSource? _activeActionSource;
 	private int _requestMetadataRefreshVersion;
 	private DateTimeOffset _lastSettingsEditUtc = DateTimeOffset.MinValue;
 	private bool _suppressSettingsAutosave;
@@ -1214,13 +1215,15 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 	}
 
-	public bool CanSend => !IsSending && IsActiveRequestEditor && _canExecuteRequests;
+	// Stays enabled while sending so the floating button can act as a Stop control for the running action.
+	public bool CanSend => IsActiveRequestEditor && _canExecuteRequests;
 
 	public bool CanUndo => !IsSending && TryGetActiveDocumentHistory(out _, out DocumentTextHistory? history) && history is not null && history.CanUndo;
 
 	public bool CanRedo => !IsSending && TryGetActiveDocumentHistory(out _, out DocumentTextHistory? history) && history is not null && history.CanRedo;
 
-	public string SendButtonText => IsSending ? string.Empty : "\u25B6";
+	// Run (\u25B6) flips to Stop (\u25A0) while an action is in flight.
+	public string SendButtonText => IsSending ? "\u25A0" : "\u25B6";
 
 	public bool CanMoveWorkspaceLeft => GetSelectedWorkspaceIndex() > 0;
 
@@ -1640,6 +1643,8 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			return;
 		}
 
+		CancellationTokenSource actionSource = new();
+		_activeActionSource = actionSource;
 		IsSending = true;
 		try
 		{
@@ -1655,7 +1660,9 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 					workspaceSnapshot,
 					executionSource,
 					environment,
-					requestName));
+					requestName,
+					cancellationToken: actionSource.Token),
+				actionSource.Token);
 
 			if (!outcome.Compilation.Succeeded || outcome.Compilation.Payload is null)
 			{
@@ -1743,6 +1750,11 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 				FocusRightPaneTab("debug");
 			}
 		}
+		catch (OperationCanceledException)
+		{
+			ResponseState = "Stopped";
+			ExecutionStatus = "Execution stopped.";
+		}
 		catch (Exception exception)
 		{
 			ResponseState = "Failed";
@@ -1771,6 +1783,25 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		finally
 		{
 			IsSending = false;
+			if (ReferenceEquals(_activeActionSource, actionSource))
+			{
+				_activeActionSource = null;
+			}
+
+			actionSource.Dispose();
+		}
+	}
+
+	/// <summary>Cancels the action currently driving the run/stop button (request execution, OAuth wait, or inline AI).</summary>
+	public void CancelActiveAction()
+	{
+		try
+		{
+			_activeActionSource?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// The action already completed; nothing to stop.
 		}
 	}
 
@@ -4236,6 +4267,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		{
 			int aiTimeoutSeconds = Math.Max(1, aiSettings.Conversation.ExecutionTimeoutSeconds);
 			aiRequestTimeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(aiTimeoutSeconds));
+			_activeActionSource = aiRequestTimeoutSource;
 			AiInlineConversationResult result = await _aiInlineConversationService.TryHandleAsync(request, aiRequestTimeoutSource.Token);
 			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
 			workingAnimationSource = null;
@@ -4321,6 +4353,11 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 		finally
 		{
+			if (ReferenceEquals(_activeActionSource, aiRequestTimeoutSource))
+			{
+				_activeActionSource = null;
+			}
+
 			aiRequestTimeoutSource?.Dispose();
 			await StopInlineAiWorkingAnimationAsync(workingAnimationSource, workingAnimationTask);
 			IsSending = false;
@@ -7105,6 +7142,49 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
 		await InvokeOnViewModelThreadAsync(() => result = McpSetActiveDocument(workspaceId, location));
 		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.ShowInApp(string target, string? id)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpShowInApp(target));
+		return result;
+	}
+
+	private McpWorkbenchResult McpShowInApp(string target)
+	{
+		string key = (target ?? string.Empty).Trim().ToLowerInvariant();
+		switch (key)
+		{
+			case "browser":
+			case "request":
+				PaneTabViewModel? centerTab = CenterTabs.FirstOrDefault(tab => string.Equals(tab.Key, key, StringComparison.OrdinalIgnoreCase));
+				if (centerTab is null)
+				{
+					return McpWorkbenchResult.Fail($"There is no '{key}' tab to show.");
+				}
+
+				SelectCenterTab(centerTab);
+				return McpWorkbenchResult.Ok($"Showing the {key} pane.");
+			case "response":
+			case "requests":
+			case "stash":
+			case "headers":
+			case "trace":
+			case "raw":
+			case "debug":
+				PaneTabViewModel? inspectorTab = RightPaneTabs.FirstOrDefault(tab => string.Equals(tab.Key, key, StringComparison.OrdinalIgnoreCase));
+				if (inspectorTab is null)
+				{
+					return McpWorkbenchResult.Fail($"There is no '{key}' tab to show.");
+				}
+
+				SelectRightPaneTab(inspectorTab);
+				return McpWorkbenchResult.Ok($"Showing the {key} tab.");
+			default:
+				return McpWorkbenchResult.Fail(
+					$"Unknown target '{target}'. Use browser, request, response, requests, stash, headers, trace, raw, or debug.");
+		}
 	}
 
 	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.ReplaceActiveDocument(string newSource)

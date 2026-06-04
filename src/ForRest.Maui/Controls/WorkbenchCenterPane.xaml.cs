@@ -75,6 +75,13 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private async void OnSendClicked(object? sender, EventArgs e)
 	{
+		// While an action is running the button acts as a Stop control: tapping it cancels the run.
+		if (ViewModel.IsSending)
+		{
+			ViewModel.CancelActiveAction();
+			return;
+		}
+
 		await SendActiveDocumentAsync();
 	}
 

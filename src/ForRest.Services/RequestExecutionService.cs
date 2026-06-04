@@ -218,7 +218,8 @@ public sealed class RequestExecutionService(
             ResponseSnapshot? responseSnapshot = preRequestResult.SentResponse;
             string errorMessage = string.Empty;
 
-            if (responseSnapshot is null)
+            // Flow-only documents (e.g. browser automation) run their flow but never send an HTTP request.
+            if (responseSnapshot is null && !request.FlowOnly)
             {
                 AuthenticatedPreparedRequest authenticatedPreparedRequest = await _requestAuthenticationService.PrepareAsync(preparedRequest, iterationCancellationToken);
                 preparedRequest = authenticatedPreparedRequest.Request;

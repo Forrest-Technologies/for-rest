@@ -63,7 +63,8 @@ public sealed class ThemeConfigNormalizer
 		{
 			Style = normalizedStyle,
 			Ai = document.Ai,
-			Mcp = document.Mcp
+			Mcp = document.Mcp,
+			OAuth = document.OAuth
 		};
 
 		string normalizedText = Render(document, settings);
@@ -89,11 +90,13 @@ public sealed class ThemeConfigNormalizer
 		bool insertedStyleSection = false;
 		bool insertedAiSection = false;
 		bool insertedMcpSection = false;
+		bool insertedOAuthSection = false;
 		bool insertedLicense = false;
 		bool skippingThemeSection = false;
 		bool skippingStyleSection = false;
 		bool skippingAiSection = false;
 		bool skippingMcpSection = false;
+		bool skippingOAuthSection = false;
 		int licenseInsertIndex = GetLicenseInsertionIndex(document.Lines);
 
 		foreach (SettingsTomlLine line in document.Lines)
@@ -118,6 +121,11 @@ public sealed class ThemeConfigNormalizer
 				if (skippingMcpSection)
 				{
 					skippingMcpSection = false;
+				}
+
+				if (skippingOAuthSection)
+				{
+					skippingOAuthSection = false;
 				}
 
 				if (string.Equals(line.SectionName, "appearance.theme", StringComparison.OrdinalIgnoreCase))
@@ -185,9 +193,39 @@ public sealed class ThemeConfigNormalizer
 					skippingMcpSection = true;
 					continue;
 				}
+
+				if (string.Equals(line.SectionName, "oauth", StringComparison.OrdinalIgnoreCase))
+				{
+					if (!insertedStyleSection)
+					{
+						AppendStyleSection(output, settings.Style);
+						insertedStyleSection = true;
+					}
+
+					if (!insertedAiSection)
+					{
+						AppendAiSection(output, settings.Ai);
+						insertedAiSection = true;
+					}
+
+					if (!insertedMcpSection)
+					{
+						AppendMcpSection(output, settings.Mcp);
+						insertedMcpSection = true;
+					}
+
+					if (!insertedOAuthSection)
+					{
+						AppendOAuthSection(output, settings.OAuth);
+						insertedOAuthSection = true;
+					}
+
+					skippingOAuthSection = true;
+					continue;
+				}
 			}
 
-			if (skippingThemeSection || skippingStyleSection || skippingAiSection || skippingMcpSection)
+			if (skippingThemeSection || skippingStyleSection || skippingAiSection || skippingMcpSection || skippingOAuthSection)
 			{
 				continue;
 			}
@@ -257,6 +295,16 @@ public sealed class ThemeConfigNormalizer
 			}
 
 			AppendMcpSection(output, settings.Mcp);
+		}
+
+		if (!insertedOAuthSection)
+		{
+			if (output.Count > 0 && !string.IsNullOrWhiteSpace(output[^1]))
+			{
+				output.Add(string.Empty);
+			}
+
+			AppendOAuthSection(output, settings.OAuth);
 		}
 
 		return string.Join(Environment.NewLine, TrimTrailingBlankLines(output));
@@ -334,6 +382,13 @@ public sealed class ThemeConfigNormalizer
 		output.Add($"port = {mcp.Port.ToString(CultureInfo.InvariantCulture)}");
 		output.Add($"auth_token = \"{SettingsTomlTemplate.EscapeTomlString(mcp.AuthToken)}\"");
 		output.Add($"max_concurrent_sessions = {mcp.MaxConcurrentSessions.ToString(CultureInfo.InvariantCulture)}");
+	}
+
+	private static void AppendOAuthSection(List<string> output, ForRestOAuthSettings oauth)
+	{
+		output.Add("# OAuth interactive sign-in. Set oauth.use_internal_browser = true to run the authorization_code redirect in the embedded browser pane (no loopback server, restores your previous tab afterward). Default false opens the system browser.");
+		output.Add("[oauth]");
+		output.Add($"use_internal_browser = {(oauth.UseInternalBrowser ? "true" : "false")}");
 	}
 
 	private static IReadOnlyList<string> TrimTrailingBlankLines(List<string> output)
