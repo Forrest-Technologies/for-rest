@@ -1,5 +1,6 @@
 #if WINDOWS || MACCATALYST
 using System.Text;
+using ForRest.Browser;
 using ForRest.Maui.Theming;
 using ForRest.Mcp;
 using ForRest.Models;
@@ -34,6 +35,7 @@ public sealed class ForRestMcpHost(
     ThemeConfigStore themeConfigStore,
     ThemeConfigParser themeConfigParser,
     McpLiveWorkbenchAccessor liveWorkbenchAccessor,
+    IBrowserAutomationProvider browserProvider,
     ILogger<ForRestMcpHost>? logger = null) : IForRestMcpHost
 {
     #region Private Fields
@@ -862,6 +864,84 @@ public sealed class ForRestMcpHost(
             Columns: [.. stash.Columns],
             Rows: [.. stash.Rows.Select(static row => (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(row.Values))]);
     }
+
+    #endregion
+
+    #region Browser automation
+
+    public bool BrowserAvailable => browserProvider.Current.IsAvailable;
+
+    public async Task<string> BrowserNavigate(string url, CancellationToken cancellationToken)
+    {
+        await browserProvider.Current.Navigate(url, cancellationToken);
+        return $"Navigated to {url}.";
+    }
+
+    public async Task<ForRestMcpBrowserSnapshotView> BrowserSnapshot(CancellationToken cancellationToken)
+    {
+        IBrowserAutomationBridge bridge = browserProvider.Current;
+        if (!bridge.IsAvailable)
+        {
+            return new ForRestMcpBrowserSnapshotView(false, string.Empty, string.Empty, []);
+        }
+
+        BrowserSnapshot snapshot = await bridge.Snapshot(cancellationToken);
+        return new ForRestMcpBrowserSnapshotView(
+            true,
+            snapshot.Url,
+            snapshot.Title,
+            [.. snapshot.Elements.Select(MapBrowserElement)]);
+    }
+
+    public Task<string> BrowserScreenshot(CancellationToken cancellationToken) =>
+        browserProvider.Current.Screenshot(cancellationToken);
+
+    public async Task<ForRestMcpBrowserElementView> BrowserQuery(string target, CancellationToken cancellationToken)
+    {
+        BrowserElementInfo info = await browserProvider.Current.Query(BrowserTarget.Parse(target), cancellationToken);
+        return MapBrowserElement(info);
+    }
+
+    public async Task<string> BrowserClick(string target, CancellationToken cancellationToken)
+    {
+        await browserProvider.Current.Click(BrowserTarget.Parse(target), cancellationToken: cancellationToken);
+        return $"Clicked {target}.";
+    }
+
+    public async Task<string> BrowserType(string target, string text, CancellationToken cancellationToken)
+    {
+        await browserProvider.Current.Type(BrowserTarget.Parse(target), text, cancellationToken: cancellationToken);
+        return $"Typed into {target}.";
+    }
+
+    public async Task<string> BrowserPress(string keys, CancellationToken cancellationToken)
+    {
+        await browserProvider.Current.Press(keys, cancellationToken);
+        return $"Pressed {keys}.";
+    }
+
+    public async Task<ForRestMcpBrowserElementView> BrowserWaitFor(string target, int timeoutMs, CancellationToken cancellationToken)
+    {
+        BrowserElementInfo info = await browserProvider.Current.WaitFor(BrowserTarget.Parse(target), timeoutMs, cancellationToken);
+        return MapBrowserElement(info);
+    }
+
+    public Task<string> BrowserEvaluate(string expression, CancellationToken cancellationToken) =>
+        browserProvider.Current.Evaluate(expression, cancellationToken);
+
+    private static ForRestMcpBrowserElementView MapBrowserElement(BrowserElementInfo info) => new(
+        info.Found,
+        info.Tag,
+        info.Id,
+        info.Text,
+        info.Css,
+        info.Xpath,
+        info.Role,
+        info.Name,
+        info.X,
+        info.Y,
+        info.Width,
+        info.Height);
 
     #endregion
 }

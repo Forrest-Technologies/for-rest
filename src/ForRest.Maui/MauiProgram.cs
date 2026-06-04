@@ -1,6 +1,8 @@
+using ForRest.Browser;
 using ForRest.Domain;
 using ForRest.Maui.Theming;
 using ForRest.Maui.Services;
+using ForRest.Maui.Services.Browser;
 using ForRest.Maui.ViewModels;
 using ForRest.Repositories;
 using ForRest.Services;
@@ -56,6 +58,8 @@ public static class MauiProgram
 			});
 		builder.Services.AddSingleton<IAppActivationService, AppActivationService>();
 		builder.Services.AddSingleton<RequestWorkbenchStateStore>();
+		builder.Services.AddSingleton<BrowserAutomationProvider>();
+		builder.Services.AddSingleton<IBrowserAutomationProvider>(serviceProvider => serviceProvider.GetRequiredService<BrowserAutomationProvider>());
 		builder.Services.AddSingleton<IExecutionHistoryRepository, InMemoryExecutionHistoryRepository>();
 		builder.Services.AddSingleton<VariableResolver>();
 		builder.Services.AddSingleton<JsonEditorService>();
