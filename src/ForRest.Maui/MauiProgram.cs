@@ -88,11 +88,12 @@ public static class MauiProgram
 		// Desktop-only Model Context Protocol server host. Mobile targets
 		// intentionally skip this because background TCP listeners are
 		// hostile to the Android lifecycle.
-		builder.Services.AddSingleton<ForRestMcpTools>(static services =>
+		builder.Services.AddSingleton<ForRestMcpHost>();
+		builder.Services.AddSingleton<ForRestMcpTools>(services =>
 			new ForRestMcpTools(
 				services.GetRequiredService<IAiKnowledgeCatalog>(),
 				services.GetRequiredService<IAiDocumentationSearchService>(),
-				static () => null));
+				() => services.GetService<ForRestMcpHost>()));
 		builder.Services.AddSingleton<ForRestMcpServerLifecycle>();
 #endif
 
