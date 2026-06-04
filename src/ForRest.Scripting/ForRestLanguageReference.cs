@@ -28,6 +28,7 @@ internal static class ForRestLanguageReference
         "negotiate",
         "oauth_client_credentials",
         "oauth_device_code",
+        "oauth_authorization_code",
         "oauth_integrated_windows",
     ];
 
@@ -189,32 +190,34 @@ internal static class ForRestLanguageReference
             "auth",
             "Auth",
             "Configure declarative request authentication.",
-            "Use either an `auth { ... }` block or top-level `auth key = value` directives for bearer tokens, API keys, custom headers, challenge-based Windows auth, and OAuth token acquisition.",
+            "Use either an `auth { ... }` block or top-level `auth key = value` directives for bearer tokens, API keys, custom headers, challenge-based Windows auth, and OAuth token acquisition. `oauth_authorization_code` performs an interactive browser sign-in (PKCE) and exposes the acquired token to scripts as `accessToken`.",
             """
             auth {
-              mode = oauth_client_credentials
-              token_url = "https://login.example.test/oauth2/v2.0/token"
+              mode = oauth_authorization_code
+              authorization_url = "https://login.example.test/authorize"
+              token_url = "https://login.example.test/token"
               client_id = "{{client_id}}"
-              client_secret = "{{client_secret}}"
-              scopes = "api://forrest/.default"
+              redirect_uri = "http://127.0.0.1:5005/callback"
+              scopes = "openid offline_access api"
+              use_pkce = true
             }
             """,
-            ["authorization", "oauth", "bearer", "ntlm", "negotiate", "token"],
+            ["authorization", "oauth", "bearer", "ntlm", "negotiate", "token", "authorization_code", "pkce", "browser sign-in"],
             ["auth"],
             "Snippet",
-            "auth {\n  mode = ${1|bearer,basic,api_key,header,digest,ntlm,negotiate,oauth_client_credentials,oauth_device_code,oauth_integrated_windows|}\n  $0\n}",
+            "auth {\n  mode = ${1|bearer,basic,api_key,header,digest,ntlm,negotiate,oauth_client_credentials,oauth_device_code,oauth_authorization_code,oauth_integrated_windows|}\n  $0\n}",
             true),
         new(
             "auth-mode",
             "auth mode",
             "Auth",
             "Select the authentication strategy.",
-            "Supported auth modes are `none`, `bearer`, `basic`, `api_key`, `header`, `digest`, `ntlm`, `negotiate`, `oauth_client_credentials`, `oauth_device_code`, and `oauth_integrated_windows`.",
+            "Supported auth modes are `none`, `bearer`, `basic`, `api_key`, `header`, `digest`, `ntlm`, `negotiate`, `oauth_client_credentials`, `oauth_device_code`, `oauth_authorization_code`, and `oauth_integrated_windows`.",
             "auth mode = bearer",
             ["auth mode", "authentication mode", "auth strategy"],
             ["auth", "auth mode"],
             "Snippet",
-            "auth mode = ${1|none,bearer,basic,api_key,header,digest,ntlm,negotiate,oauth_client_credentials,oauth_device_code,oauth_integrated_windows|}",
+            "auth mode = ${1|none,bearer,basic,api_key,header,digest,ntlm,negotiate,oauth_client_credentials,oauth_device_code,oauth_authorization_code,oauth_integrated_windows|}",
             true),
         new(
             "auth-client-credentials",

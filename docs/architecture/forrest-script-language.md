@@ -172,6 +172,7 @@ Use `auth { ... }` or top-level `auth key = value` directives.
 | `negotiate` | Integrated Windows auth handshake |
 | `oauth_client_credentials` | Client credentials token acquisition |
 | `oauth_device_code` | Device code auth flow |
+| `oauth_authorization_code` | Interactive browser sign-in (authorization code + PKCE) |
 | `oauth_integrated_windows` | Windows integrated token acquisition |
 
 The docs and catalog should keep the following auth shape explicit:
@@ -185,6 +186,29 @@ auth {
   scopes = "api://forrest/.default"
 }
 ```
+
+`oauth_authorization_code` is the interactive grant: it opens the system browser to
+`authorization_url` (with a PKCE challenge and `state`), captures the redirect on a
+localhost loopback (or accepts a registered `redirect_uri`), exchanges the code at
+`token_url`, caches the `refresh_token`, and auto-refreshes. The acquired bearer token
+is exposed to post-response scripts as the runtime variable `accessToken`.
+
+```frs
+auth {
+  mode = oauth_authorization_code
+  authorization_url = "https://login.example.test/authorize"
+  token_url = "https://login.example.test/token"
+  client_id = "{{client_id}}"
+  redirect_uri = "http://127.0.0.1:5005/callback"
+  scopes = "openid offline_access api"
+  use_pkce = true
+  code_challenge_method = "S256"
+}
+```
+
+For Azure AD B2C, put the policy in the `authorization_url` (path or query) and use a
+public client with PKCE; a loopback `redirect_uri` or `https://oauth.pstmn.io/v1/callback`
+both work (the latter requires a paste-the-redirect broker on headless hosts).
 
 ## Flow Control
 
@@ -419,7 +443,7 @@ Included now:
 - runtime variable seeding
 - request/body/header/query/auth authoring
 - challenge-based Windows auth (`digest`, `ntlm`, `negotiate`)
-- OAuth token acquisition (`oauth_client_credentials`, `oauth_device_code`, `oauth_integrated_windows`)
+- OAuth token acquisition (`oauth_client_credentials`, `oauth_device_code`, `oauth_authorization_code`, `oauth_integrated_windows`)
 - JSON extraction
 - regex extraction and regex-backed expectations
 - structured response stash data

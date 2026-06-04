@@ -72,6 +72,18 @@ public sealed record RequestAuthDefinition
 
     public string Audience { get; init; } = string.Empty;
 
+    /// <summary>Authorization endpoint for the interactive authorization-code grant.</summary>
+    public string AuthorizationUrl { get; init; } = string.Empty;
+
+    /// <summary>Redirect URI registered with the provider; defaults to a localhost loopback when empty.</summary>
+    public string RedirectUri { get; init; } = string.Empty;
+
+    /// <summary>Whether the authorization-code grant uses PKCE (recommended; required for public clients).</summary>
+    public bool UsePkce { get; init; } = true;
+
+    /// <summary>PKCE code challenge method for the authorization-code grant (S256 by default).</summary>
+    public string CodeChallengeMethod { get; init; } = "S256";
+
     [JsonConverter(typeof(JsonStringEnumConverter<ApiKeyLocation>))]
     public ApiKeyLocation ApiKeyLocation { get; init; }
 }

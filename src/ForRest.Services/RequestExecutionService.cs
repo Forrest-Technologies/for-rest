@@ -222,6 +222,14 @@ public sealed class RequestExecutionService(
             {
                 AuthenticatedPreparedRequest authenticatedPreparedRequest = await _requestAuthenticationService.PrepareAsync(preparedRequest, iterationCancellationToken);
                 preparedRequest = authenticatedPreparedRequest.Request;
+                if (authenticatedPreparedRequest.AcquiredAccessToken is { Length: > 0 } acquiredAccessToken)
+                {
+                    // Expose the freshly-acquired OAuth token to post-response scripts as `accessToken`.
+                    runtimeVariables = MergeRuntimeVariables(
+                        runtimeVariables,
+                        [new VariableDefinition { Key = "accessToken", Value = acquiredAccessToken, Scope = VariableScope.Runtime, IsSecret = true }]);
+                }
+
                 using var handler = CreateHandler(authenticatedPreparedRequest);
                 using var client = new HttpClient(handler)
                 {
