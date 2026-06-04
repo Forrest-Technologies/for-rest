@@ -33,4 +33,5 @@ GitHub Actions:
 - [`CODEX.md`](CODEX.md)
 - [`docs/architecture/for-rest-architecture.md`](docs/architecture/for-rest-architecture.md)
 - [`docs/architecture/mvp-progress.md`](docs/architecture/mvp-progress.md)
+- [`docs/mcp/connecting-mcp-clients.md`](docs/mcp/connecting-mcp-clients.md)
 - [`docs/dependencies/dependency-ledger.md`](docs/dependencies/dependency-ledger.md)
