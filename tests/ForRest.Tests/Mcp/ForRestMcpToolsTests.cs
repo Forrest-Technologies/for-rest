@@ -435,6 +435,57 @@ public sealed class ForRestMcpToolsTests
 
     #endregion
 
+    #region Browser automation
+
+    [TestMethod]
+    public async Task Browser_navigate_and_click_pass_through_to_host()
+    {
+        FakeHost host = new();
+        ForRestMcpTools tools = CreateTools(host);
+
+        string navigated = await tools.browser_navigate("https://app.test/login");
+        string clicked = await tools.browser_click("role=button:Sign in");
+
+        StringAssert.Contains(navigated, "https://app.test/login");
+        StringAssert.Contains(clicked, "role=button:Sign in");
+        CollectionAssert.Contains(host.BrowserCalls, "navigate:https://app.test/login");
+        CollectionAssert.Contains(host.BrowserCalls, "click:role=button:Sign in");
+    }
+
+    [TestMethod]
+    public async Task Browser_query_returns_stable_selectors()
+    {
+        ForRestMcpTools tools = CreateTools(new FakeHost());
+
+        string json = await tools.browser_query("#go");
+
+        StringAssert.Contains(json, "#go");
+        StringAssert.Contains(json, "Xpath");
+    }
+
+    [TestMethod]
+    public async Task Browser_snapshot_lists_elements()
+    {
+        ForRestMcpTools tools = CreateTools(new FakeHost());
+
+        string json = await tools.browser_snapshot();
+
+        StringAssert.Contains(json, "Elements");
+        StringAssert.Contains(json, "https://x.test/");
+    }
+
+    [TestMethod]
+    public async Task Browser_tools_report_missing_host()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string result = await tools.browser_navigate("https://x.test");
+
+        StringAssert.Contains(result, "desktop");
+    }
+
+    #endregion
+
     #region Helpers
 
     private static ForRestMcpTools CreateTools(IForRestMcpHost? host)
@@ -567,6 +618,51 @@ public sealed class ForRestMcpToolsTests
         public string GetSettingsText() => "[mcp]\nenabled = true\n";
 
         public ForRestMcpMutationResult UpdateSettingsText(string rawToml) => ForRestMcpMutationResult.Ok("saved");
+
+        public List<string> BrowserCalls { get; } = [];
+
+        public bool BrowserAvailable => true;
+
+        public Task<string> BrowserNavigate(string url, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"navigate:{url}");
+            return Task.FromResult($"Navigated to {url}.");
+        }
+
+        public Task<ForRestMcpBrowserSnapshotView> BrowserSnapshot(CancellationToken cancellationToken)
+            => Task.FromResult(new ForRestMcpBrowserSnapshotView(true, "https://x.test/", "X",
+                [new ForRestMcpBrowserElementView(true, "button", "go", "Go", "#go", "/html/body/button[1]", "button", "Go", 1, 2, 3, 4)]));
+
+        public Task<string> BrowserScreenshot(CancellationToken cancellationToken) => Task.FromResult("QUJD");
+
+        public Task<ForRestMcpBrowserElementView> BrowserQuery(string target, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"query:{target}");
+            return Task.FromResult(new ForRestMcpBrowserElementView(true, "button", "go", "Go", "#go", "/html/body/button[1]", "button", "Go", 1, 2, 3, 4));
+        }
+
+        public Task<string> BrowserClick(string target, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"click:{target}");
+            return Task.FromResult($"Clicked {target}.");
+        }
+
+        public Task<string> BrowserType(string target, string text, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"type:{target}={text}");
+            return Task.FromResult($"Typed into {target}.");
+        }
+
+        public Task<string> BrowserPress(string keys, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"press:{keys}");
+            return Task.FromResult($"Pressed {keys}.");
+        }
+
+        public Task<ForRestMcpBrowserElementView> BrowserWaitFor(string target, int timeoutMs, CancellationToken cancellationToken)
+            => Task.FromResult(new ForRestMcpBrowserElementView(true, "div", "ready", "Ready", "#ready", "/html/body/div[1]", "", "", 0, 0, 0, 0));
+
+        public Task<string> BrowserEvaluate(string expression, CancellationToken cancellationToken) => Task.FromResult("null");
     }
 
     #endregion

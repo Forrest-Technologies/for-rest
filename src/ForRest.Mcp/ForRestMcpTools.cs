@@ -582,6 +582,73 @@ public sealed class ForRestMcpTools
 
     #endregion
 
+    #region Browser automation
+
+    [Description("Navigates the embedded For-Rest browser pane to a URL. The desktop Browser tab must be open. This is the agent's 'hands': pair it with browser_snapshot/browser_query for 'eyes', then record the actions into a script for deterministic replay.")]
+    public Task<string> browser_navigate(
+        [Description("Absolute URL to load, e.g. https://app.example.test/login.")] string url)
+    {
+        return WithHostAsync(async host => await host.BrowserNavigate(url, CancellationToken.None));
+    }
+
+    [Description("Returns the page's interactive elements (links, buttons, inputs, role/aria nodes) with their stable selectors (css, xpath, role+name, id) and on-screen positions. Use this as the agent's 'eyes' to decide what to target next.")]
+    public Task<string> browser_snapshot()
+    {
+        return WithHostAsync(async host => Serialize(await host.BrowserSnapshot(CancellationToken.None)));
+    }
+
+    [Description("Captures a screenshot of the current page and returns it as a base64-encoded PNG.")]
+    public Task<string> browser_screenshot()
+    {
+        return WithHostAsync(async host => await host.BrowserScreenshot(CancellationToken.None));
+    }
+
+    [Description("Locates a single element and returns its stable selectors (css, xpath, role+name, id), text, and bounding box. Use the returned selectors when authoring or recording a replayable script. Target forms: '#id', 'css=.row', 'xpath=//a', 'text=Save', 'role=button:Save', 'testid=submit'.")]
+    public Task<string> browser_query(
+        [Description("Element target expression, e.g. '#submit' or 'role=button:Save'.")] string target)
+    {
+        return WithHostAsync(async host => Serialize(await host.BrowserQuery(target, CancellationToken.None)));
+    }
+
+    [Description("Clicks the element matching the target, moving the visible cursor to it first. Target forms: '#id', 'css=.row', 'xpath=//a', 'text=Save', 'role=button:Save', 'testid=submit'.")]
+    public Task<string> browser_click(
+        [Description("Element target expression.")] string target)
+    {
+        return WithHostAsync(async host => await host.BrowserClick(target, CancellationToken.None));
+    }
+
+    [Description("Types text into the element matching the target (clicks to focus first).")]
+    public Task<string> browser_type(
+        [Description("Element target expression.")] string target,
+        [Description("Text to type.")] string text)
+    {
+        return WithHostAsync(async host => await host.BrowserType(target, text, CancellationToken.None));
+    }
+
+    [Description("Presses a key or key name in the page (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown', or a single character).")]
+    public Task<string> browser_press(
+        [Description("Key name or single character.")] string keys)
+    {
+        return WithHostAsync(async host => await host.BrowserPress(keys, CancellationToken.None));
+    }
+
+    [Description("Waits up to a timeout for an element matching the target to appear, then returns its selectors and position. Use before interacting with elements that load asynchronously.")]
+    public Task<string> browser_wait_for(
+        [Description("Element target expression.")] string target,
+        [Description("Maximum time to wait in milliseconds (default 5000).")] int timeout_ms = 5000)
+    {
+        return WithHostAsync(async host => Serialize(await host.BrowserWaitFor(target, timeout_ms, CancellationToken.None)));
+    }
+
+    [Description("Evaluates a JavaScript expression in the current page and returns the result as JSON. Use for reads the other tools do not cover.")]
+    public Task<string> browser_eval(
+        [Description("JavaScript expression to evaluate in the page.")] string expression)
+    {
+        return WithHostAsync(async host => await host.BrowserEvaluate(expression, CancellationToken.None));
+    }
+
+    #endregion
+
     #region Settings
 
     [Description("Returns the current For-Rest MCP server settings (enabled, bind address, port, whether an auth token is set, max concurrent sessions, and the active endpoint). The token value itself is never returned.")]
