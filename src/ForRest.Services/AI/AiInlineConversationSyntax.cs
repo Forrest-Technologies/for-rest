@@ -116,6 +116,21 @@ public static class AiInlineConversationPromptResolver
                 AiInlineConversationPrompt? prompt = document.FindLatestPrompt(cursorLineNumber);
                 return IsActionablePrompt(prompt) ? prompt : null;
             }
+
+            // Touch/mobile flow: editors like the Android Sora pane do not auto-insert a
+            // `## ` continuation on Enter (the way Monaco does), so after typing a prompt
+            // the caret lands on a plain blank line directly beneath it. When the nearest
+            // non-blank line above the caret is an unanswered prompt, treat that prompt as
+            // the actionable target so tapping send routes to the AI instead of executing
+            // the request. Gating on the prompt being unanswered keeps normal sends intact.
+            if (cursorLine.Kind == AiInlineConversationLineKind.Blank)
+            {
+                AiInlineConversationPrompt? pendingPrompt = ResolvePendingPromptAboveBlankCursor(document, cursorLineNumber);
+                if (pendingPrompt is not null)
+                {
+                    return pendingPrompt;
+                }
+            }
         }
 
         AiInlineConversationLine? lastContentLine = document.Lines.LastOrDefault(
@@ -124,6 +139,38 @@ public static class AiInlineConversationPromptResolver
         {
             AiInlineConversationPrompt? prompt = document.FindLatestPrompt(lastContentLine.LineNumber);
             return IsActionablePrompt(prompt) ? prompt : null;
+        }
+
+        return null;
+    }
+
+    private static AiInlineConversationPrompt? ResolvePendingPromptAboveBlankCursor(
+        AiInlineConversationDocument document,
+        int cursorLineNumber)
+    {
+        // Walk up from the line directly above the caret, skipping blank lines, to the
+        // nearest non-blank line. Only resolve when it is a prompt line whose block has no
+        // active response — i.e. a question the user just typed and has not yet submitted.
+        for (int lineIndex = cursorLineNumber - 2; lineIndex >= 0; lineIndex--)
+        {
+            AiInlineConversationLine line = document.Lines[lineIndex];
+            if (line.Kind == AiInlineConversationLineKind.Blank)
+            {
+                continue;
+            }
+
+            if (line.Kind != AiInlineConversationLineKind.Prompt)
+            {
+                return null;
+            }
+
+            AiInlineConversationPrompt? prompt = document.FindLatestPrompt(line.LineNumber);
+            if (prompt is null || prompt.HasActiveResponse || !IsActionablePrompt(prompt))
+            {
+                return null;
+            }
+
+            return prompt;
         }
 
         return null;

@@ -1233,6 +1233,157 @@ public sealed class RoslynScriptEngineTests
         Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
     }
 
+    [TestMethod]
+    public async Task Run_exposes_payloads_catalog_to_scripts()
+    {
+        // Regression: the `payloads` security corpus is a ScriptGlobals member but was
+        // missing from the generated-script preamble, so any flow referencing it failed
+        // to compile with "CS0103: The name 'payloads' does not exist in the current
+        // context" — the exact error the fuzzing showcase request hit.
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                tests.Assert(payloads.Sqli.Count > 0, "sqli corpus is available");
+                variables.Set("first_sqli", payloads.Sqli[0]);
+                variables.Set("combined", payloads.Combine("xss", "ssti").Count.ToString());
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual(TestOutcomeState.Passed, result.Tests.Single().State);
+        Assert.IsFalse(string.IsNullOrEmpty(result.RuntimeVariables.Single(static item => item.Key == "first_sqli").Value));
+        Assert.AreNotEqual("0", result.RuntimeVariables.Single(static item => item.Key == "combined").Value);
+    }
+
+    [TestMethod]
+    public async Task Run_hashes_dynamic_non_string_values_through_crypto()
+    {
+        // Regression: crypto.Md5/Sha1/Sha256 only accepted a compile-time string, so
+        // hashing a dynamic flow value (an int status, a JSON number, etc.) failed at
+        // runtime. They now coerce through the shared formatter.
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                variables.Set("status_hash", crypto.Sha256(response.Status));
+                variables.Set("id_hash", crypto.Md5(response.id));
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    StatusCode = 200,
+                    Body = """{"id":4242}""",
+                    ContentType = "application/json",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        // SHA-256("200") and MD5("4242") computed from the coerced text of each dynamic value.
+        var expectedStatusHash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("200"))).ToLowerInvariant();
+        var expectedIdHash = Convert.ToHexString(
+            System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("4242"))).ToLowerInvariant();
+        Assert.AreEqual(expectedStatusHash, result.RuntimeVariables.Single(static item => item.Key == "status_hash").Value);
+        Assert.AreEqual(expectedIdHash, result.RuntimeVariables.Single(static item => item.Key == "id_hash").Value);
+    }
+
+    [TestMethod]
+    public async Task Run_compiles_handler_flow_without_redeclaring_runtime_preamble()
+    {
+        // Regression: on-status / on-error handlers were each re-compiled with their own
+        // `var __flow` + known-variable preamble. Splicing those into the same generated
+        // method re-declared __flow and runtime variables like trace_id, producing
+        // CS0128/CS0136. The preamble is now emitted once at method scope and shared.
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Handler Scopes"
+            method GET
+            url "https://api.example.test/thing"
+
+            runtime trace_id = "abc-123"
+
+            log $"main flow {trace_id}"
+
+            on status 200 {
+              runtime status_trace = trace_id
+              log $"status handler {trace_id}"
+            }
+
+            on error {
+              runtime error_trace = trace_id
+            }
+            """;
+
+        var compilation = compiler.Compile(source, new() { WorkspaceId = Guid.NewGuid() });
+        Assert.IsTrue(compilation.Succeeded);
+        Assert.IsNotNull(compilation.Payload);
+
+        var generated = compilation.Payload.Request.PreRequestScript;
+        Assert.AreEqual(
+            1,
+            CountOccurrences(generated, "var __flow ="),
+            "the runtime preamble must be declared exactly once across the main flow and handlers");
+
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script = generated,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    StatusCode = 200,
+                    Body = """{"ok":true}""",
+                    ContentType = "application/json",
+                },
+                RuntimeVariables =
+                [
+                    new() { Key = "trace_id", Value = "abc-123", Scope = VariableScope.Runtime },
+                ],
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("abc-123", result.RuntimeVariables.Single(static item => item.Key == "status_trace").Value);
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        var count = 0;
+        var position = haystack.IndexOf(needle, StringComparison.Ordinal);
+        while (position >= 0)
+        {
+            count++;
+            position = haystack.IndexOf(needle, position + needle.Length, StringComparison.Ordinal);
+        }
+
+        return count;
+    }
+
     private static PreparedRequest BuildPreparedRequest(RequestDefinition request)
     {
         return new()

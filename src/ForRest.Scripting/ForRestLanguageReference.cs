@@ -388,7 +388,7 @@ internal static class ForRestLanguageReference
             "collection methods",
             "Flow",
             "Chain LINQ-like operations on arrays and lists.",
-            "Use dot-chained methods on collections returned from JSON responses, ranges, or variables. Available methods: `.where(x => condition)`, `.select(x => x.field)`, `.first()`, `.firstOrDefault()`, `.last()`, `.any()`, `.all(x => condition)`, `.count()`, `.orderBy(x => x.field)`, `.orderByDesc(x => x.field)`, `.take(n)`, `.skip(n)`, `.distinct()`, `.flatten()`, `.groupBy(x => x.field)`, `.sum()`, `.min()`, `.max()`, `.average()`, `.toList()`, `.reverse()`, `.contains(value)`. Lambda expressions use `x => expr` syntax.",
+            "Use dot-chained methods on collections returned from JSON responses, ranges, or variables. Available methods: `.where(x => condition)`, `.select(x => x.field)`, `.first()`, `.firstOrDefault()`, `.last()`, `.any()`, `.all(x => condition)`, `.count()`, `.orderBy(x => x.field)`, `.orderByDesc(x => x.field)`, `.take(n)`, `.skip(n)`, `.distinct()`, `.flatten()`, `.groupBy(x => x.field)`, `.sum()`, `.min()`, `.max()`, `.average()`, `.toList()`, `.reverse()`, `.contains(value)`. Lambda expressions use `x => expr` syntax. Positional access also works through indexing — `parts[0]` is the first element and `.first()` / `.last()` are the predicate-friendly equivalents — so the result of `strings.Split(...)`, a JSON array, or a range can be read either way.",
             """
             let users = response.json().data
             let active = users.where(x => x.active).select(x => x.name)
@@ -834,7 +834,7 @@ internal static class ForRestLanguageReference
             "crypto.Sha256",
             "Security",
             "Hash values directly from ForRest scripts.",
-            "Built-in crypto helpers make request signing and verification workflows straightforward.",
+            "Built-in crypto helpers (`crypto.Md5`, `crypto.Sha1`, `crypto.Sha256`) make request signing and verification workflows straightforward. They accept any flow value — strings, numbers, booleans, or JSON scalars — and coerce it to its stable text form before hashing, so you can pass a runtime variable like `trace_id` or a numeric `response.Status` without converting it first.",
             "let signature = crypto.Sha256(trace_id)",
             ["security", "hash", "signature", "sha256"],
             ["crypto"],
@@ -912,7 +912,7 @@ internal static class ForRestLanguageReference
             "on error { ... }",
             "Flow",
             "Declare a handler that runs when the request flow throws an exception.",
-            "Place `on error { }` at the top level of your script. If any unhandled exception occurs during flow execution, the handler block runs instead of crashing the script. You can log, set stash values, or perform cleanup inside the handler.",
+            "Place `on error { }` at the top level of your script. If any unhandled exception occurs during flow execution, the handler block runs instead of crashing the script. You can log, set stash values, or perform cleanup inside the handler. The handler shares the same runtime variables and seeds as the main flow, so you can reference values like `trace_id` directly inside the block.",
             """
             on error {
               error "Request failed unexpectedly"
@@ -930,7 +930,7 @@ internal static class ForRestLanguageReference
             "on status N { ... }",
             "Flow",
             "Declare a handler that runs when the response returns a specific HTTP status code.",
-            "Place `on status <code> { }` at the top level. After the main flow completes, if the response status matches, the handler block runs. Useful for 401 re-auth, 429 rate-limit backoff, or custom error reporting.",
+            "Place `on status <code> { }` at the top level. After the main flow completes, if the response status matches, the handler block runs. Useful for 401 re-auth, 429 rate-limit backoff, or custom error reporting. The handler shares the same runtime variables and seeds as the main flow, so values like `trace_id` are in scope without redeclaring them.",
             """
             on status 429 {
               warn "Rate limited — backing off"
