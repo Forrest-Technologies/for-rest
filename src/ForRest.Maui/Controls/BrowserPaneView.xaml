@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ForRest.Maui.Controls.BrowserPaneView">
+
+    <Grid RowDefinitions="Auto,Auto,*"
+          BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}">
+
+        <Grid Padding="8,6"
+              ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto"
+              ColumnSpacing="4">
+            <Button Text="&#x2039;"
+                    Style="{StaticResource DenseTabButtonStyle}"
+                    Clicked="OnBackClicked"
+                    SemanticProperties.Description="Navigate back" />
+
+            <Button Grid.Column="1"
+                    Text="&#x203A;"
+                    Style="{StaticResource DenseTabButtonStyle}"
+                    Clicked="OnForwardClicked"
+                    SemanticProperties.Description="Navigate forward" />
+
+            <Button Grid.Column="2"
+                    Text="&#x21BB;"
+                    Style="{StaticResource DenseTabButtonStyle}"
+                    Clicked="OnReloadClicked"
+                    SemanticProperties.Description="Reload the current page" />
+
+            <Entry Grid.Column="3"
+                   x:Name="AddressEntry"
+                   Placeholder="https://"
+                   FontSize="13"
+                   ClearButtonVisibility="WhileEditing"
+                   Keyboard="Url"
+                   ReturnType="Go"
+                   Completed="OnAddressCompleted" />
+
+            <Button Grid.Column="4"
+                    Text="Go"
+                    Style="{StaticResource DenseTabButtonStyle}"
+                    Clicked="OnGoClicked"
+                    SemanticProperties.Description="Navigate to the address" />
+
+            <Button Grid.Column="5"
+                    x:Name="RecordButton"
+                    Text="Record"
+                    Style="{StaticResource DenseTabButtonStyle}"
+                    Clicked="OnRecordToggleClicked"
+                    SemanticProperties.Description="Start or stop recording browser actions" />
+
+            <Button Grid.Column="6"
+                    x:Name="TakeOverButton"
+                    Text="Take over"
+                    Style="{StaticResource DenseTabButtonStyle}"
+                    Clicked="OnTakeOverToggleClicked"
+                    SemanticProperties.Description="Suspend synthetic input so you can drive the page directly" />
+        </Grid>
+
+        <Label Grid.Row="1"
+               x:Name="StatusLabel"
+               Padding="10,0,10,6"
+               LineBreakMode="TailTruncation"
+               MaxLines="1"
+               Style="{StaticResource MonoMetaStyle}" />
+
+        <WebView Grid.Row="2"
+                 x:Name="PageWebView"
+                 Navigated="OnWebViewNavigated" />
+    </Grid>
+</ContentView>

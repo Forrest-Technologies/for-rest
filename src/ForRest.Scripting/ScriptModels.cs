@@ -24,6 +24,8 @@ public sealed record ScriptExecutionRequest
 
     public Func<string, IReadOnlyList<VariableDefinition>, Task<ScriptExecutionResult>>? ExecuteWorkspaceRequestAsync { get; init; }
 
+    public IBrowserAutomationBridge? BrowserBridge { get; init; }
+
     public int MaxSendIterations { get; init; }
 }
 

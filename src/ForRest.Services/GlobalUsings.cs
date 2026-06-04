@@ -7,6 +7,7 @@ global using System.Net.Security;
 global using System.Security.Cryptography.X509Certificates;
 global using System.Text;
 global using Microsoft.Extensions.DependencyInjection;
+global using ForRest.Browser;
 global using ForRest.Domain;
 global using ForRest.Models;
 global using ForRest.Plugins.Abstractions;

@@ -32,6 +32,7 @@ public enum AuthMode
     Negotiate,
     OAuthClientCredentials,
     OAuthDeviceCode,
+    OAuthAuthorizationCode,
     OAuthIntegratedWindows,
 }
 

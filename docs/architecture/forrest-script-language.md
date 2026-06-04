@@ -172,6 +172,7 @@ Use `auth { ... }` or top-level `auth key = value` directives.
 | `negotiate` | Integrated Windows auth handshake |
 | `oauth_client_credentials` | Client credentials token acquisition |
 | `oauth_device_code` | Device code auth flow |
+| `oauth_authorization_code` | Interactive browser sign-in (authorization code + PKCE) |
 | `oauth_integrated_windows` | Windows integrated token acquisition |
 
 The docs and catalog should keep the following auth shape explicit:
@@ -185,6 +186,29 @@ auth {
   scopes = "api://forrest/.default"
 }
 ```
+
+`oauth_authorization_code` is the interactive grant: it opens the system browser to
+`authorization_url` (with a PKCE challenge and `state`), captures the redirect on a
+localhost loopback (or accepts a registered `redirect_uri`), exchanges the code at
+`token_url`, caches the `refresh_token`, and auto-refreshes. The acquired bearer token
+is exposed to post-response scripts as the runtime variable `accessToken`.
+
+```frs
+auth {
+  mode = oauth_authorization_code
+  authorization_url = "https://login.example.test/authorize"
+  token_url = "https://login.example.test/token"
+  client_id = "{{client_id}}"
+  redirect_uri = "http://127.0.0.1:5005/callback"
+  scopes = "openid offline_access api"
+  use_pkce = true
+  code_challenge_method = "S256"
+}
+```
+
+For Azure AD B2C, put the policy in the `authorization_url` (path or query) and use a
+public client with PKCE; a loopback `redirect_uri` or `https://oauth.pstmn.io/v1/callback`
+both work (the latter requires a paste-the-redirect broker on headless hosts).
 
 ## Flow Control
 
@@ -312,6 +336,43 @@ Behavior to keep documented:
 - `Reset()` clears both committed rows and the current in-progress row
 - if a branch exits before a stash assignment or commit executes, that branch contributes no stash row
 
+## Security & Fuzzing
+
+The runtime ships a defensive security-testing surface for **authorized** testing only.
+
+- `payloads` is a curated catalog of fuzzing corpora for common web vulnerability
+  classes: `sqli`, `xss`, `path_traversal`, `command_injection`, `ssti`,
+  `open_redirect`, `xxe`, `nosqli`, `crlf_injection`, `ssrf`, `ldap`,
+  `header_injection`, and `prototype_pollution`. Use the named properties, or
+  `payloads.Category(name)` / `payloads.Combine(...)` for dynamic lookups, and
+  `payloads.Mutate(payload)` / `payloads.MutateAll(list)` to expand a payload into
+  WAF-evasion variants (url, double-url, base64, upper/lower case). Custom
+  categories can be injected through the host.
+
+- `fuzz` is a programmatic fuzz engine. `await fuzz.Run(payloads, send, options, category)`
+  drives a payload enumerable against the current request through a `send`
+  delegate (which reuses `request.send()`), bounding concurrency with a
+  `SemaphoreSlim` (`options.MaxConcurrency`), enforcing a per-attempt timeout via
+  a cancellation token (`options.TimeoutMs`), and applying an optional
+  `options.DelayMs` throttle. Per-attempt errors are recorded, never thrown. The
+  `FuzzResult` exposes `.Attempts`, `.Findings`, `.Clusters`, `.Baseline`, and
+  `.Summarize()`.
+
+- Response diffing / fingerprinting is pure and deterministic (no LLM):
+  `fuzz.Fingerprint(response)` reduces a response to `(status, size bucket, timing
+  bucket)`, `fuzz.Baseline(response)` captures a known-good baseline, and
+  `fuzz.Diff(baseline, response)` flags status changes, large size deltas, and
+  time-based anomalies (the canonical blind/time-based injection signal). Attempts
+  are clustered by fingerprint so outliers stand out.
+
+- Governance: `fuzz.AllowHost(host)` / `fuzz.AllowHosts([...])` declare an
+  in-scope host allowlist; once declared, the runner refuses out-of-scope targets.
+  Every run writes an audit line (category, payload count, concurrency, timeout,
+  and the anomaly summary) into the script `console`.
+
+A dedicated `fuzz { }` flow-block grammar is a future follow-up; today `fuzz` is a
+programmatic API object.
+
 ## Built-In Helpers
 
 The runtime currently includes these helper surfaces:
@@ -327,6 +388,8 @@ The runtime currently includes these helper surfaces:
 - `tests`
 - `console`
 - `payloads`
+- `fuzz`
+- `browser`
 - `workspace`
 - `snapshot`
 - `stash`
@@ -380,13 +443,14 @@ Included now:
 - runtime variable seeding
 - request/body/header/query/auth authoring
 - challenge-based Windows auth (`digest`, `ntlm`, `negotiate`)
-- OAuth token acquisition (`oauth_client_credentials`, `oauth_device_code`, `oauth_integrated_windows`)
+- OAuth token acquisition (`oauth_client_credentials`, `oauth_device_code`, `oauth_authorization_code`, `oauth_integrated_windows`)
 - JSON extraction
 - regex extraction and regex-backed expectations
 - structured response stash data
 - `while`, `foreach`, `range(start, end)`, and `if` flow forms
 - `workspace.execute()` nested request execution
 - `ssl`, `history`, `timeout`, `redirects`, `content_type`, and `max_send_iterations` request settings
+- `payloads` corpora (with mutation) and the `fuzz` engine (bounded concurrency, baseline diffing, fingerprinting, host-scope governance)
 
 Not yet included:
 
@@ -397,5 +461,6 @@ Not yet included:
 - plugin-provided language extensions
 - cloud signing helpers such as AWS SigV4 or bespoke HMAC schemes
 - `switch` / `case` / `default` flow syntax
+- a dedicated `fuzz { }` flow-block grammar (the programmatic `fuzz` API covers this today)
 
 Those are future language/runtime expansions, not parser bugs.

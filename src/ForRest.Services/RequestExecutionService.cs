@@ -7,13 +7,17 @@ public sealed class RequestExecutionService(
     IRepeatRunnerService repeatRunnerService,
     IScriptEngine scriptEngine,
     ILogger<RequestExecutionService> logger,
-    IRequestAuthenticationService? requestAuthenticationService = null) : IRequestExecutionService
+    IRequestAuthenticationService? requestAuthenticationService = null,
+    IBrowserAutomationProvider? browserProvider = null) : IRequestExecutionService
 {
     private const string DefaultRequestFlowScript = "await request.send();";
 
     private readonly IRequestAuthenticationService _requestAuthenticationService =
         requestAuthenticationService
         ?? new RequestAuthenticationService(Microsoft.Extensions.Logging.Abstractions.NullLogger<RequestAuthenticationService>.Instance);
+
+    private readonly IBrowserAutomationProvider _browserProvider =
+        browserProvider ?? NullBrowserAutomationProvider.Instance;
 
     #region Public Methods
 
@@ -162,6 +166,7 @@ public sealed class RequestExecutionService(
                     RuntimeVariables = runtimeVariables,
                     SendAsync = ExecuteScriptSend,
                     ExecuteWorkspaceRequestAsync = ExecuteWorkspaceRequestAsync,
+                    BrowserBridge = _browserProvider.Current,
                     MaxSendIterations = request.MaxSendIterations,
                 },
                 iterationCancellationToken);
@@ -217,6 +222,14 @@ public sealed class RequestExecutionService(
             {
                 AuthenticatedPreparedRequest authenticatedPreparedRequest = await _requestAuthenticationService.PrepareAsync(preparedRequest, iterationCancellationToken);
                 preparedRequest = authenticatedPreparedRequest.Request;
+                if (authenticatedPreparedRequest.AcquiredAccessToken is { Length: > 0 } acquiredAccessToken)
+                {
+                    // Expose the freshly-acquired OAuth token to post-response scripts as `accessToken`.
+                    runtimeVariables = MergeRuntimeVariables(
+                        runtimeVariables,
+                        [new VariableDefinition { Key = "accessToken", Value = acquiredAccessToken, Scope = VariableScope.Runtime, IsSecret = true }]);
+                }
+
                 using var handler = CreateHandler(authenticatedPreparedRequest);
                 using var client = new HttpClient(handler)
                 {

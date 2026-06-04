@@ -118,6 +118,7 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
             case AuthMode.Negotiate:
             case AuthMode.OAuthClientCredentials:
             case AuthMode.OAuthDeviceCode:
+            case AuthMode.OAuthAuthorizationCode:
             case AuthMode.OAuthIntegratedWindows:
             default:
                 break;
@@ -264,7 +265,7 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
         return auth.Mode switch
         {
             AuthMode.Basic => "Basic",
-            AuthMode.BearerToken or AuthMode.OAuthClientCredentials or AuthMode.OAuthDeviceCode or AuthMode.OAuthIntegratedWindows
+            AuthMode.BearerToken or AuthMode.OAuthClientCredentials or AuthMode.OAuthDeviceCode or AuthMode.OAuthAuthorizationCode or AuthMode.OAuthIntegratedWindows
                 when auth.ApiKeyLocation == ApiKeyLocation.Header
                      && string.Equals(ResolveHeaderName(auth), "Authorization", StringComparison.OrdinalIgnoreCase) => "Bearer",
             _ => string.Empty,

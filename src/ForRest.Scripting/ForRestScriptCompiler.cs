@@ -253,6 +253,10 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             Scopes = TryReadOptionalString(document.Auth, "scopes") ?? string.Empty,
             Resource = TryReadOptionalString(document.Auth, "resource") ?? string.Empty,
             Audience = TryReadOptionalString(document.Auth, "audience") ?? string.Empty,
+            AuthorizationUrl = TryReadOptionalString(document.Auth, "authorization_url") ?? string.Empty,
+            RedirectUri = TryReadOptionalString(document.Auth, "redirect_uri") ?? string.Empty,
+            UsePkce = TryReadOptionalBoolean(document.Auth, "use_pkce") ?? true,
+            CodeChallengeMethod = TryReadOptionalString(document.Auth, "code_challenge_method") ?? "S256",
             ApiKeyLocation = Enum.TryParse<ApiKeyLocation>(TryReadOptionalString(document.Auth, "location"), true, out var apiKeyLocation)
                 ? apiKeyLocation
                 : ApiKeyLocation.Header,
@@ -923,6 +927,12 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             case "oauth_device_code":
             case "device_code":
                 mode = AuthMode.OAuthDeviceCode;
+                return true;
+            case "oauth_authorization_code":
+            case "authorization_code":
+            case "oauth_auth_code":
+            case "auth_code":
+                mode = AuthMode.OAuthAuthorizationCode;
                 return true;
             case "oauth_integrated_windows":
             case "integrated_windows":

@@ -1,9 +1,14 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using ForRest.Services.AI.OAuth;
+
 namespace ForRest.Services;
 
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddForRestCore(this IServiceCollection services)
     {
+        // Fallback only: the MAUI app registers a provider backed by the live browser pane before this runs.
+        services.TryAddSingleton<IBrowserAutomationProvider>(NullBrowserAutomationProvider.Instance);
         services.AddSingleton<VariableResolver>();
         services.AddSingleton<JsonEditorService>();
         services.AddSingleton<JsonNodeSelector>();
@@ -18,6 +23,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRequestAuthenticationService, RequestAuthenticationService>();
         services.AddSingleton<IRequestExecutionService, RequestExecutionService>();
         services.AddSingleton<IForRestScriptExecutionService, ForRestScriptExecutionService>();
+
+        // AI provider OAuth sign-in. The in-memory token store is a fallback only; the MAUI app
+        // overrides it with a DPAPI-backed implementation, hence TryAddSingleton.
+        services.TryAddSingleton<IProviderTokenStore, InMemoryProviderTokenStore>();
+        services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 
         return services;
     }

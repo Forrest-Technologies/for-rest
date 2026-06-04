@@ -37,9 +37,11 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         var regex = global::ForRest.Scripting.ScriptRuntimeContext.Globals.regex;
         var random = global::ForRest.Scripting.ScriptRuntimeContext.Globals.random;
         var payloads = global::ForRest.Scripting.ScriptRuntimeContext.Globals.payloads;
+        var fuzz = global::ForRest.Scripting.ScriptRuntimeContext.Globals.fuzz;
         var workspace = global::ForRest.Scripting.ScriptRuntimeContext.Globals.workspace;
         dynamic stash = global::ForRest.Scripting.ScriptRuntimeContext.Globals.stash;
         var snapshot = global::ForRest.Scripting.ScriptRuntimeContext.Globals.snapshot;
+        var browser = global::ForRest.Scripting.ScriptRuntimeContext.Globals.browser;
 
         """;
     private static readonly string[] DefaultImports =
@@ -155,6 +157,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 regex = new RegexApi(),
                 random = new RandomApi(),
                 payloads = new PayloadsApi(),
+                fuzz = new FuzzApi(consoleApi, requestApi),
                 workspace = new WorkspaceApi(
                     request.Workspace,
                     variablesApi,
@@ -165,6 +168,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                     request.ExecuteWorkspaceRequestAsync),
                 stash = stashApi,
                 snapshot = new SnapshotApi(),
+                browser = new ScriptBrowserApi(request.BrowserBridge ?? NullBrowserBridge.Instance),
             };
 
             ScriptCompilationResult compilation = CompileScript(request.Script);

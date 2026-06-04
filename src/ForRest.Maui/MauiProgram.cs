@@ -1,10 +1,13 @@
+using ForRest.Browser;
 using ForRest.Domain;
 using ForRest.Maui.Theming;
 using ForRest.Maui.Services;
+using ForRest.Maui.Services.Browser;
 using ForRest.Maui.ViewModels;
 using ForRest.Repositories;
 using ForRest.Services;
 using ForRest.Services.AI;
+using ForRest.Services.AI.OAuth;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging;
 #if WINDOWS || MACCATALYST
@@ -44,6 +47,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton<SettingsTomlDocumentService>();
 		builder.Services.AddSingleton<IWorkbenchAiSettingsProvider, WorkbenchAiSettingsProvider>();
 		builder.Services.AddSingleton<IWorkbenchMcpSettingsProvider, WorkbenchMcpSettingsProvider>();
+		builder.Services.AddSingleton<IProviderTokenStore, SecureStorageProviderTokenStore>();
+		builder.Services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
 		builder.Services.AddSingleton<ILicenseLeaseCacheStore, FileLicenseLeaseCacheStore>();
@@ -56,6 +61,8 @@ public static class MauiProgram
 			});
 		builder.Services.AddSingleton<IAppActivationService, AppActivationService>();
 		builder.Services.AddSingleton<RequestWorkbenchStateStore>();
+		builder.Services.AddSingleton<BrowserAutomationProvider>();
+		builder.Services.AddSingleton<IBrowserAutomationProvider>(serviceProvider => serviceProvider.GetRequiredService<BrowserAutomationProvider>());
 		builder.Services.AddSingleton<IExecutionHistoryRepository, InMemoryExecutionHistoryRepository>();
 		builder.Services.AddSingleton<VariableResolver>();
 		builder.Services.AddSingleton<JsonEditorService>();

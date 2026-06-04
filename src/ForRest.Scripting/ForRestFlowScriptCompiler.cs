@@ -12,6 +12,7 @@ internal static class ForRestFlowScriptCompiler
     [
         "await",
         "break",
+        "browser",
         "call",
         "continue",
         "define",

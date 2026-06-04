@@ -103,6 +103,14 @@ public partial class WorkbenchCenterPane : ContentView
 		ViewModel.ToggleLanguageHelp();
 	}
 
+	private void OnCenterTabClicked(object? sender, EventArgs e)
+	{
+		if (sender is Button { CommandParameter: PaneTabViewModel tab })
+		{
+			ViewModel.SelectCenterTab(tab);
+		}
+	}
+
 	private async void OnCopyLanguageHelpExampleClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopySelectedLanguageHelpExampleAsync();

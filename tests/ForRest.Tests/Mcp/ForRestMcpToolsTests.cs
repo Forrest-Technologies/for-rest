@@ -121,6 +121,87 @@ public sealed class ForRestMcpToolsTests
         StringAssert.Contains(result, "No payloads");
     }
 
+    [TestMethod]
+    public void List_payload_categories_includes_new_categories()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string json = tools.list_payload_categories();
+
+        StringAssert.Contains(json, "ldap");
+        StringAssert.Contains(json, "header_injection");
+        StringAssert.Contains(json, "prototype_pollution");
+    }
+
+    [TestMethod]
+    public void Analyze_responses_flags_status_and_timing_anomalies()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string json = tools.analyze_responses(
+            baseline_status: 200, baseline_size_bytes: 1000, baseline_duration_ms: 40,
+            candidate_status: 500, candidate_size_bytes: 1000, candidate_duration_ms: 5040);
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.IsTrue(parsed.RootElement.GetProperty("isAnomalous").GetBoolean());
+        string anomalies = parsed.RootElement.GetProperty("anomalies").GetRawText();
+        StringAssert.Contains(anomalies, "status changed");
+        StringAssert.Contains(anomalies, "timing anomaly");
+    }
+
+    [TestMethod]
+    public void Analyze_responses_reports_no_anomaly_for_identical_responses()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string json = tools.analyze_responses(200, 1000, 50, 200, 1000, 55);
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.IsFalse(parsed.RootElement.GetProperty("isAnomalous").GetBoolean());
+        Assert.AreEqual(0, parsed.RootElement.GetProperty("anomalies").GetArrayLength());
+    }
+
+    [TestMethod]
+    public void Build_fuzz_script_emits_runnable_fuzz_harness_with_scope_guard()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string script = tools.build_fuzz_script("https://target.test/search", "sqli");
+
+        StringAssert.Contains(script, "request {");
+        StringAssert.Contains(script, "flow {");
+        StringAssert.Contains(script, "fuzz.AllowHost(\"target.test\")");
+        StringAssert.Contains(script, "await fuzz.Run(payloads.Category(\"sqli\")");
+        StringAssert.Contains(script, "new ForRest.Scripting.FuzzOptions");
+        StringAssert.Contains(script, "result.Summarize()");
+        StringAssert.Contains(script, "foreach f in result.Findings");
+        StringAssert.Contains(script, "stash.Commit()");
+        StringAssert.Contains(script, "?q=");
+    }
+
+    [TestMethod]
+    public void Build_fuzz_script_supports_body_injection_and_omits_scope_when_unrestricted()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string script = tools.build_fuzz_script(
+            "https://target.test/items", "xss", injection: "body", restrict_to_host: false);
+
+        StringAssert.Contains(script, "method = POST");
+        StringAssert.Contains(script, "request.body = json.Stringify(new { value = payload })");
+        Assert.IsFalse(script.Contains("fuzz.AllowHost", System.StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Build_fuzz_script_rejects_unknown_category()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string result = tools.build_fuzz_script("https://target.test", "not-a-category");
+
+        StringAssert.Contains(result, "No payloads");
+    }
+
     #endregion
 
     #region Host-less degradation
@@ -435,6 +516,57 @@ public sealed class ForRestMcpToolsTests
 
     #endregion
 
+    #region Browser automation
+
+    [TestMethod]
+    public async Task Browser_navigate_and_click_pass_through_to_host()
+    {
+        FakeHost host = new();
+        ForRestMcpTools tools = CreateTools(host);
+
+        string navigated = await tools.browser_navigate("https://app.test/login");
+        string clicked = await tools.browser_click("role=button:Sign in");
+
+        StringAssert.Contains(navigated, "https://app.test/login");
+        StringAssert.Contains(clicked, "role=button:Sign in");
+        CollectionAssert.Contains(host.BrowserCalls, "navigate:https://app.test/login");
+        CollectionAssert.Contains(host.BrowserCalls, "click:role=button:Sign in");
+    }
+
+    [TestMethod]
+    public async Task Browser_query_returns_stable_selectors()
+    {
+        ForRestMcpTools tools = CreateTools(new FakeHost());
+
+        string json = await tools.browser_query("#go");
+
+        StringAssert.Contains(json, "#go");
+        StringAssert.Contains(json, "Xpath");
+    }
+
+    [TestMethod]
+    public async Task Browser_snapshot_lists_elements()
+    {
+        ForRestMcpTools tools = CreateTools(new FakeHost());
+
+        string json = await tools.browser_snapshot();
+
+        StringAssert.Contains(json, "Elements");
+        StringAssert.Contains(json, "https://x.test/");
+    }
+
+    [TestMethod]
+    public async Task Browser_tools_report_missing_host()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string result = await tools.browser_navigate("https://x.test");
+
+        StringAssert.Contains(result, "desktop");
+    }
+
+    #endregion
+
     #region Helpers
 
     private static ForRestMcpTools CreateTools(IForRestMcpHost? host)
@@ -567,6 +699,51 @@ public sealed class ForRestMcpToolsTests
         public string GetSettingsText() => "[mcp]\nenabled = true\n";
 
         public ForRestMcpMutationResult UpdateSettingsText(string rawToml) => ForRestMcpMutationResult.Ok("saved");
+
+        public List<string> BrowserCalls { get; } = [];
+
+        public bool BrowserAvailable => true;
+
+        public Task<string> BrowserNavigate(string url, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"navigate:{url}");
+            return Task.FromResult($"Navigated to {url}.");
+        }
+
+        public Task<ForRestMcpBrowserSnapshotView> BrowserSnapshot(CancellationToken cancellationToken)
+            => Task.FromResult(new ForRestMcpBrowserSnapshotView(true, "https://x.test/", "X",
+                [new ForRestMcpBrowserElementView(true, "button", "go", "Go", "#go", "/html/body/button[1]", "button", "Go", 1, 2, 3, 4)]));
+
+        public Task<string> BrowserScreenshot(CancellationToken cancellationToken) => Task.FromResult("QUJD");
+
+        public Task<ForRestMcpBrowserElementView> BrowserQuery(string target, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"query:{target}");
+            return Task.FromResult(new ForRestMcpBrowserElementView(true, "button", "go", "Go", "#go", "/html/body/button[1]", "button", "Go", 1, 2, 3, 4));
+        }
+
+        public Task<string> BrowserClick(string target, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"click:{target}");
+            return Task.FromResult($"Clicked {target}.");
+        }
+
+        public Task<string> BrowserType(string target, string text, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"type:{target}={text}");
+            return Task.FromResult($"Typed into {target}.");
+        }
+
+        public Task<string> BrowserPress(string keys, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"press:{keys}");
+            return Task.FromResult($"Pressed {keys}.");
+        }
+
+        public Task<ForRestMcpBrowserElementView> BrowserWaitFor(string target, int timeoutMs, CancellationToken cancellationToken)
+            => Task.FromResult(new ForRestMcpBrowserElementView(true, "div", "ready", "Ready", "#ready", "/html/body/div[1]", "", "", 0, 0, 0, 0));
+
+        public Task<string> BrowserEvaluate(string expression, CancellationToken cancellationToken) => Task.FromResult("null");
     }
 
     #endregion

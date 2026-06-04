@@ -9,6 +9,7 @@
 
 # Repository-local state and secret material
 /.azure/
+/.claude/worktrees/
 /.codex/
 /.codex-dotnet/
 /.dotnet-cli/

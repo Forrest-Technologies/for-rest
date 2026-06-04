@@ -138,6 +138,26 @@ public sealed record ForRestMcpServerSettingsView(
     int MaxConcurrentSessions,
     string? Endpoint);
 
+public sealed record ForRestMcpBrowserElementView(
+    bool Found,
+    string Tag,
+    string Id,
+    string Text,
+    string Css,
+    string Xpath,
+    string Role,
+    string Name,
+    double X,
+    double Y,
+    double Width,
+    double Height);
+
+public sealed record ForRestMcpBrowserSnapshotView(
+    bool Available,
+    string Url,
+    string Title,
+    IReadOnlyList<ForRestMcpBrowserElementView> Elements);
+
 #endregion
 
 /// <summary>
@@ -226,6 +246,32 @@ public interface IForRestMcpHost
     string GetSettingsText();
 
     ForRestMcpMutationResult UpdateSettingsText(string rawToml);
+
+    #endregion
+
+    #region Browser automation
+
+    /// <summary>Whether a live browser pane is connected and ready to be driven.</summary>
+    bool BrowserAvailable { get; }
+
+    Task<string> BrowserNavigate(string url, CancellationToken cancellationToken);
+
+    Task<ForRestMcpBrowserSnapshotView> BrowserSnapshot(CancellationToken cancellationToken);
+
+    /// <summary>Returns a base64-encoded PNG screenshot of the current page.</summary>
+    Task<string> BrowserScreenshot(CancellationToken cancellationToken);
+
+    Task<ForRestMcpBrowserElementView> BrowserQuery(string target, CancellationToken cancellationToken);
+
+    Task<string> BrowserClick(string target, CancellationToken cancellationToken);
+
+    Task<string> BrowserType(string target, string text, CancellationToken cancellationToken);
+
+    Task<string> BrowserPress(string keys, CancellationToken cancellationToken);
+
+    Task<ForRestMcpBrowserElementView> BrowserWaitFor(string target, int timeoutMs, CancellationToken cancellationToken);
+
+    Task<string> BrowserEvaluate(string expression, CancellationToken cancellationToken);
 
     #endregion
 }
