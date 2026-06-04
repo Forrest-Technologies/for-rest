@@ -22,7 +22,7 @@ using Microsoft.Maui.Storage;
 
 namespace ForRest.Maui.ViewModels;
 
-public sealed class MainPageViewModel : ObservableObject
+public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 {
 	private const double DefaultLeftPanePixels = 260d;
 	private const double DefaultRightPanePixels = 420d;
@@ -6856,4 +6856,584 @@ public sealed class MainPageViewModel : ObservableObject
 			return false;
 		}
 	}
+
+	#region MCP workbench bridge
+
+	async Task<IReadOnlyList<McpWorkbenchWorkspace>> IMcpWorkbenchBridge.ListWorkspaces()
+	{
+		IReadOnlyList<McpWorkbenchWorkspace> result = [];
+		await InvokeOnViewModelThreadAsync(() => result = McpSnapshotWorkspaces());
+		return result;
+	}
+
+	async Task<McpWorkbenchWorkspace?> IMcpWorkbenchBridge.GetWorkspace(string workspaceId)
+	{
+		McpWorkbenchWorkspace? result = null;
+		await InvokeOnViewModelThreadAsync(() =>
+		{
+			if (McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+			{
+				result = McpMapWorkspace(workspace);
+			}
+		});
+		return result;
+	}
+
+	async Task<McpWorkbenchDocument?> IMcpWorkbenchBridge.GetActiveDocument()
+	{
+		McpWorkbenchDocument? result = null;
+		await InvokeOnViewModelThreadAsync(() =>
+		{
+			CaptureActiveRequestIntoWorkspaceState();
+			RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+			if (workspace is null)
+			{
+				return;
+			}
+
+			RequestWorkbenchDocumentState? document = workspace.Documents.FirstOrDefault(
+					item => string.Equals(item.Location, RequestLocation, StringComparison.OrdinalIgnoreCase))
+				?? workspace.Documents.FirstOrDefault();
+			if (document is not null)
+			{
+				result = new McpWorkbenchDocument(document.Location, document.Title, document.RequestSource, workspace.Name);
+			}
+		});
+		return result;
+	}
+
+	async Task<McpWorkbenchScriptDetail?> IMcpWorkbenchBridge.GetScript(string workspaceId, string location)
+	{
+		McpWorkbenchScriptDetail? result = null;
+		await InvokeOnViewModelThreadAsync(() =>
+		{
+			if (McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+			{
+				RequestWorkbenchDocumentState? document = McpFindDocument(workspace, location);
+				if (document is not null)
+				{
+					result = new McpWorkbenchScriptDetail(
+						workspace.Id.ToString(),
+						workspace.Name,
+						document.Location,
+						document.Title,
+						document.Method,
+						document.Summary,
+						document.RequestSource);
+				}
+			}
+		});
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.CreateWorkspace(string name)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpCreateWorkspace(name));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.RenameWorkspace(string workspaceId, string newName)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpRenameWorkspace(workspaceId, newName));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.DeleteWorkspace(string workspaceId)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpDeleteWorkspace(workspaceId));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.CreateScript(string workspaceId, string name, string source)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpCreateScript(workspaceId, name, source));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.UpdateScript(string workspaceId, string location, string newSource)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpUpdateScript(workspaceId, location, newSource));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.RenameScript(string workspaceId, string location, string newName)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpRenameScript(workspaceId, location, newName));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.DeleteScript(string workspaceId, string location)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpDeleteScript(workspaceId, location));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.SetActiveDocument(string workspaceId, string location)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpSetActiveDocument(workspaceId, location));
+		return result;
+	}
+
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.ReplaceActiveDocument(string newSource)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpReplaceActiveDocument(newSource));
+		return result;
+	}
+
+	private IReadOnlyList<McpWorkbenchWorkspace> McpSnapshotWorkspaces()
+	{
+		List<McpWorkbenchWorkspace> workspaces = [];
+		foreach (WorkspaceItemViewModel item in Workspaces)
+		{
+			if (_workspaceStates.TryGetValue(item.Id, out RequestWorkbenchWorkspaceState? workspace))
+			{
+				workspaces.Add(McpMapWorkspace(workspace));
+			}
+		}
+
+		return workspaces;
+	}
+
+	private static McpWorkbenchWorkspace McpMapWorkspace(RequestWorkbenchWorkspaceState workspace)
+	{
+		return new McpWorkbenchWorkspace(
+			workspace.Id.ToString(),
+			workspace.Name,
+			[.. workspace.Documents.Select(document => new McpWorkbenchScript(document.Title, document.Method, document.Summary, document.Location))]);
+	}
+
+	private McpWorkbenchResult McpCreateWorkspace(string name)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		string workspaceName = string.IsNullOrWhiteSpace(name) ? BuildNextWorkspaceName() : name.Trim();
+		RequestWorkbenchWorkspaceState workspace = new()
+		{
+			Id = Guid.NewGuid(),
+			Name = workspaceName,
+		};
+		_workspaceStates[workspace.Id] = workspace;
+		Workspaces.Add(new WorkspaceItemViewModel(workspace.Id, workspace.Name, "0 requests", false));
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok($"Workspace '{workspace.Name}' created.", workspace.Id.ToString());
+	}
+
+	private McpWorkbenchResult McpRenameWorkspace(string workspaceId, string newName)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (string.IsNullOrWhiteSpace(newName))
+		{
+			return McpWorkbenchResult.Fail("New workspace name is required.");
+		}
+
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return McpWorkbenchResult.Fail($"No workspace found with id '{workspaceId}'.");
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchWorkspaceState renamed = RenameWorkspace(workspace, newName.Trim());
+		RekeyWorkspaceDocumentHistory(workspace, renamed);
+		_workspaceStates[renamed.Id] = renamed;
+		if (renamed.Id == _selectedWorkspaceId)
+		{
+			ApplyWorkspaceSelection(renamed.Id);
+		}
+		else
+		{
+			McpTouchWorkspaceItem(renamed);
+		}
+
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok("Workspace renamed.", renamed.Id.ToString());
+	}
+
+	private McpWorkbenchResult McpDeleteWorkspace(string workspaceId)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return McpWorkbenchResult.Fail($"No workspace found with id '{workspaceId}'.");
+		}
+
+		bool deletingSelected = workspace.Id == _selectedWorkspaceId;
+		ClearWorkspaceDocumentHistory(workspace);
+		_workspaceStates.Remove(workspace.Id);
+		WorkspaceItemViewModel? item = Workspaces.FirstOrDefault(candidate => candidate.Id == workspace.Id);
+		if (item is not null)
+		{
+			Workspaces.Remove(item);
+		}
+
+		if (Workspaces.Count == 0)
+		{
+			RequestWorkbenchWorkspaceState replacement = BuildUserWorkspace(BuildNextWorkspaceName());
+			_workspaceStates[replacement.Id] = replacement;
+			Workspaces.Add(
+				new WorkspaceItemViewModel(
+					replacement.Id,
+					replacement.Name,
+					replacement.Documents.Count == 1 ? "1 request" : $"{replacement.Documents.Count} requests",
+					false));
+			ApplyWorkspaceSelection(replacement.Id);
+		}
+		else if (deletingSelected)
+		{
+			ApplyWorkspaceSelection(Workspaces[0].Id);
+		}
+
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok("Workspace deleted.");
+	}
+
+	private McpWorkbenchResult McpCreateScript(string workspaceId, string name, string source)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (string.IsNullOrWhiteSpace(name))
+		{
+			return McpWorkbenchResult.Fail("Script name is required.");
+		}
+
+		if (string.IsNullOrWhiteSpace(source))
+		{
+			return McpWorkbenchResult.Fail("Script source is required.");
+		}
+
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return McpWorkbenchResult.Fail($"No workspace found with id '{workspaceId}'.");
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		string location = McpBuildScriptLocation(workspace, name);
+		(string method, string summary) = McpDeriveScriptMetadata(workspace.Id, source, name);
+		RequestWorkbenchDocumentState document = new()
+		{
+			Title = name.Trim(),
+			Method = method,
+			Summary = summary,
+			Location = location,
+			RequestSource = source,
+		};
+
+		RequestWorkbenchWorkspaceState updated = workspace with
+		{
+			SelectedDocumentLocation = location,
+			Documents = [.. workspace.Documents, document],
+		};
+		_workspaceStates[updated.Id] = updated;
+		if (updated.Id == _selectedWorkspaceId)
+		{
+			ApplyWorkspaceSelection(updated.Id);
+		}
+		else
+		{
+			McpTouchWorkspaceItem(updated);
+		}
+
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok($"Script '{document.Title}' created.", location);
+	}
+
+	private McpWorkbenchResult McpUpdateScript(string workspaceId, string location, string newSource)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (string.IsNullOrWhiteSpace(newSource))
+		{
+			return McpWorkbenchResult.Fail("Replacement source is required.");
+		}
+
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return McpWorkbenchResult.Fail($"No workspace found with id '{workspaceId}'.");
+		}
+
+		RequestWorkbenchDocumentState? document = McpFindDocument(workspace, location);
+		if (document is null)
+		{
+			return McpWorkbenchResult.Fail($"No script found at '{location}' in workspace '{workspaceId}'.");
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		(string method, string summary) = McpDeriveScriptMetadata(workspace.Id, newSource, document.Title);
+		RequestWorkbenchDocumentState updatedDocument = document with
+		{
+			RequestSource = newSource,
+			Method = method,
+			Summary = summary,
+		};
+		RequestWorkbenchWorkspaceState updated = workspace with
+		{
+			Documents = UpsertDocument(workspace.Documents, updatedDocument),
+		};
+		_workspaceStates[updated.Id] = updated;
+		if (updated.Id == _selectedWorkspaceId)
+		{
+			ApplyWorkspaceSelection(updated.Id);
+		}
+		else
+		{
+			McpTouchWorkspaceItem(updated);
+		}
+
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok("Script updated.", updatedDocument.Location);
+	}
+
+	private McpWorkbenchResult McpRenameScript(string workspaceId, string location, string newName)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (string.IsNullOrWhiteSpace(newName))
+		{
+			return McpWorkbenchResult.Fail("New script name is required.");
+		}
+
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return McpWorkbenchResult.Fail($"No workspace found with id '{workspaceId}'.");
+		}
+
+		RequestWorkbenchDocumentState? document = McpFindDocument(workspace, location);
+		if (document is null)
+		{
+			return McpWorkbenchResult.Fail($"No script found at '{location}' in workspace '{workspaceId}'.");
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchDocumentState renamed = document with { Title = newName.Trim() };
+		RequestWorkbenchWorkspaceState updated = workspace with
+		{
+			Documents = UpsertDocument(workspace.Documents, renamed),
+		};
+		_workspaceStates[updated.Id] = updated;
+		if (updated.Id == _selectedWorkspaceId)
+		{
+			ApplyWorkspaceSelection(updated.Id);
+		}
+		else
+		{
+			McpTouchWorkspaceItem(updated);
+		}
+
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok("Script renamed.", renamed.Location);
+	}
+
+	private McpWorkbenchResult McpDeleteScript(string workspaceId, string location)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return McpWorkbenchResult.Fail($"No workspace found with id '{workspaceId}'.");
+		}
+
+		RequestWorkbenchDocumentState? document = McpFindDocument(workspace, location);
+		if (document is null)
+		{
+			return McpWorkbenchResult.Fail($"No script found at '{location}' in workspace '{workspaceId}'.");
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		List<RequestWorkbenchDocumentState> remaining =
+		[
+			.. workspace.Documents.Where(item => !string.Equals(item.Location, document.Location, StringComparison.OrdinalIgnoreCase))
+		];
+		string selectedLocation = remaining.Any(item => string.Equals(item.Location, workspace.SelectedDocumentLocation, StringComparison.OrdinalIgnoreCase))
+			? workspace.SelectedDocumentLocation
+			: remaining.FirstOrDefault()?.Location ?? string.Empty;
+		RequestWorkbenchWorkspaceState updated = workspace with
+		{
+			Documents = remaining,
+			SelectedDocumentLocation = selectedLocation,
+		};
+		_workspaceStates[updated.Id] = updated;
+		if (updated.Id == _selectedWorkspaceId)
+		{
+			ApplyWorkspaceSelection(updated.Id);
+		}
+		else
+		{
+			McpTouchWorkspaceItem(updated);
+		}
+
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok("Script deleted.");
+	}
+
+	private McpWorkbenchResult McpSetActiveDocument(string workspaceId, string location)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return McpWorkbenchResult.Fail($"No workspace found with id '{workspaceId}'.");
+		}
+
+		RequestWorkbenchDocumentState? document = McpFindDocument(workspace, location);
+		if (document is null)
+		{
+			return McpWorkbenchResult.Fail($"No script found at '{location}' in workspace '{workspaceId}'.");
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchWorkspaceState updated = workspace with { SelectedDocumentLocation = document.Location };
+		_workspaceStates[updated.Id] = updated;
+		ApplyWorkspaceSelection(updated.Id);
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok("Active document selected.", document.Location);
+	}
+
+	private McpWorkbenchResult McpReplaceActiveDocument(string newSource)
+	{
+		if (!_isInitialized)
+		{
+			return McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		}
+
+		if (string.IsNullOrWhiteSpace(newSource))
+		{
+			return McpWorkbenchResult.Fail("Replacement source is required.");
+		}
+
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return McpWorkbenchResult.Fail("No active workspace.");
+		}
+
+		RequestWorkbenchDocumentState? document = workspace.Documents.FirstOrDefault(
+				item => string.Equals(item.Location, RequestLocation, StringComparison.OrdinalIgnoreCase))
+			?? workspace.Documents.FirstOrDefault();
+		if (document is null)
+		{
+			return McpWorkbenchResult.Fail("No active document.");
+		}
+
+		(string method, string summary) = McpDeriveScriptMetadata(workspace.Id, newSource, document.Title);
+		RequestWorkbenchDocumentState updatedDocument = document with
+		{
+			RequestSource = newSource,
+			Method = method,
+			Summary = summary,
+		};
+		RequestWorkbenchWorkspaceState updated = workspace with
+		{
+			SelectedDocumentLocation = updatedDocument.Location,
+			Documents = UpsertDocument(workspace.Documents, updatedDocument),
+		};
+		_workspaceStates[updated.Id] = updated;
+		ApplyWorkspaceSelection(updated.Id);
+		_ = PersistWorkbenchStateInBackground();
+		return McpWorkbenchResult.Ok("Active document replaced.", updatedDocument.Location);
+	}
+
+	private bool McpTryGetWorkspace(string workspaceId, out RequestWorkbenchWorkspaceState workspace)
+	{
+		if (Guid.TryParse(workspaceId, out Guid id) &&
+			_workspaceStates.TryGetValue(id, out RequestWorkbenchWorkspaceState? found))
+		{
+			workspace = found;
+			return true;
+		}
+
+		workspace = null!;
+		return false;
+	}
+
+	private static RequestWorkbenchDocumentState? McpFindDocument(RequestWorkbenchWorkspaceState workspace, string location)
+	{
+		return workspace.Documents.FirstOrDefault(
+			document => string.Equals(document.Location, location, StringComparison.OrdinalIgnoreCase));
+	}
+
+	private void McpTouchWorkspaceItem(RequestWorkbenchWorkspaceState workspace)
+	{
+		WorkspaceItemViewModel? item = Workspaces.FirstOrDefault(candidate => candidate.Id == workspace.Id);
+		if (item is not null)
+		{
+			item.Title = workspace.Name;
+			item.Subtitle = workspace.Documents.Count == 1 ? "1 request" : $"{workspace.Documents.Count} requests";
+		}
+	}
+
+	private static string McpBuildScriptLocation(RequestWorkbenchWorkspaceState workspace, string name)
+	{
+		string workspaceSlug = BuildSlug(workspace.Name, "workspace");
+		string scriptSlug = BuildSlug(name, "request");
+		string baseLocation = $"/requests/{workspaceSlug}/{scriptSlug}";
+		HashSet<string> taken = workspace.Documents
+			.Select(document => document.Location)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		string candidate = baseLocation;
+		int suffix = 2;
+		while (taken.Contains(candidate))
+		{
+			candidate = $"{baseLocation}-{suffix}";
+			suffix++;
+		}
+
+		return candidate;
+	}
+
+	private (string Method, string Summary) McpDeriveScriptMetadata(Guid workspaceId, string source, string name)
+	{
+		try
+		{
+			ForRestScriptCompilationResult compilation = _scriptExecutionService.Compile(source, workspaceId, name);
+			if (compilation.Payload is { } payload)
+			{
+				string method = payload.Request.Method.ToString().ToUpperInvariant();
+				string summary = payload.Request.UrlTemplate ?? string.Empty;
+				return (method, summary);
+			}
+		}
+		catch
+		{
+			// Best-effort metadata; fall through to defaults when the source does not compile.
+		}
+
+		return ("GET", string.Empty);
+	}
+
+	#endregion
 }

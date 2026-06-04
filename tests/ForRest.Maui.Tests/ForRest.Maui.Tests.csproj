@@ -51,6 +51,7 @@
     <Compile Include="..\..\src\ForRest.Maui\Services\RequestWorkbenchStateStore.cs" Link="Services\RequestWorkbenchStateStore.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\WorkbenchAiSettingsProvider.cs" Link="Services\WorkbenchAiSettingsProvider.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\WorkbenchMcpSettingsProvider.cs" Link="Services\WorkbenchMcpSettingsProvider.cs" />
+    <Compile Include="..\..\src\ForRest.Maui\Services\McpLiveWorkbench.cs" Link="Services\McpLiveWorkbench.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\BuildMetadataProvider.cs" Link="Services\BuildMetadataProvider.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\LicenseRuntimeModels.cs" Link="Services\LicenseRuntimeModels.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\LicenseRuntimeServices.cs" Link="Services\LicenseRuntimeServices.cs" />
