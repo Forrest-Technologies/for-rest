@@ -99,4 +99,53 @@ public sealed class ThemeConfigParserTests
 		StringAssert.Contains(result.NormalizedText, "stream_responses = false");
 		StringAssert.Contains(result.NormalizedText, "api_key = \"secret-api-key\"");
 	}
+
+	[TestMethod]
+	public void Normalize_switches_to_newly_enabled_theme_when_multiple_flags_are_true()
+	{
+		SettingsTomlTemplate template = new();
+		ThemeConfigParser parser = new();
+		ThemeConfigNormalizer normalizer = new(template);
+
+		// User turned on black while azure (the current theme) is still true.
+		ThemeConfigDocument document = parser.Parse(
+			"""
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = true
+			amber = false
+			""");
+
+		ThemeNormalizationResult result = normalizer.Normalize(document, ShellThemeName.Azure);
+
+		// Newest flag wins: switch to black and the writer clears the rest.
+		Assert.AreEqual(ShellThemeName.Black, result.Settings.Theme);
+		StringAssert.Contains(result.NormalizedText, "black = true");
+		StringAssert.Contains(result.NormalizedText, "azure = false");
+	}
+
+	[TestMethod]
+	public void Normalize_without_current_theme_keeps_first_enabled_flag()
+	{
+		SettingsTomlTemplate template = new();
+		ThemeConfigParser parser = new();
+		ThemeConfigNormalizer normalizer = new(template);
+
+		ThemeConfigDocument document = parser.Parse(
+			"""
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = true
+			amber = false
+			""");
+
+		ThemeNormalizationResult result = normalizer.Normalize(document);
+
+		// No current theme supplied -> historical first-in-document behaviour.
+		Assert.AreEqual(ShellThemeName.Azure, result.Settings.Theme);
+	}
 }
