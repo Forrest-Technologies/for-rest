@@ -36,6 +36,16 @@ public sealed record OAuthProviderConfig
     /// </summary>
     public string? Audience { get; init; }
 
+    /// <summary>Optional token revocation endpoint (used for sign-out), when the provider exposes one.</summary>
+    public string? RevocationEndpoint { get; init; }
+
+    /// <summary>
+    /// Optional fixed loopback port the redirect listener must bind. Some providers register an exact
+    /// redirect URI (e.g. Codex uses <c>http://localhost:1455/auth/callback</c>); when null a free
+    /// port is chosen per RFC 8252.
+    /// </summary>
+    public int? LoopbackPort { get; init; }
+
     #endregion
 
     #region Public Methods
@@ -64,46 +74,51 @@ public static class OAuthProviderDefaults
     }
 
     /// <summary>
-    /// xAI (Grok) browser sign-in defaults.
-    /// TODO: confirm against provider docs — xAI's public OAuth authorization-code + PKCE
-    /// endpoints and the first-party client_id are not yet finalized publicly. These are
-    /// best-known placeholders and MUST be overridden from settings before shipping.
+    /// xAI / X (Grok) browser sign-in defaults, using X's OAuth 2.0 authorization-code + PKCE flow.
+    /// Endpoints are confirmed from the X developer docs. The <see cref="OAuthProviderConfig.ClientId"/>
+    /// is intentionally a placeholder: it REQUIRES the operator to register an App in the X Developer
+    /// Portal and supply its Client ID (and to whitelist the loopback redirect URI). Confidential
+    /// clients additionally send a Basic auth header with the client secret at the token endpoint.
     /// </summary>
     public static OAuthProviderConfig CreateGrokDefault()
     {
         return new()
         {
             Provider = AiProviderKind.Grok,
-            // TODO: confirm against provider docs.
-            AuthorizationEndpoint = "https://accounts.x.ai/oauth/authorize",
-            // TODO: confirm against provider docs.
-            TokenEndpoint = "https://api.x.ai/oauth/token",
-            // TODO: confirm against provider docs — no public first-party desktop client_id yet.
-            ClientId = "forrest-grok",
-            Scopes = ["openid", "profile", "offline_access", "api"],
+            AuthorizationEndpoint = "https://x.com/i/oauth2/authorize",
+            TokenEndpoint = "https://api.x.com/2/oauth2/token",
+            RevocationEndpoint = "https://api.x.com/2/oauth2/revoke",
+            // TODO (operator): register an App at https://developer.x.com → Keys and Tokens, then set
+            // this Client ID (and whitelist the loopback redirect) from settings. Sign-in cannot work
+            // until this is a real, registered Client ID.
+            ClientId = "REPLACE_WITH_X_APP_CLIENT_ID",
+            // X uses dotted scope names; offline.access yields a refresh token.
+            Scopes = ["users.read", "tweet.read", "offline.access"],
             RedirectPath = "/callback",
         };
     }
 
     /// <summary>
-    /// OpenAI (Codex / ChatGPT-style) browser sign-in defaults. The Codex CLI uses an
-    /// authorization-code + PKCE flow against auth.openai.com with a loopback redirect.
-    /// TODO: confirm against provider docs — the first-party Codex client_id and exact scopes
-    /// are subject to change; treat these as best-known defaults and allow overrides.
+    /// OpenAI (Codex / "Sign in with ChatGPT") browser sign-in defaults. Per the Codex docs this is an
+    /// authorization-code + PKCE flow against auth.openai.com that returns the token to a fixed
+    /// localhost:1455 loopback callback. These reuse the open-source Codex CLI's PUBLIC client and
+    /// callback, so no operator app registration is required — but they are the Codex CLI's values and
+    /// may change; allow overrides from settings. Note ChatGPT-login usage follows the user's ChatGPT
+    /// workspace data/retention policies.
     /// </summary>
     public static OAuthProviderConfig CreateOpenAiDefault()
     {
         return new()
         {
             Provider = AiProviderKind.OpenAI,
-            // TODO: confirm against provider docs.
             AuthorizationEndpoint = "https://auth.openai.com/oauth/authorize",
-            // TODO: confirm against provider docs.
             TokenEndpoint = "https://auth.openai.com/oauth/token",
-            // TODO: confirm against provider docs — Codex CLI public client identifier.
+            // Public client used by the open-source Codex CLI (no operator registration needed).
             ClientId = "app_EMoamEEZ73f0CkXaXp7hrann",
             Scopes = ["openid", "profile", "email", "offline_access"],
             RedirectPath = "/auth/callback",
+            FixedRedirectUri = "http://localhost:1455/auth/callback",
+            LoopbackPort = 1455,
         };
     }
 
