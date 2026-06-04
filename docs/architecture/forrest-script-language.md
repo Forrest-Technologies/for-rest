@@ -264,6 +264,43 @@ Behavior to keep documented:
 - `Reset()` clears both committed rows and the current in-progress row
 - if a branch exits before a stash assignment or commit executes, that branch contributes no stash row
 
+## Security & Fuzzing
+
+The runtime ships a defensive security-testing surface for **authorized** testing only.
+
+- `payloads` is a curated catalog of fuzzing corpora for common web vulnerability
+  classes: `sqli`, `xss`, `path_traversal`, `command_injection`, `ssti`,
+  `open_redirect`, `xxe`, `nosqli`, `crlf_injection`, `ssrf`, `ldap`,
+  `header_injection`, and `prototype_pollution`. Use the named properties, or
+  `payloads.Category(name)` / `payloads.Combine(...)` for dynamic lookups, and
+  `payloads.Mutate(payload)` / `payloads.MutateAll(list)` to expand a payload into
+  WAF-evasion variants (url, double-url, base64, upper/lower case). Custom
+  categories can be injected through the host.
+
+- `fuzz` is a programmatic fuzz engine. `await fuzz.Run(payloads, send, options, category)`
+  drives a payload enumerable against the current request through a `send`
+  delegate (which reuses `request.send()`), bounding concurrency with a
+  `SemaphoreSlim` (`options.MaxConcurrency`), enforcing a per-attempt timeout via
+  a cancellation token (`options.TimeoutMs`), and applying an optional
+  `options.DelayMs` throttle. Per-attempt errors are recorded, never thrown. The
+  `FuzzResult` exposes `.Attempts`, `.Findings`, `.Clusters`, `.Baseline`, and
+  `.Summarize()`.
+
+- Response diffing / fingerprinting is pure and deterministic (no LLM):
+  `fuzz.Fingerprint(response)` reduces a response to `(status, size bucket, timing
+  bucket)`, `fuzz.Baseline(response)` captures a known-good baseline, and
+  `fuzz.Diff(baseline, response)` flags status changes, large size deltas, and
+  time-based anomalies (the canonical blind/time-based injection signal). Attempts
+  are clustered by fingerprint so outliers stand out.
+
+- Governance: `fuzz.AllowHost(host)` / `fuzz.AllowHosts([...])` declare an
+  in-scope host allowlist; once declared, the runner refuses out-of-scope targets.
+  Every run writes an audit line (category, payload count, concurrency, timeout,
+  and the anomaly summary) into the script `console`.
+
+A dedicated `fuzz { }` flow-block grammar is a future follow-up; today `fuzz` is a
+programmatic API object.
+
 ## Built-In Helpers
 
 The runtime currently includes these helper surfaces:
@@ -278,6 +315,8 @@ The runtime currently includes these helper surfaces:
 - `time`
 - `tests`
 - `console`
+- `payloads`
+- `fuzz`
 
 Common patterns they already support:
 
@@ -333,6 +372,7 @@ Included now:
 - `while`, `foreach`, `range(start, end)`, and `if` flow forms
 - `workspace.execute()` nested request execution
 - `ssl`, `history`, `timeout`, `redirects`, `content_type`, and `max_send_iterations` request settings
+- `payloads` corpora (with mutation) and the `fuzz` engine (bounded concurrency, baseline diffing, fingerprinting, host-scope governance)
 
 Not yet included:
 
@@ -343,5 +383,6 @@ Not yet included:
 - plugin-provided language extensions
 - cloud signing helpers such as AWS SigV4 or bespoke HMAC schemes
 - `switch` / `case` / `default` flow syntax
+- a dedicated `fuzz { }` flow-block grammar (the programmatic `fuzz` API covers this today)
 
 Those are future language/runtime expansions, not parser bugs.

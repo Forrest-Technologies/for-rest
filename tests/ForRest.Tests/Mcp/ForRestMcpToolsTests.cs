@@ -121,6 +121,87 @@ public sealed class ForRestMcpToolsTests
         StringAssert.Contains(result, "No payloads");
     }
 
+    [TestMethod]
+    public void List_payload_categories_includes_new_categories()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string json = tools.list_payload_categories();
+
+        StringAssert.Contains(json, "ldap");
+        StringAssert.Contains(json, "header_injection");
+        StringAssert.Contains(json, "prototype_pollution");
+    }
+
+    [TestMethod]
+    public void Analyze_responses_flags_status_and_timing_anomalies()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string json = tools.analyze_responses(
+            baseline_status: 200, baseline_size_bytes: 1000, baseline_duration_ms: 40,
+            candidate_status: 500, candidate_size_bytes: 1000, candidate_duration_ms: 5040);
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.IsTrue(parsed.RootElement.GetProperty("isAnomalous").GetBoolean());
+        string anomalies = parsed.RootElement.GetProperty("anomalies").GetRawText();
+        StringAssert.Contains(anomalies, "status changed");
+        StringAssert.Contains(anomalies, "timing anomaly");
+    }
+
+    [TestMethod]
+    public void Analyze_responses_reports_no_anomaly_for_identical_responses()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string json = tools.analyze_responses(200, 1000, 50, 200, 1000, 55);
+
+        using JsonDocument parsed = JsonDocument.Parse(json);
+        Assert.IsFalse(parsed.RootElement.GetProperty("isAnomalous").GetBoolean());
+        Assert.AreEqual(0, parsed.RootElement.GetProperty("anomalies").GetArrayLength());
+    }
+
+    [TestMethod]
+    public void Build_fuzz_script_emits_runnable_fuzz_harness_with_scope_guard()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string script = tools.build_fuzz_script("https://target.test/search", "sqli");
+
+        StringAssert.Contains(script, "request {");
+        StringAssert.Contains(script, "flow {");
+        StringAssert.Contains(script, "fuzz.AllowHost(\"target.test\")");
+        StringAssert.Contains(script, "await fuzz.Run(payloads.Category(\"sqli\")");
+        StringAssert.Contains(script, "new ForRest.Scripting.FuzzOptions");
+        StringAssert.Contains(script, "result.Summarize()");
+        StringAssert.Contains(script, "foreach f in result.Findings");
+        StringAssert.Contains(script, "stash.Commit()");
+        StringAssert.Contains(script, "?q=");
+    }
+
+    [TestMethod]
+    public void Build_fuzz_script_supports_body_injection_and_omits_scope_when_unrestricted()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string script = tools.build_fuzz_script(
+            "https://target.test/items", "xss", injection: "body", restrict_to_host: false);
+
+        StringAssert.Contains(script, "method = POST");
+        StringAssert.Contains(script, "request.body = json.Stringify(new { value = payload })");
+        Assert.IsFalse(script.Contains("fuzz.AllowHost", System.StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Build_fuzz_script_rejects_unknown_category()
+    {
+        ForRestMcpTools tools = CreateTools(host: null);
+
+        string result = tools.build_fuzz_script("https://target.test", "not-a-category");
+
+        StringAssert.Contains(result, "No payloads");
+    }
+
     #endregion
 
     #region Host-less degradation

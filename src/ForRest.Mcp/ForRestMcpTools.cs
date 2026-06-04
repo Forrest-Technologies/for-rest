@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ForRest.Models;
 using ForRest.Scripting;
 using ForRest.Services.AI;
 
@@ -203,6 +204,146 @@ public sealed class ForRestMcpTools
         builder.AppendLine("    let sent = request.send()");
         builder.AppendLine("    stash.Payload = payload");
         builder.AppendLine("    stash.Status = sent.status");
+        builder.AppendLine("    stash.Commit()");
+        builder.AppendLine("  }");
+        builder.AppendLine("}");
+
+        return builder.ToString();
+    }
+
+    [Description("Diffs and fingerprints two HTTP responses (a baseline and a candidate) the same way the ForRest `fuzz` engine does, and reports any anomalies: status changes, large size deltas, and time-based anomalies (the classic blind-injection signal). Pure analysis — no host or network required. Use it to triage whether a fuzz attempt's response is meaningfully different from a clean baseline.")]
+    public string analyze_responses(
+        [Description("Baseline (known-good) response status code.")] int baseline_status,
+        [Description("Baseline response body size in bytes.")] long baseline_size_bytes,
+        [Description("Baseline response duration in milliseconds.")] long baseline_duration_ms,
+        [Description("Candidate response status code.")] int candidate_status,
+        [Description("Candidate response body size in bytes.")] long candidate_size_bytes,
+        [Description("Candidate response duration in milliseconds.")] long candidate_duration_ms)
+    {
+        FuzzApi fuzz = new(new ConsoleApi());
+
+        ResponseSnapshot baselineResponse = new()
+        {
+            StatusCode = baseline_status,
+            SizeBytes = baseline_size_bytes,
+            DurationMilliseconds = baseline_duration_ms,
+        };
+        ResponseSnapshot candidateResponse = new()
+        {
+            StatusCode = candidate_status,
+            SizeBytes = candidate_size_bytes,
+            DurationMilliseconds = candidate_duration_ms,
+        };
+
+        FuzzBaseline baseline = fuzz.Baseline(baselineResponse);
+        FuzzFingerprint candidateFingerprint = fuzz.Fingerprint(candidateResponse);
+        FuzzDiff diff = fuzz.Diff(baseline, candidateResponse);
+
+        return Serialize(new
+        {
+            baseline = new
+            {
+                status = baseline.Fingerprint.Status,
+                sizeBytes = baseline.Fingerprint.SizeBytes,
+                sizeBucket = baseline.Fingerprint.SizeBucket,
+                durationMilliseconds = baseline.Fingerprint.DurationMilliseconds,
+                clusterKey = baseline.Fingerprint.ClusterKey(),
+            },
+            candidate = new
+            {
+                status = candidateFingerprint.Status,
+                sizeBytes = candidateFingerprint.SizeBytes,
+                sizeBucket = candidateFingerprint.SizeBucket,
+                durationMilliseconds = candidateFingerprint.DurationMilliseconds,
+                clusterKey = candidateFingerprint.ClusterKey(),
+            },
+            isAnomalous = diff.IsAnomalous,
+            anomalies = diff.Anomalies,
+        });
+    }
+
+    [Description("Generates a ready-to-run ForRest script that uses the new `fuzz` engine: it iterates a built-in payload category against a target with bounded concurrency, captures a baseline, diffs every response, and stashes the flagged anomalies. Optionally constrains the run to an in-scope host allowlist. Run the returned script with execute_script. Authorized security testing only.")]
+    public string build_fuzz_script(
+        [Description("Absolute base target URL, e.g. https://api.example.test/search.")] string target_url,
+        [Description("Payload category: sqli, xss, path_traversal, command_injection, ssti, open_redirect, xxe, nosqli, crlf, ssrf, ldap, header_injection, prototype_pollution, or a custom category name.")] string category,
+        [Description("Where to inject the payload: 'query' (default), 'url_path', 'body', or 'header'.")] string injection = "query",
+        [Description("Parameter or header name to inject into for 'query' and 'header' injection. Defaults to 'q' (query) or 'X-Fuzz' (header).")] string parameter = "",
+        [Description("Maximum concurrent attempts. Defaults to 4.")] int max_concurrency = 4,
+        [Description("Per-attempt timeout in milliseconds. Defaults to 8000.")] int timeout_ms = 8000,
+        [Description("Delay before each send in milliseconds (courteous rate limiting). Defaults to 100.")] int delay_ms = 100,
+        [Description("Restrict the run to the target's host via fuzz.AllowHost(). Defaults to true.")] bool restrict_to_host = true)
+    {
+        if (string.IsNullOrWhiteSpace(target_url))
+        {
+            return "target_url is required.";
+        }
+
+        PayloadsApi payloads = new();
+        IReadOnlyList<string> list = payloads.Category(category);
+        if (list.Count == 0)
+        {
+            return $"No payloads are registered for category '{category}'.";
+        }
+
+        string mode = injection.Trim().ToLowerInvariant();
+        string resolvedMethod = mode == "body" ? "POST" : "GET";
+        int iterations = list.Count + 5;
+        string categoryLiteral = EscapeForRestString(category.Trim().ToLowerInvariant());
+        string baseUrlLiteral = EscapeForRestString(target_url.Trim());
+        string host = Uri.TryCreate(target_url.Trim(), UriKind.Absolute, out Uri? uri) ? uri.Host : target_url.Trim();
+        int safeConcurrency = Math.Clamp(max_concurrency, 1, 64);
+        int safeTimeout = Math.Max(0, timeout_ms);
+        int safeDelay = Math.Max(0, delay_ms);
+
+        StringBuilder builder = new();
+        builder.AppendLine("request {");
+        builder.AppendLine($"  method = {resolvedMethod}");
+        builder.AppendLine($"  url = \"{baseUrlLiteral}\"");
+        if (mode == "body")
+        {
+            builder.AppendLine("  content_type = \"application/json\"");
+        }
+
+        builder.AppendLine($"  max_send_iterations = {iterations}");
+        builder.AppendLine("}");
+        builder.AppendLine();
+        builder.AppendLine("flow {");
+        if (restrict_to_host)
+        {
+            builder.AppendLine($"  fuzz.AllowHost(\"{EscapeForRestString(host)}\")   # authorized scope only");
+        }
+
+        builder.AppendLine($"  let opts = new ForRest.Scripting.FuzzOptions {{ MaxConcurrency = {safeConcurrency}, TimeoutMs = {safeTimeout}, DelayMs = {safeDelay} }}");
+        builder.AppendLine($"  let result = await fuzz.Run(payloads.Category(\"{categoryLiteral}\"), async (string payload) => {{");
+
+        switch (mode)
+        {
+            case "url_path":
+                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}/{{encoding.UrlEncode(payload)}}\"");
+                break;
+            case "body":
+                builder.AppendLine("    request.content_type = \"application/json\"");
+                builder.AppendLine("    request.body = json.Stringify(new { value = payload })");
+                break;
+            case "header":
+                string headerName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "X-Fuzz" : parameter.Trim());
+                builder.AppendLine($"    request.headers[\"{headerName}\"] = payload");
+                break;
+            default: // query
+                string queryName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
+                string separator = target_url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}{separator}{queryName}={{encoding.UrlEncode(payload)}}\"");
+                break;
+        }
+
+        builder.AppendLine("    let sent = await request.send()");
+        builder.AppendLine("    return sent.Snapshot");
+        builder.AppendLine($"  }}, opts, \"{categoryLiteral}\")");
+        builder.AppendLine();
+        builder.AppendLine("  console.Log(result.Summarize())");
+        builder.AppendLine("  foreach f in result.Findings {");
+        builder.AppendLine("    stash.Payload = f.Payload");
+        builder.AppendLine("    stash.Anomalies = strings.Join(\"; \", f.Anomalies)");
         builder.AppendLine("    stash.Commit()");
         builder.AppendLine("  }");
         builder.AppendLine("}");

@@ -1261,7 +1261,7 @@ internal static class ForRestLanguageReference
             "payloads",
             "Security",
             "Curated bug bounty / security test payload catalog with custom category support.",
-            "`payloads` is a script-facing helper that exposes built-in fuzzing corpora for common web vulnerability classes. Every list is documented publicly (SecLists, OWASP WSTG, Burp Intruder) and intended for *authorized* testing only. Use the named properties (`payloads.sqli`, `payloads.xss`, `payloads.path_traversal`, `payloads.command_injection`, `payloads.ssti`, `payloads.open_redirect`, `payloads.xxe`, `payloads.nosqli`, `payloads.crlf_injection`, `payloads.ssrf`) or call `payloads.Category(name)` / `payloads.Combine(...)` for dynamic lookups. Custom categories can be injected via the script host so teams can override the defaults with their own wordlists.",
+            "`payloads` is a script-facing helper that exposes built-in fuzzing corpora for common web vulnerability classes. Every list is documented publicly (SecLists, OWASP WSTG, Burp Intruder) and intended for *authorized* testing only. Use the named properties (`payloads.sqli`, `payloads.xss`, `payloads.path_traversal`, `payloads.command_injection`, `payloads.ssti`, `payloads.open_redirect`, `payloads.xxe`, `payloads.nosqli`, `payloads.crlf_injection`, `payloads.ssrf`, `payloads.ldap`, `payloads.header_injection`, `payloads.prototype_pollution`) or call `payloads.Category(name)` / `payloads.Combine(...)` for dynamic lookups. Use `payloads.Mutate(payload)` to expand one payload into WAF-evasion variants (url, double-url, base64, upper/lower case), or `payloads.MutateAll(list)` to mutate a whole corpus. Custom categories can be injected via the script host so teams can override the defaults with their own wordlists.",
             """
             # Straightforward SQLi fuzz of a query parameter
             foreach p in payloads.sqli {
@@ -1282,7 +1282,7 @@ internal static class ForRestLanguageReference
             ["payloads", "fuzz", "fuzzing", "sqli", "xss", "ssti", "path traversal", "command injection", "ssrf", "xxe", "bug bounty", "security", "pentest", "owasp"],
             ["payloads"],
             "Value",
-            "payloads.${1|sqli,xss,path_traversal,command_injection,ssti,open_redirect,xxe,nosqli,crlf_injection,ssrf|}",
+            "payloads.${1|sqli,xss,path_traversal,command_injection,ssti,open_redirect,xxe,nosqli,crlf_injection,ssrf,ldap,header_injection,prototype_pollution|}",
             true),
         new(
             "browser",
@@ -1305,26 +1305,34 @@ internal static class ForRestLanguageReference
             "browser.${1|navigate,click,type,press,hover,getText,getAttribute,exists,waitFor,scrollTo,select,find,snapshot,screenshot,evaluate|}",
             true),
         new(
-            "fuzz-loop",
-            "fuzz loop",
+            "fuzz",
+            "fuzz",
             "Security",
-            "Iterate a payload category against a named target location.",
-            "ForRest does not (yet) have a dedicated `fuzz` block; use a documented `foreach` + `payloads` pattern instead. The loop can target any mutation surface: `request.url`, `request.body`, `request.headers[\"X-Name\"]`, or a nested JSON path. Pair it with `retry` for flaky hosts, `delay` for rate-limited targets, and `stash` for capturing findings.",
+            "Drive a payload corpus against the current request with bounded concurrency, baseline diffing, and anomaly findings.",
+            "`fuzz` is a script-facing fuzz engine for *authorized* testing only. `await fuzz.Run(payloads, send, options, category)` runs a payload enumerable against the current request, where `send` is an async delegate that mutates the request and calls `request.send()` for each payload. It bounds concurrency with a semaphore (`options.MaxConcurrency`), honours a per-attempt timeout (`options.TimeoutMs`) via a cancellation token, applies an optional `options.DelayMs` throttle, and records — never throws — per-attempt errors. The result has `.Attempts` (payload, status, size, duration, error), `.Findings` (anomalies tied to payloads), `.Clusters` (attempts grouped by status+size fingerprint), and `.Summarize()`. Anomalies come from response diffing: capture a `fuzz.Baseline(response)` from a clean send (or let the runner use the first successful attempt), then each response is fingerprinted with `fuzz.Fingerprint(response)` and compared via `fuzz.Diff(baseline, response)` to flag status changes, large size deltas, and time-based anomalies (blind injection). Governance: declare in-scope hosts with `fuzz.AllowHost(\"api.example.test\")` (or `fuzz.AllowHosts([...])`) and the runner refuses out-of-scope targets; every run writes an audit line into the `console`. There is no LLM in the loop. (A dedicated `fuzz { }` flow-block grammar is a future follow-up; today `fuzz` is a programmatic API object.)",
             """
-            # Fuzz a header with an SSRF corpus and stash any reflected URLs
-            foreach p in payloads.ssrf {
-              request.headers["X-Forwarded-For"] = p
-              delay 250                        # courteous rate limit
-              let sent = request.send()
-              if sent.status == 200 and sent.body contains p {
-                stash row = { "header": "X-Forwarded-For", "payload": p }
-              }
+            # Bounded SQLi sweep of a query parameter with baseline diffing
+            fuzz.AllowHost("api.example.test")            # authorized scope only
+            request.url = "https://api.example.test/search?q=clean"
+            let opts = new ForRest.Scripting.FuzzOptions { MaxConcurrency = 4, TimeoutMs = 8000, DelayMs = 100 }
+            let result = await fuzz.Run(
+              payloads.sqli,
+              async (string p) => {
+                request.url = $"https://api.example.test/search?q={encoding.UrlEncode(p)}"
+                let sent = await request.send()
+                return sent.Snapshot
+              },
+              opts,
+              "sqli")
+            console.Log(result.Summarize())
+            foreach f in result.Findings {
+              stash row = { "payload": f.Payload, "anomalies": strings.Join("; ", f.Anomalies) }
             }
             """,
-            ["fuzz", "fuzzer", "attack", "payload loop", "intruder", "pen test"],
+            ["fuzz", "fuzzer", "attack", "payload loop", "intruder", "pen test", "baseline", "diff", "fingerprint", "anomaly", "blind injection", "concurrency"],
             ["fuzz"],
-            "Snippet",
-            "foreach p in payloads.${1|sqli,xss,path_traversal,command_injection,ssti,open_redirect,xxe,nosqli,crlf_injection,ssrf|} {\n  request.${2|url,body,headers[\"X-Test\"]|} = p\n  delay ${3:250}\n  let sent = request.send()\n  if sent.status >= 500 { warn $\"possible hit: {p}\" }\n}",
+            "Value",
+            "fuzz.${1|Run,Baseline,Diff,Fingerprint,AllowHost,AllowHosts|}",
             true),
         new(
             "ai-providers",

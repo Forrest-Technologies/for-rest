@@ -116,4 +116,73 @@ public sealed class PayloadsApiTests
             Assert.IsTrue(seen.Add(payload), "Combine must not duplicate payloads");
         }
     }
+
+    [TestMethod]
+    public void New_categories_resolve_and_appear_in_Categories()
+    {
+        PayloadsApi payloads = new();
+
+        Assert.IsTrue(payloads.Ldap.Count > 0);
+        Assert.IsTrue(payloads.HeaderInjection.Count > 0);
+        Assert.IsTrue(payloads.PrototypePollution.Count > 0);
+
+        Assert.IsTrue(payloads.Category("ldap").Count > 0);
+        Assert.IsTrue(payloads.Category("ldap_injection").Count > 0);
+        Assert.IsTrue(payloads.Category("header_injection").Count > 0);
+        Assert.IsTrue(payloads.Category("response_splitting").Count > 0);
+        Assert.IsTrue(payloads.Category("prototype_pollution").Count > 0);
+        Assert.IsTrue(payloads.Category("proto").Count > 0);
+
+        List<string> categories = new(payloads.Categories());
+        CollectionAssert.Contains(categories, "ldap");
+        CollectionAssert.Contains(categories, "header_injection");
+        CollectionAssert.Contains(categories, "prototype_pollution");
+    }
+
+    [TestMethod]
+    public void Mutate_produces_encoding_and_case_variants_without_duplicates()
+    {
+        PayloadsApi payloads = new();
+
+        IReadOnlyList<string> variants = payloads.Mutate("a b<c>");
+
+        List<string> list = new(variants);
+        CollectionAssert.Contains(list, "a b<c>");                                    // original
+        CollectionAssert.Contains(list, System.Uri.EscapeDataString("a b<c>"));        // url-encoded
+        CollectionAssert.Contains(list, System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("a b<c>")));
+        CollectionAssert.Contains(list, "A B<C>");                                     // upper
+        CollectionAssert.Contains(list, "a b<c>".ToLowerInvariant());                  // lower
+
+        HashSet<string> seen = new();
+        foreach (string variant in list)
+        {
+            Assert.IsTrue(seen.Add(variant), $"Mutate must not duplicate: {variant}");
+        }
+    }
+
+    [TestMethod]
+    public void Mutate_of_empty_payload_is_empty()
+    {
+        PayloadsApi payloads = new();
+
+        Assert.AreEqual(0, payloads.Mutate(string.Empty).Count);
+    }
+
+    [TestMethod]
+    public void MutateAll_flattens_and_dedupes_a_corpus()
+    {
+        PayloadsApi payloads = new();
+
+        IReadOnlyList<string> mutated = payloads.MutateAll(["abc", "ABC"]);
+
+        // "abc" and "ABC" share upper/lower forms, so MutateAll must dedupe across them.
+        HashSet<string> seen = new();
+        foreach (string variant in mutated)
+        {
+            Assert.IsTrue(seen.Add(variant), $"MutateAll must not duplicate: {variant}");
+        }
+
+        CollectionAssert.Contains(new List<string>(mutated), "abc");
+        CollectionAssert.Contains(new List<string>(mutated), "ABC");
+    }
 }
