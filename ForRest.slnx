@@ -2,6 +2,7 @@
     <Project Path="src/ForRest.Maui/ForRest.Maui.csproj">
       <Deploy Solution="Debug|*" />
     </Project>
+    <Project Path="src/ForRest.Browser/ForRest.Browser.csproj" />
     <Project Path="src/ForRest.Domain/ForRest.Domain.csproj" />
     <Project Path="src/ForRest.Infrastructure.Sqlite/ForRest.Infrastructure.Sqlite.csproj" />
     <Project Path="src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj" />
