@@ -33,6 +33,7 @@ public sealed class ForRestMcpHost(
     IWorkbenchMcpSettingsProvider settingsProvider,
     ThemeConfigStore themeConfigStore,
     ThemeConfigParser themeConfigParser,
+    McpLiveWorkbenchAccessor liveWorkbenchAccessor,
     ILogger<ForRestMcpHost>? logger = null) : IForRestMcpHost
 {
     #region Private Fields
@@ -42,31 +43,52 @@ public sealed class ForRestMcpHost(
     private readonly ILogger<ForRestMcpHost> logger = logger ?? NullLogger<ForRestMcpHost>.Instance;
     private readonly SemaphoreSlim mutationGate = new(1, 1);
 
+    /// <summary>The live workbench when the desktop UI is running; null otherwise.</summary>
+    private IMcpWorkbenchBridge? Live => liveWorkbenchAccessor.Current;
+
     #endregion
 
     #region Active document
 
     public async Task<ForRestMcpDocumentSnapshot?> GetActiveDocument(CancellationToken cancellationToken)
     {
+        if (Live is { } live)
+        {
+            McpWorkbenchDocument? document = await live.GetActiveDocument();
+            return document is null
+                ? null
+                : new ForRestMcpDocumentSnapshot(document.Location, document.Title, "forrest", document.Source, document.WorkspaceName);
+        }
+
         RequestWorkbenchState state = await LoadState(cancellationToken);
         RequestWorkbenchWorkspaceState? workspace = SelectedWorkspace(state);
-        RequestWorkbenchDocumentState? document = SelectedDocument(workspace);
-        if (workspace is null || document is null)
+        RequestWorkbenchDocumentState? document2 = SelectedDocument(workspace);
+        if (workspace is null || document2 is null)
         {
             return null;
         }
 
         return new ForRestMcpDocumentSnapshot(
-            DocumentId: document.Location,
-            Title: document.Title,
+            DocumentId: document2.Location,
+            Title: document2.Title,
             Language: "forrest",
-            SourceText: document.RequestSource,
+            SourceText: document2.RequestSource,
             WorkspaceName: workspace.Name);
     }
 
-    public Task<ForRestMcpUpdateResult> ReplaceActiveDocument(string newSource, CancellationToken cancellationToken)
+    public async Task<ForRestMcpUpdateResult> ReplaceActiveDocument(string newSource, CancellationToken cancellationToken)
     {
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            McpWorkbenchDocument? active = await live.GetActiveDocument();
+            string liveRestored = McpSecretRedactor.Restore(active?.Source, newSource);
+            McpWorkbenchResult liveResult = await live.ReplaceActiveDocument(liveRestored);
+            return liveResult.Succeeded
+                ? ForRestMcpUpdateResult.Success()
+                : ForRestMcpUpdateResult.Failure(liveResult.Message ?? "Replace failed.");
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = SelectedWorkspace(state);
             RequestWorkbenchDocumentState? document = SelectedDocument(workspace);
@@ -81,9 +103,14 @@ public sealed class ForRestMcpHost(
         });
     }
 
-    public Task<ForRestMcpMutationResult> SetActiveDocument(string workspaceId, string location, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> SetActiveDocument(string workspaceId, string location, CancellationToken cancellationToken)
     {
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            return MapLive(await live.SetActiveDocument(workspaceId, location));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
             if (workspace is null)
@@ -110,25 +137,41 @@ public sealed class ForRestMcpHost(
 
     public async Task<IReadOnlyList<ForRestMcpWorkspaceSummary>> ListWorkspaces(CancellationToken cancellationToken)
     {
+        if (Live is { } live)
+        {
+            return [.. (await live.ListWorkspaces()).Select(MapLive)];
+        }
+
         RequestWorkbenchState state = await LoadState(cancellationToken);
         return [.. state.Workspaces.Select(MapWorkspace)];
     }
 
     public async Task<ForRestMcpWorkspaceSummary?> GetWorkspace(string workspaceId, CancellationToken cancellationToken)
     {
+        if (Live is { } live)
+        {
+            McpWorkbenchWorkspace? workspace = await live.GetWorkspace(workspaceId);
+            return workspace is null ? null : MapLive(workspace);
+        }
+
         RequestWorkbenchState state = await LoadState(cancellationToken);
-        RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
-        return workspace is null ? null : MapWorkspace(workspace);
+        RequestWorkbenchWorkspaceState? found = FindWorkspace(state, workspaceId);
+        return found is null ? null : MapWorkspace(found);
     }
 
-    public Task<ForRestMcpMutationResult> CreateWorkspace(string name, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> CreateWorkspace(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return Task.FromResult(ForRestMcpMutationResult.Fail("Workspace name is required."));
+            return ForRestMcpMutationResult.Fail("Workspace name is required.");
         }
 
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            return MapLive(await live.CreateWorkspace(name));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState workspace = new()
             {
@@ -140,14 +183,19 @@ public sealed class ForRestMcpHost(
         });
     }
 
-    public Task<ForRestMcpMutationResult> RenameWorkspace(string workspaceId, string newName, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> RenameWorkspace(string workspaceId, string newName, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(newName))
         {
-            return Task.FromResult(ForRestMcpMutationResult.Fail("New workspace name is required."));
+            return ForRestMcpMutationResult.Fail("New workspace name is required.");
         }
 
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            return MapLive(await live.RenameWorkspace(workspaceId, newName));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
             if (workspace is null)
@@ -161,9 +209,14 @@ public sealed class ForRestMcpHost(
         });
     }
 
-    public Task<ForRestMcpMutationResult> DeleteWorkspace(string workspaceId, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> DeleteWorkspace(string workspaceId, CancellationToken cancellationToken)
     {
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            return MapLive(await live.DeleteWorkspace(workspaceId));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
             if (workspace is null)
@@ -187,6 +240,14 @@ public sealed class ForRestMcpHost(
 
     public async Task<ForRestMcpScriptDetail?> GetScript(string workspaceId, string location, CancellationToken cancellationToken)
     {
+        if (Live is { } live)
+        {
+            McpWorkbenchScriptDetail? detail = await live.GetScript(workspaceId, location);
+            return detail is null
+                ? null
+                : new ForRestMcpScriptDetail(detail.WorkspaceId, detail.WorkspaceName, detail.Location, detail.Name, detail.Method, detail.Summary, detail.Source, string.Empty);
+        }
+
         RequestWorkbenchState state = await LoadState(cancellationToken);
         RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
         RequestWorkbenchDocumentState? document = FindDocument(workspace, location);
@@ -206,19 +267,24 @@ public sealed class ForRestMcpHost(
             PreRequestScript: document.PreRequestScript);
     }
 
-    public Task<ForRestMcpMutationResult> CreateScript(string workspaceId, string name, string source, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> CreateScript(string workspaceId, string name, string source, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return Task.FromResult(ForRestMcpMutationResult.Fail("Script name is required."));
+            return ForRestMcpMutationResult.Fail("Script name is required.");
         }
 
         if (string.IsNullOrWhiteSpace(source))
         {
-            return Task.FromResult(ForRestMcpMutationResult.Fail("Script source is required."));
+            return ForRestMcpMutationResult.Fail("Script source is required.");
         }
 
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            return MapLive(await live.CreateScript(workspaceId, name, source));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
             if (workspace is null)
@@ -241,14 +307,21 @@ public sealed class ForRestMcpHost(
         });
     }
 
-    public Task<ForRestMcpMutationResult> UpdateScript(string workspaceId, string location, string newSource, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> UpdateScript(string workspaceId, string location, string newSource, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(newSource))
         {
-            return Task.FromResult(ForRestMcpMutationResult.Fail("Replacement source is required."));
+            return ForRestMcpMutationResult.Fail("Replacement source is required.");
         }
 
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            McpWorkbenchScriptDetail? detail = await live.GetScript(workspaceId, location);
+            string liveRestored = McpSecretRedactor.Restore(detail?.Source, newSource);
+            return MapLive(await live.UpdateScript(workspaceId, location, liveRestored));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
             RequestWorkbenchDocumentState? document = FindDocument(workspace, location);
@@ -263,14 +336,19 @@ public sealed class ForRestMcpHost(
         });
     }
 
-    public Task<ForRestMcpMutationResult> RenameScript(string workspaceId, string location, string newName, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> RenameScript(string workspaceId, string location, string newName, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(newName))
         {
-            return Task.FromResult(ForRestMcpMutationResult.Fail("New script name is required."));
+            return ForRestMcpMutationResult.Fail("New script name is required.");
         }
 
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            return MapLive(await live.RenameScript(workspaceId, location, newName));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
             RequestWorkbenchDocumentState? document = FindDocument(workspace, location);
@@ -284,9 +362,14 @@ public sealed class ForRestMcpHost(
         });
     }
 
-    public Task<ForRestMcpMutationResult> DeleteScript(string workspaceId, string location, CancellationToken cancellationToken)
+    public async Task<ForRestMcpMutationResult> DeleteScript(string workspaceId, string location, CancellationToken cancellationToken)
     {
-        return Mutate(cancellationToken, state =>
+        if (Live is { } live)
+        {
+            return MapLive(await live.DeleteScript(workspaceId, location));
+        }
+
+        return await Mutate(cancellationToken, state =>
         {
             RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
             RequestWorkbenchDocumentState? document = FindDocument(workspace, location);
@@ -327,6 +410,18 @@ public sealed class ForRestMcpHost(
         string location,
         CancellationToken cancellationToken)
     {
+        if (Live is { } live)
+        {
+            McpWorkbenchScriptDetail? detail = await live.GetScript(workspaceId, location);
+            if (detail is null)
+            {
+                return Failed($"No script found at '{location}' in workspace '{workspaceId}'.");
+            }
+
+            Guid liveId = TryParseWorkspaceId(detail.WorkspaceId);
+            return await ExecuteSource(liveId, detail.Name, detail.Source, cancellationToken);
+        }
+
         RequestWorkbenchState state = await LoadState(cancellationToken);
         RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId);
         RequestWorkbenchDocumentState? document = FindDocument(workspace, location);
@@ -670,6 +765,19 @@ public sealed class ForRestMcpHost(
     #endregion
 
     #region Mapping helpers
+
+    private static ForRestMcpMutationResult MapLive(McpWorkbenchResult result)
+    {
+        return new ForRestMcpMutationResult(result.Succeeded, result.Message, result.Id);
+    }
+
+    private static ForRestMcpWorkspaceSummary MapLive(McpWorkbenchWorkspace workspace)
+    {
+        return new ForRestMcpWorkspaceSummary(
+            workspace.Id,
+            workspace.Name,
+            [.. workspace.Scripts.Select(script => new ForRestMcpScriptSummary(script.Name, script.Method, script.UrlTemplate, script.Location))]);
+    }
 
     private static ForRestMcpWorkspaceSummary MapWorkspace(RequestWorkbenchWorkspaceState workspace)
     {

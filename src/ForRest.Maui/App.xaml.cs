@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using ForRest.Maui.Theming;
 using ForRest.Maui.Services;
+using ForRest.Maui.ViewModels;
 #if WINDOWS || MACCATALYST
 using ForRest.Maui.Services.Mcp;
 #endif
@@ -79,6 +80,16 @@ public partial class App : Application
 #if WINDOWS || MACCATALYST
 		try
 		{
+			// Expose the live page view model to the MCP server so workspace/script
+			// edits and active-document selection happen on the running UI (and
+			// persist through the view model) instead of writing the state file
+			// underneath the app, which it would overwrite.
+			McpLiveWorkbenchAccessor? workbenchAccessor = _services.GetService<McpLiveWorkbenchAccessor>();
+			if (workbenchAccessor is not null && _services.GetService<MainPageViewModel>() is IMcpWorkbenchBridge bridge)
+			{
+				workbenchAccessor.Current = bridge;
+			}
+
 			ForRestMcpServerLifecycle? mcpLifecycle = _services.GetService<ForRestMcpServerLifecycle>();
 			if (mcpLifecycle is not null)
 			{
