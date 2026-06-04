@@ -602,7 +602,7 @@ public sealed class ForRestMcpTools
         });
     }
 
-    [Description("Returns the full raw settings.toml content for the For-Rest app so an agent can inspect theme, AI, and MCP configuration before proposing changes.")]
+    [Description("Returns the settings.toml content for the For-Rest app so an agent can inspect theme, AI, and MCP configuration before proposing changes. Secret values (api keys, the MCP auth token, the license key, and custom headers) are redacted to \"***\".")]
     public string get_settings_text()
     {
         return WithHost(host =>
@@ -612,7 +612,7 @@ public sealed class ForRestMcpTools
         });
     }
 
-    [Description("Overwrites the settings.toml content. The host validates the supplied TOML by re-parsing it before persisting and rejects invalid input. Note: changes to the MCP bind address or port only take effect after the server restarts.")]
+    [Description("Overwrites the settings.toml content. The host validates the supplied TOML before persisting. Any secret you leave as the redacted \"***\" marker keeps its original value; set a real value to change a secret. Note: changes to the MCP bind address or port only take effect after the server restarts.")]
     public string update_settings_text(
         [Description("Full replacement settings.toml content.")] string raw_toml)
     {

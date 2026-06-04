@@ -384,6 +384,57 @@ public sealed class ForRestMcpToolsTests
 
     #endregion
 
+    #region Settings secret redaction
+
+    [TestMethod]
+    public void Settings_redactor_hides_known_secret_values()
+    {
+        string toml =
+            "license = \"LIC-123\"\n" +
+            "[ai]\n" +
+            "enabled = true\n" +
+            "provider = \"openai\"\n" +
+            "api = \"openai\"\n" +
+            "api_key = \"sk-super-secret\"\n" +
+            "custom_headers = \"X-Api-Key: shh\"\n" +
+            "[mcp]\n" +
+            "port = 7341\n" +
+            "auth_token = \"tok-secret\"\n";
+
+        string redacted = McpSettingsRedactor.Redact(toml);
+
+        Assert.IsFalse(redacted.Contains("sk-super-secret", System.StringComparison.Ordinal));
+        Assert.IsFalse(redacted.Contains("tok-secret", System.StringComparison.Ordinal));
+        Assert.IsFalse(redacted.Contains("LIC-123", System.StringComparison.Ordinal));
+        Assert.IsFalse(redacted.Contains("X-Api-Key: shh", System.StringComparison.Ordinal));
+        // Non-secret values are preserved, including the provider family 'api'.
+        StringAssert.Contains(redacted, "provider = \"openai\"");
+        StringAssert.Contains(redacted, "api = \"openai\"");
+        StringAssert.Contains(redacted, "port = 7341");
+    }
+
+    [TestMethod]
+    public void Settings_restore_swaps_marker_back_but_keeps_intentional_changes()
+    {
+        string original =
+            "[ai]\n" +
+            "api_key = \"sk-original\"\n" +
+            "[mcp]\n" +
+            "auth_token = \"tok-original\"\n";
+        string edited =
+            "[ai]\n" +
+            "api_key = \"***\"\n" +          // untouched -> restore original
+            "[mcp]\n" +
+            "auth_token = \"tok-new\"\n";    // deliberately changed -> keep
+
+        string restored = McpSettingsRedactor.Restore(original, edited);
+
+        StringAssert.Contains(restored, "api_key = \"sk-original\"");
+        StringAssert.Contains(restored, "auth_token = \"tok-new\"");
+    }
+
+    #endregion
+
     #region Helpers
 
     private static ForRestMcpTools CreateTools(IForRestMcpHost? host)

@@ -447,7 +447,10 @@ public sealed class ForRestMcpHost(
 
     public string GetSettingsText()
     {
-        return themeConfigStore.ReadAllText();
+        // The raw file holds the AI api_key, MCP auth_token, license key, and
+        // custom headers that may embed credentials. Never hand those to a
+        // (possibly remote) MCP client verbatim.
+        return McpSettingsRedactor.Redact(themeConfigStore.ReadAllText());
     }
 
     public ForRestMcpMutationResult UpdateSettingsText(string rawToml)
@@ -470,7 +473,12 @@ public sealed class ForRestMcpHost(
 
         try
         {
-            themeConfigStore.WriteAllText(rawToml);
+            // The client only ever saw redacted secrets, so splice the original
+            // secret values back in before persisting; a still-redacted value is
+            // restored, a changed value is honored as a deliberate update.
+            string original = themeConfigStore.ReadAllText();
+            string restored = McpSettingsRedactor.Restore(original, rawToml);
+            themeConfigStore.WriteAllText(restored);
         }
         catch (Exception exception)
         {
