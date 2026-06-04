@@ -12,14 +12,25 @@ internal sealed class FakeCdpTransport : ICdpTransport
 
     public Func<string, string, string>? Responder { get; set; }
 
+    public List<string> Subscriptions { get; } = [];
+
     public event EventHandler<CdpEvent>? EventReceived;
 
     public Task<string> Send(string method, string parametersJson, CancellationToken cancellationToken = default)
     {
         Calls.Add((method, parametersJson));
         string result = Responder?.Invoke(method, parametersJson) ?? "{}";
+
+        // Simulate the page finishing load so CdpClient.Navigate completes immediately in tests.
+        if (method == "Page.navigate")
+        {
+            EventReceived?.Invoke(this, new CdpEvent("Page.frameStoppedLoading", "{}"));
+        }
+
         return Task.FromResult(result);
     }
+
+    public void Subscribe(string eventName) => Subscriptions.Add(eventName);
 
     public void Emit(CdpEvent cdpEvent) => EventReceived?.Invoke(this, cdpEvent);
 

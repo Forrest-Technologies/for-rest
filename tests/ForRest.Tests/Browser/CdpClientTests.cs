@@ -18,6 +18,8 @@ public sealed class CdpClientTests
         CollectionAssert.AreEqual(
             new[] { "Page.enable", "DOM.enable", "Runtime.enable" },
             transport.Calls.Select(call => call.Method).ToArray());
+        CollectionAssert.Contains(transport.Subscriptions, "Page.loadEventFired");
+        CollectionAssert.Contains(transport.Subscriptions, "Page.frameStoppedLoading");
     }
 
     [TestMethod]

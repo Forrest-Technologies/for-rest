@@ -11,7 +11,13 @@ public interface ICdpTransport
     /// <summary>Invokes a CDP method (e.g. <c>Page.navigate</c>) with a JSON parameter object and returns the raw JSON result.</summary>
     Task<string> Send(string method, string parametersJson, CancellationToken cancellationToken = default);
 
-    /// <summary>Raised for every CDP protocol event the page emits (e.g. <c>Page.loadEventFired</c>).</summary>
+    /// <summary>
+    /// Registers interest in a CDP protocol event so it is delivered via <see cref="EventReceived"/>.
+    /// Some transports (WebView2) require an explicit per-event subscription before the event fires.
+    /// </summary>
+    void Subscribe(string eventName);
+
+    /// <summary>Raised for every subscribed CDP protocol event the page emits (e.g. <c>Page.loadEventFired</c>).</summary>
     event EventHandler<CdpEvent>? EventReceived;
 }
 

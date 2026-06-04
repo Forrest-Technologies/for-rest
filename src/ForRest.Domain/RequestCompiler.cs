@@ -24,9 +24,17 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
             request.Variables,
             runtimeVariables);
 
-        if (!Uri.TryCreate(preview.RenderedText, UriKind.Absolute, out var uri))
+        string renderedUrl = preview.RenderedText;
+        if (request.FlowOnly && string.IsNullOrWhiteSpace(renderedUrl))
         {
-            return OperationResult<PreparedRequest>.Fail($"The request URL is invalid after variable resolution: '{preview.RenderedText}'.");
+            // Flow-only documents (e.g. browser automation) carry no real URL; use a harmless
+            // placeholder so compilation succeeds. The runner never sends to it.
+            renderedUrl = "http://localhost/";
+        }
+
+        if (!Uri.TryCreate(renderedUrl, UriKind.Absolute, out var uri))
+        {
+            return OperationResult<PreparedRequest>.Fail($"The request URL is invalid after variable resolution: '{renderedUrl}'.");
         }
 
         var queryParameters = RenderEntries(request.QueryParameters, preview.Variables);

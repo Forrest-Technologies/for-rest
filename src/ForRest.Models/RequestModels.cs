@@ -159,6 +159,12 @@ public sealed record RequestDefinition
 
     public string UrlTemplate { get; init; } = string.Empty;
 
+    /// <summary>
+    /// When true the document has no HTTP request envelope (no method/url) and only runs its flow —
+    /// e.g. a browser-automation script. The runner executes the flow and does not send an HTTP request.
+    /// </summary>
+    public bool FlowOnly { get; init; }
+
     public List<KeyValueDefinition> QueryParameters { get; init; } = [];
 
     public List<KeyValueDefinition> Headers { get; init; } = [];

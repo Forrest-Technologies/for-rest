@@ -72,17 +72,33 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             .Concat(runtimeSeeds.Select(static item => item.Key))
             .ToList();
 
-        if (!TryReadRequiredIdentifier(document.Request, "method", out var methodText, diagnostics, "request")
-            || !Enum.TryParse<HttpMethodKind>(methodText, true, out var method))
-        {
-            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The request section must declare a valid HTTP method.", 0, 0));
-            method = HttpMethodKind.Get;
-        }
+        // A document with no method and no url but with flow (e.g. a browser-automation script) is a
+        // valid flow-only document: it compiles and runs its flow without sending an HTTP request.
+        bool flowOnly = !document.Request.ContainsKey("method")
+            && !document.Request.ContainsKey("url")
+            && !string.IsNullOrWhiteSpace(document.Flow);
 
-        if (!TryReadRequiredString(document.Request, "url", out var urlTemplate, diagnostics, "request"))
+        HttpMethodKind method;
+        string? urlTemplate;
+        if (flowOnly)
         {
-            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The request section must declare a URL.", 0, 0));
-            urlTemplate = "https://localhost";
+            method = HttpMethodKind.Get;
+            urlTemplate = string.Empty;
+        }
+        else
+        {
+            if (!TryReadRequiredIdentifier(document.Request, "method", out var methodText, diagnostics, "request")
+                || !Enum.TryParse(methodText, true, out method))
+            {
+                diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The request section must declare a valid HTTP method.", 0, 0));
+                method = HttpMethodKind.Get;
+            }
+
+            if (!TryReadRequiredString(document.Request, "url", out urlTemplate, diagnostics, "request"))
+            {
+                diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The request section must declare a URL.", 0, 0));
+                urlTemplate = "https://localhost";
+            }
         }
 
         var body = BuildBody(document);
@@ -124,6 +140,7 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             Name = TryReadOptionalString(document.Meta, "name") ?? options.DefaultRequestName,
             Method = method,
             UrlTemplate = urlTemplate!,
+            FlowOnly = flowOnly,
             QueryParameters = queryParameters,
             Headers = headers,
             Auth = auth,
