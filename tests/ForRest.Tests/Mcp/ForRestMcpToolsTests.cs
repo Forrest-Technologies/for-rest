@@ -556,6 +556,18 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    public async Task Show_in_app_passes_target_and_id_to_host()
+    {
+        FakeHost host = new();
+        ForRestMcpTools tools = CreateTools(host);
+
+        string result = await tools.show_in_app("browser");
+
+        StringAssert.Contains(result, "Showing browser");
+        CollectionAssert.Contains(host.BrowserCalls, "show:browser:");
+    }
+
+    [TestMethod]
     public async Task Browser_tools_report_missing_host()
     {
         ForRestMcpTools tools = CreateTools(host: null);
@@ -744,6 +756,12 @@ public sealed class ForRestMcpToolsTests
             => Task.FromResult(new ForRestMcpBrowserElementView(true, "div", "ready", "Ready", "#ready", "/html/body/div[1]", "", "", 0, 0, 0, 0));
 
         public Task<string> BrowserEvaluate(string expression, CancellationToken cancellationToken) => Task.FromResult("null");
+
+        public Task<ForRestMcpMutationResult> ShowInApp(string target, string? id, CancellationToken cancellationToken)
+        {
+            BrowserCalls.Add($"show:{target}:{id}");
+            return Task.FromResult(ForRestMcpMutationResult.Ok($"Showing {target}."));
+        }
     }
 
     #endregion

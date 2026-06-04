@@ -7107,6 +7107,49 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		return result;
 	}
 
+	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.ShowInApp(string target, string? id)
+	{
+		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");
+		await InvokeOnViewModelThreadAsync(() => result = McpShowInApp(target));
+		return result;
+	}
+
+	private McpWorkbenchResult McpShowInApp(string target)
+	{
+		string key = (target ?? string.Empty).Trim().ToLowerInvariant();
+		switch (key)
+		{
+			case "browser":
+			case "request":
+				PaneTabViewModel? centerTab = CenterTabs.FirstOrDefault(tab => string.Equals(tab.Key, key, StringComparison.OrdinalIgnoreCase));
+				if (centerTab is null)
+				{
+					return McpWorkbenchResult.Fail($"There is no '{key}' tab to show.");
+				}
+
+				SelectCenterTab(centerTab);
+				return McpWorkbenchResult.Ok($"Showing the {key} pane.");
+			case "response":
+			case "requests":
+			case "stash":
+			case "headers":
+			case "trace":
+			case "raw":
+			case "debug":
+				PaneTabViewModel? inspectorTab = RightPaneTabs.FirstOrDefault(tab => string.Equals(tab.Key, key, StringComparison.OrdinalIgnoreCase));
+				if (inspectorTab is null)
+				{
+					return McpWorkbenchResult.Fail($"There is no '{key}' tab to show.");
+				}
+
+				SelectRightPaneTab(inspectorTab);
+				return McpWorkbenchResult.Ok($"Showing the {key} tab.");
+			default:
+				return McpWorkbenchResult.Fail(
+					$"Unknown target '{target}'. Use browser, request, response, requests, stash, headers, trace, raw, or debug.");
+		}
+	}
+
 	async Task<McpWorkbenchResult> IMcpWorkbenchBridge.ReplaceActiveDocument(string newSource)
 	{
 		McpWorkbenchResult result = McpWorkbenchResult.Fail("Workbench is not ready yet.");

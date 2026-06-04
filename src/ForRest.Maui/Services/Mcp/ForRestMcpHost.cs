@@ -929,6 +929,17 @@ public sealed class ForRestMcpHost(
     public Task<string> BrowserEvaluate(string expression, CancellationToken cancellationToken) =>
         browserProvider.Current.Evaluate(expression, cancellationToken);
 
+    public async Task<ForRestMcpMutationResult> ShowInApp(string target, string? id, CancellationToken cancellationToken)
+    {
+        if (Live is not { } live)
+        {
+            return ForRestMcpMutationResult.Fail("Showing a pane requires the For-Rest desktop app to be running.");
+        }
+
+        McpWorkbenchResult result = await live.ShowInApp(target, id);
+        return MapLive(result);
+    }
+
     private static ForRestMcpBrowserElementView MapBrowserElement(BrowserElementInfo info) => new(
         info.Found,
         info.Tag,

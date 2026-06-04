@@ -274,4 +274,14 @@ public interface IForRestMcpHost
     Task<string> BrowserEvaluate(string expression, CancellationToken cancellationToken);
 
     #endregion
+
+    #region App surface
+
+    /// <summary>
+    /// Brings something into view in the running desktop app (changes the selected tab, selects a
+    /// document/run, or focuses a pane) so the user looks at it. Requires the app UI to be running.
+    /// </summary>
+    Task<ForRestMcpMutationResult> ShowInApp(string target, string? id, CancellationToken cancellationToken);
+
+    #endregion
 }
