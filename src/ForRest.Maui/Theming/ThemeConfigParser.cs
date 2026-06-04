@@ -9,6 +9,7 @@ public sealed class ThemeConfigParser
 	private const string StyleSectionName = "appearance.style";
 	private const string AiSectionName = "ai";
 	private const string McpSectionName = "mcp";
+	private const string OAuthSectionName = "oauth";
 	private static readonly Regex ThemeLinePattern = new(
 		@"^(?<key>[A-Za-z][\w-]*)\s*=\s*(?<value>[^\r\n#]*?)(\s*(#.*)?)$",
 		RegexOptions.Compiled);
@@ -24,6 +25,7 @@ public sealed class ThemeConfigParser
 		ForRestStyleSettings style = new();
 		ForRestAiSettings ai = new();
 		ForRestMcpSettings mcp = new();
+		ForRestOAuthSettings oauth = new();
 
 		for (int index = 0; index < rawLines.Length; index++)
 		{
@@ -122,6 +124,18 @@ public sealed class ThemeConfigParser
 				}
 			}
 
+			if (string.Equals(currentSection, OAuthSectionName, StringComparison.OrdinalIgnoreCase))
+			{
+				if (!TryParseOAuthEntry(key!, value, oauth, out ForRestOAuthSettings parsedOAuth, out string? oauthMessage))
+				{
+					messages.Add(oauthMessage ?? $"ignored setting entry '{key}'");
+				}
+				else
+				{
+					oauth = parsedOAuth;
+				}
+			}
+
 			if (string.IsNullOrWhiteSpace(currentSection) &&
 			    string.Equals(key, SettingsTomlTemplate.LicenseKeyName, StringComparison.OrdinalIgnoreCase))
 			{
@@ -129,7 +143,7 @@ public sealed class ThemeConfigParser
 			}
 		}
 
-		return new ThemeConfigDocument(lines, entries, licenseKey, style, ai, mcp, messages);
+		return new ThemeConfigDocument(lines, entries, licenseKey, style, ai, mcp, oauth, messages);
 	}
 
 	private static bool TryParseEntry(string line, out string? key, out string? value, out string? message)
@@ -240,6 +254,27 @@ public sealed class ThemeConfigParser
 				}
 
 				parsed = current with { MaxConcurrentSessions = sessions };
+				return true;
+			default:
+				return SetMessage($"ignored setting entry '{key}'", out message);
+		}
+	}
+
+	private static bool TryParseOAuthEntry(string key, string? rawValue, ForRestOAuthSettings current, out ForRestOAuthSettings parsed, out string? message)
+	{
+		parsed = current;
+		message = null;
+		string value = ParseScalarValue(rawValue);
+
+		switch (key.Trim().ToLowerInvariant())
+		{
+			case "use_internal_browser":
+				if (!bool.TryParse(value, out bool useInternalBrowser))
+				{
+					return SetMessage("ignored invalid value for 'use_internal_browser'", out message);
+				}
+
+				parsed = current with { UseInternalBrowser = useInternalBrowser };
 				return true;
 			default:
 				return SetMessage($"ignored setting entry '{key}'", out message);

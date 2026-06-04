@@ -52,6 +52,12 @@ public sealed record ForRestMcpSettings(
 		MaxConcurrentSessions != 4;
 }
 
+public sealed record ForRestOAuthSettings(
+	bool UseInternalBrowser = false)
+{
+	public bool HasConfiguredValues => UseInternalBrowser;
+}
+
 public sealed record ForRestStyleSettings(
 	double EditorFontSize = 13.5d,
 	double ResultPaneTabFontSize = 11.5d)
@@ -92,6 +98,8 @@ public sealed record ForRestSettings(
 	public ForRestAiSettings Ai { get; init; } = new();
 
 	public ForRestMcpSettings Mcp { get; init; } = new();
+
+	public ForRestOAuthSettings OAuth { get; init; } = new();
 }
 
 public sealed record SettingsTomlLine(
@@ -118,6 +126,7 @@ public sealed record ThemeConfigDocument(
 	ForRestStyleSettings Style,
 	ForRestAiSettings Ai,
 	ForRestMcpSettings Mcp,
+	ForRestOAuthSettings OAuth,
 	IReadOnlyList<string> Messages);
 
 public sealed record ThemeNormalizationResult(

@@ -1,6 +1,7 @@
 using ForRest.Browser;
 using ForRest.Maui.Services.Browser;
 using ForRest.Maui.ViewModels;
+using ForRest.Services.AI.OAuth;
 using Microsoft.Extensions.Logging;
 #if WINDOWS
 using ForRest.Maui.Platforms.Windows.Browser;
@@ -19,13 +20,17 @@ namespace ForRest.Maui.Controls;
 /// user's actions into a runnable <c>.frs</c> document. On other platforms the provider stays on its no-op
 /// bridge for now (see the platform guards below).
 /// </summary>
-public partial class BrowserPaneView : ContentView
+public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
 {
     #region Private Fields
 
+    private static readonly TimeSpan OAuthSignInTimeout = TimeSpan.FromMinutes(5);
+
     private readonly BrowserAutomationProvider? provider;
+    private readonly InAppOAuthBrowserProvider? oauthBrowserProvider;
     private readonly ILogger<BrowserPaneView>? logger;
     private readonly BrowserRecordingScriptBuilder recordingBuilder = new();
+    private OAuthInterception? oauthInterception;
     private bool isRecording;
     private bool isTakenOver;
     private bool isBridgeConnected;
@@ -45,6 +50,7 @@ public partial class BrowserPaneView : ContentView
 
         IServiceProvider? services = IPlatformApplication.Current?.Services;
         provider = services?.GetService(typeof(BrowserAutomationProvider)) as BrowserAutomationProvider;
+        oauthBrowserProvider = services?.GetService(typeof(InAppOAuthBrowserProvider)) as InAppOAuthBrowserProvider;
         logger = services?.GetService(typeof(ILogger<BrowserPaneView>)) as ILogger<BrowserPaneView>;
 
         Loaded += OnLoaded;
@@ -64,6 +70,8 @@ public partial class BrowserPaneView : ContentView
     private void OnLoaded(object? sender, EventArgs e)
     {
         SetStatus("Enter an address and press Go to load a page.");
+        PageWebView.Navigating += OnWebViewNavigating;
+        oauthBrowserProvider?.Connect(this);
 #if WINDOWS
         PageWebView.HandlerChanged += OnWebViewHandlerChanged;
         TryInitializeCoreWebView();
@@ -77,6 +85,11 @@ public partial class BrowserPaneView : ContentView
     private void OnUnloaded(object? sender, EventArgs e)
     {
         DisconnectBridge();
+        PageWebView.Navigating -= OnWebViewNavigating;
+        oauthBrowserProvider?.Disconnect(this);
+
+        // A teardown mid-sign-in must not leave the awaiting run hanging forever.
+        oauthInterception?.Cancel(new OperationCanceledException("The browser pane closed during OAuth sign-in."));
 #if WINDOWS
         PageWebView.HandlerChanged -= OnWebViewHandlerChanged;
 #endif
@@ -111,6 +124,25 @@ public partial class BrowserPaneView : ContentView
     private void OnAddressCompleted(object? sender, EventArgs e)
     {
         Navigate(AddressEntry.Text);
+    }
+
+    private void OnWebViewNavigating(object? sender, WebNavigatingEventArgs e)
+    {
+        OAuthInterception? interception = oauthInterception;
+        if (interception is null)
+        {
+            return;
+        }
+
+        if (!RedirectUriMatcher.IsRedirect(e.Url, interception.RedirectUri))
+        {
+            return;
+        }
+
+        // Stop the WebView before it actually loads the redirect target (which may be an opaque provider
+        // callback page), then hand the code back to the awaiting run.
+        e.Cancel = true;
+        interception.TryComplete(e.Url);
     }
 
     private void OnWebViewNavigated(object? sender, WebNavigatedEventArgs e)
@@ -173,7 +205,81 @@ public partial class BrowserPaneView : ContentView
 
     #endregion
 
+    #region Interface Implementations
+
+    public async Task<string> Authorize(string authorizeUrl, string redirectUri, string state, CancellationToken cancellationToken)
+    {
+        if (oauthInterception is not null)
+        {
+            throw new InvalidOperationException("An OAuth sign-in is already in progress in the browser pane.");
+        }
+
+        // Save the current UX state so we can put the user back exactly where they were afterward.
+        PaneTabViewModel? previousCenterTab = ViewModel?.CenterTabs.FirstOrDefault(static tab => tab.IsSelected);
+
+        OAuthInterception interception = new(redirectUri, state);
+        oauthInterception = interception;
+
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(OAuthSignInTimeout);
+        using CancellationTokenRegistration registration = timeout.Token.Register(
+            () => interception.Cancel(
+                timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested
+                    ? new TimeoutException($"Browser sign-in timed out after {OAuthSignInTimeout.TotalMinutes:0} minutes without a redirect. Try again.")
+                    : new OperationCanceledException(cancellationToken)));
+
+        try
+        {
+            await InvokeOnUiThreadAsync(() =>
+            {
+                ShowBrowserPane();
+                SetStatus("Waiting for sign-in to complete in the browser pane...");
+                PageWebView.Source = authorizeUrl;
+            });
+
+            return await interception.Task;
+        }
+        finally
+        {
+            oauthInterception = null;
+
+            // Restore the previous UX state regardless of success, cancellation, or failure.
+            await InvokeOnUiThreadAsync(() =>
+            {
+                if (previousCenterTab is not null)
+                {
+                    ViewModel?.SelectCenterTab(previousCenterTab);
+                }
+
+                RefreshStatus();
+            });
+        }
+    }
+
+    #endregion
+
     #region Private Methods
+
+    private void ShowBrowserPane()
+    {
+        PaneTabViewModel? browserTab = ViewModel?.CenterTabs.FirstOrDefault(
+            static tab => string.Equals(tab.Key, "browser", StringComparison.OrdinalIgnoreCase));
+        if (browserTab is not null)
+        {
+            ViewModel?.SelectCenterTab(browserTab);
+        }
+    }
+
+    private static Task InvokeOnUiThreadAsync(Action action)
+    {
+        if (MainThread.IsMainThread)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return MainThread.InvokeOnMainThreadAsync(action);
+    }
 
     private void Navigate(string? address)
     {
@@ -423,6 +529,42 @@ public partial class BrowserPaneView : ContentView
         }
     }
 #endif
+
+    #endregion
+
+    #region Helpers
+
+    /// <summary>
+    /// Tracks one in-flight OAuth sign-in: the redirect URI being awaited and a
+    /// <see cref="TaskCompletionSource{TResult}"/> the navigation interceptor completes with the
+    /// authorization code (or faults on cancellation, timeout, or a provider-reported error).
+    /// </summary>
+    private sealed class OAuthInterception(string redirectUri, string state)
+    {
+        private readonly TaskCompletionSource<string> completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly string expectedState = state;
+
+        public string RedirectUri { get; } = redirectUri;
+
+        public Task<string> Task => completion.Task;
+
+        public void TryComplete(string redirectUrl)
+        {
+            try
+            {
+                OAuthRedirectResult result = OAuthRedirectParser.ParseAndValidate(redirectUrl, expectedState);
+                completion.TrySetResult(result.Code);
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+        }
+
+        public void Cancel(Exception exception) => completion.TrySetException(exception);
+    }
 
     #endregion
 }

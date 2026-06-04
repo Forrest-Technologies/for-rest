@@ -47,6 +47,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<SettingsTomlDocumentService>();
 		builder.Services.AddSingleton<IWorkbenchAiSettingsProvider, WorkbenchAiSettingsProvider>();
 		builder.Services.AddSingleton<IWorkbenchMcpSettingsProvider, WorkbenchMcpSettingsProvider>();
+		builder.Services.AddSingleton<IWorkbenchOAuthSettingsProvider, WorkbenchOAuthSettingsProvider>();
 		builder.Services.AddSingleton<IProviderTokenStore, SecureStorageProviderTokenStore>();
 		builder.Services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
@@ -63,6 +64,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton<RequestWorkbenchStateStore>();
 		builder.Services.AddSingleton<BrowserAutomationProvider>();
 		builder.Services.AddSingleton<IBrowserAutomationProvider>(serviceProvider => serviceProvider.GetRequiredService<BrowserAutomationProvider>());
+		builder.Services.AddSingleton<InAppOAuthBrowserProvider>();
+		builder.Services.AddSingleton<IInteractiveAuthorizationBroker, InAppBrowserAuthorizationBroker>();
 		builder.Services.AddSingleton<IExecutionHistoryRepository, InMemoryExecutionHistoryRepository>();
 		builder.Services.AddSingleton<VariableResolver>();
 		builder.Services.AddSingleton<JsonEditorService>();
