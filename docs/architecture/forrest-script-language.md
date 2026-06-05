@@ -216,9 +216,16 @@ Supported flow forms today:
 
 - `if / else if / else`
 - `while`
-- `foreach`
+- `foreach` (preferred) / `for` (accepted alias)
+- `switch / case / default`
 - `range(start, end)`
 - inclusive range literals like `[0..9]`
+
+**Block style.** The canonical form puts the opening brace on the header line, indents the
+body, and closes with `}` on its own line (every example below uses it). A block whose body
+is a single short statement may also be written inline — `if sent.status == 200 { break }` —
+but prefer the multiline form for anything longer. Both compile to the same thing: the inline
+form is expanded to the multiline form before compilation.
 
 Examples:
 
@@ -237,7 +244,19 @@ foreach index in range(0, 3) {
 }
 ```
 
-`switch`, `case`, and `default` are not currently part of the flow compiler. Keep the docs honest about that gap until the compiler supports it.
+```frs
+switch response.status {
+  case 200 {
+    log "OK"
+  }
+  case 404 {
+    warn "Not found"
+  }
+  default {
+    error "Unexpected status"
+  }
+}
+```
 
 ## Response and Error Handlers
 

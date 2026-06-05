@@ -296,7 +296,7 @@ internal static class ForRestLanguageReference
             "if / else if / else",
             "Flow",
             "Run code conditionally.",
-            "ForRest supports single-line and multiline conditions. Use `and`, `or`, and `not (...)` for readable branching.",
+            "Prefer the multiline block form shown below: the opening brace sits on the header line, the body is indented, and the closing brace is on its own line. Chain branches with `else if` and `else`. For a single short action you may also write the block inline on one line — `if cond { break }` — but reach for the multiline form for anything longer. Conditions can span multiple lines; combine them with `and`, `or`, and `not (...)`.",
             """
             if response.status == 200
                and response.uuid.length() > 10
@@ -335,7 +335,7 @@ internal static class ForRestLanguageReference
             "foreach",
             "Flow",
             "Iterate arrays, ranges, header collections, or JSON lists.",
-            "Use `foreach item in source { }` for arrays and generated ranges. `for item in source { }` is also accepted as a shorthand loop header.",
+            "Prefer `foreach item in source { }` for arrays, generated ranges, header collections, and JSON lists — it is the canonical loop header. `for item in source { }` is accepted as an alias but `foreach` reads best. Use the multiline block form (closing brace on its own line); inline a single-statement body only when it stays short.",
             """
             let attempts = [0..2]
             foreach attempt in attempts {
