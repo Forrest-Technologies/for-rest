@@ -6,8 +6,27 @@
     <Grid RowDefinitions="Auto,Auto,*"
           BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}">
 
+        <!-- The WebView is declared first so it sits at the bottom of the native draw order, and it
+             is wrapped in a clipped container pinned to row 2. On Android the hardware-accelerated
+             WebView would otherwise paint past its grid row and cover the chrome above it (the user
+             saw a blank white panel with no toolbar). Clipping confines the page to its own row, and
+             keeping the chrome (toolbar + status) after it in the tree keeps the address bar and
+             buttons tappable above the page. -->
+        <Grid Grid.Row="2"
+              ZIndex="0"
+              IsClippedToBounds="True">
+            <WebView x:Name="PageWebView"
+                     Navigated="OnWebViewNavigated" />
+        </Grid>
+
+        <!-- Two rows so the address bar gets a full-width line of its own. Cramming the nav glyphs,
+             address, Go, Record, and Take over onto one row squished the address field on phones. -->
         <Grid Padding="8,6"
-              ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto"
+              ZIndex="1"
+              BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+              RowDefinitions="Auto,Auto"
+              RowSpacing="4"
+              ColumnDefinitions="Auto,Auto,Auto,*,Auto"
               ColumnSpacing="4">
             <Button Text="&#x2039;"
                     Style="{StaticResource DenseTabButtonStyle}"
@@ -41,30 +60,30 @@
                     Clicked="OnGoClicked"
                     SemanticProperties.Description="Navigate to the address" />
 
-            <Button Grid.Column="5"
-                    x:Name="RecordButton"
-                    Text="Record"
-                    Style="{StaticResource DenseTabButtonStyle}"
-                    Clicked="OnRecordToggleClicked"
-                    SemanticProperties.Description="Start or stop recording browser actions" />
+            <HorizontalStackLayout Grid.Row="1"
+                                   Grid.ColumnSpan="5"
+                                   Spacing="4">
+                <Button x:Name="RecordButton"
+                        Text="Record"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnRecordToggleClicked"
+                        SemanticProperties.Description="Start or stop recording browser actions" />
 
-            <Button Grid.Column="6"
-                    x:Name="TakeOverButton"
-                    Text="Take over"
-                    Style="{StaticResource DenseTabButtonStyle}"
-                    Clicked="OnTakeOverToggleClicked"
-                    SemanticProperties.Description="Suspend synthetic input so you can drive the page directly" />
+                <Button x:Name="TakeOverButton"
+                        Text="Take over"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnTakeOverToggleClicked"
+                        SemanticProperties.Description="Suspend synthetic input so you can drive the page directly" />
+            </HorizontalStackLayout>
         </Grid>
 
         <Label Grid.Row="1"
                x:Name="StatusLabel"
+               ZIndex="1"
+               BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
                Padding="10,0,10,6"
                LineBreakMode="TailTruncation"
                MaxLines="1"
                Style="{StaticResource MonoMetaStyle}" />
-
-        <WebView Grid.Row="2"
-                 x:Name="PageWebView"
-                 Navigated="OnWebViewNavigated" />
     </Grid>
 </ContentView>

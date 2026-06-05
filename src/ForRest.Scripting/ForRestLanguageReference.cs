@@ -296,7 +296,7 @@ internal static class ForRestLanguageReference
             "if / else if / else",
             "Flow",
             "Run code conditionally.",
-            "ForRest supports single-line and multiline conditions. Use `and`, `or`, and `not (...)` for readable branching.",
+            "Prefer the multiline block form shown below: the opening brace sits on the header line, the body is indented, and the closing brace is on its own line. Chain branches with `else if` and `else`. For a single short action you may also write the block inline on one line — `if cond { break }` — but reach for the multiline form for anything longer. Conditions can span multiple lines; combine them with `and`, `or`, and `not (...)`.",
             """
             if response.status == 200
                and response.uuid.length() > 10
@@ -335,7 +335,7 @@ internal static class ForRestLanguageReference
             "foreach",
             "Flow",
             "Iterate arrays, ranges, header collections, or JSON lists.",
-            "Use `foreach item in source { }` for arrays and generated ranges. `for item in source { }` is also accepted as a shorthand loop header.",
+            "Prefer `foreach item in source { }` for arrays, generated ranges, header collections, and JSON lists — it is the canonical loop header. `for item in source { }` is accepted as an alias but `foreach` reads best. Use the multiline block form (closing brace on its own line); inline a single-statement body only when it stays short.",
             """
             let attempts = [0..2]
             foreach attempt in attempts {
@@ -1425,6 +1425,18 @@ internal static class ForRestLanguageReference
         builder.AppendLine("Canonical source: `ForRestLanguageCatalog`.");
         builder.AppendLine("This document mirrors the Monaco help catalog and the prompt context built from the same entry list.");
         builder.AppendLine();
+        builder.AppendLine("## What this language is for");
+        builder.AppendLine();
+        builder.AppendLine("`.frs` is a small domain-specific language purpose-built for the HTTP loop: **send → inspect → extract → assert → repeat**. It is not general-purpose — favour its declarative sugar over hand-rolled control flow. A request is a readable source file, so the *same* script is the artifact a human reads, an AI edits, and the runtime replays deterministically with no model in the loop at run time.");
+        builder.AppendLine();
+        builder.AppendLine("Guidance when authoring or editing scripts:");
+        builder.AppendLine();
+        builder.AppendLine("- Prefer declarative directives (`auth`, `header`, `expect`, `extract`) over imperative code; drop into flow (`let`, `if`, `foreach`, `request.send()`) only when you genuinely need logic.");
+        builder.AppendLine("- Let values flow through the precedence chain (System → Global → Workspace → Environment → Request-local → Runtime) and `{{interpolation}}` instead of hard-coding them.");
+        builder.AppendLine("- Treat `secret` values as opaque: they are encrypted at rest and redacted before any AI or MCP client sees them, so never echo them into logs or bodies.");
+        builder.AppendLine("- Verify with `expect`, capture evidence with `stash`, and carry values forward with `extract`; every run is snapshotted to history.");
+        builder.AppendLine("- `payloads`/`fuzz` and `browser` are for authorized testing only.");
+        builder.AppendLine();
         builder.AppendLine("## Request Surface");
         builder.AppendLine();
         builder.AppendLine("| Setting | Notes |");
@@ -1471,6 +1483,8 @@ internal static class ForRestLanguageReference
         StringBuilder builder = new();
         builder.AppendLine("ForRest language reference.");
         builder.AppendLine("Use the exact syntax from the canonical catalog below.");
+        builder.AppendLine();
+        builder.AppendLine("`.frs` is a small DSL for the HTTP loop (send -> inspect -> extract -> assert) and is the shared artifact a human reads, you edit, and the runtime replays deterministically. Prefer its declarative sugar (auth / header / expect / extract / stash) over imperative flow; only reach for let / if / foreach / request.send() when you need real logic. Resolve values through the variable precedence chain and {{interpolation}}; treat secret values as opaque (they are redacted, so never echo them). payloads / fuzz / browser are for authorized testing only.");
         builder.AppendLine();
         AppendPromptSection(builder, "Request surface", Entries.Where(entry => entry.Category == "Request"));
         builder.AppendLine();

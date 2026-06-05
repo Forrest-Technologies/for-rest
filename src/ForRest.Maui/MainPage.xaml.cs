@@ -77,6 +77,11 @@ public partial class MainPage : ContentPage
 		ViewModel.ToggleRightPane();
 	}
 
+	private void OnToggleCenterPaneClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ToggleCenterPane();
+	}
+
 	private void OnDismissStatusBannerClicked(object? sender, EventArgs e)
 	{
 		ViewModel.DismissStatusBanner();

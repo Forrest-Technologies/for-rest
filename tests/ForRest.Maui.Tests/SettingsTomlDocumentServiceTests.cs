@@ -148,6 +148,38 @@ public sealed class SettingsTomlDocumentServiceTests
 	}
 
 	[TestMethod]
+	public void SaveRawText_switches_theme_when_user_enables_a_second_flag()
+	{
+		// Regression: flipping a theme flag to true in the editor while the current theme flag is
+		// still true must switch to the newly enabled theme, not silently revert to the first flag
+		// in the document (light).
+		using TestConfigScope scope = new();
+		SettingsTomlDocumentService service = CreateService();
+		File.WriteAllText(
+			scope.ConfigFilePath,
+			"""
+			license = ""
+
+			[appearance.theme]
+			light = true
+			azure = false
+			dark = false
+			black = false
+			amber = false
+			""");
+
+		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Light));
+
+		// The user turns on black without first clearing light — both flags are now true.
+		string updatedText = editorText.Replace("black = false", "black = true", StringComparison.Ordinal);
+		service.SaveRawText(updatedText);
+
+		string rawText = File.ReadAllText(scope.ConfigFilePath);
+		StringAssert.Contains(rawText, "black = true");
+		StringAssert.Contains(rawText, "light = false");
+	}
+
+	[TestMethod]
 	public void SaveRawText_persists_style_section_values()
 	{
 		using TestConfigScope scope = new();

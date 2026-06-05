@@ -128,7 +128,7 @@ internal static class ForRestFlowScriptCompiler
             AppendRuntimePreamble(builder, knownIdentifiers);
         }
 
-        var lines = Normalize(flowSource).Split('\n');
+        var lines = ExpandInlineBlocks(Normalize(flowSource).Split('\n'));
         var index = 0;
         var tempCounter = 0;
         CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(knownIdentifiers, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: false);
@@ -3934,6 +3934,204 @@ internal static class ForRestFlowScriptCompiler
     private static string Normalize(string source)
     {
         return (source ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+    }
+
+    /// <summary>
+    /// Rewrites single-line inline blocks such as <c>if cond { stmt }</c> into the canonical
+    /// multi-line form the line-oriented compiler understands:
+    /// <code>
+    /// if cond {
+    ///   stmt
+    /// }
+    /// </code>
+    /// The line-oriented parser keys block boundaries off lines that end in <c>{</c> and lines
+    /// that are exactly <c>}</c>. An inline block ends in <c>}</c>, so without this pass the
+    /// header collector either greedily swallows forward to the next <c>{</c>-terminated line
+    /// (corrupting unrelated blocks and reporting a spurious "missing closing brace") or the
+    /// statement falls through to a raw, paren-less <c>if</c> that is invalid C#. Expanding the
+    /// inline form up front lets <c>if</c>, <c>else</c>, <c>while</c>, and <c>foreach</c> all
+    /// flow through the same machinery. Lines that do not start with a block keyword (including
+    /// assignments whose values contain braces, such as <c>request.body = $"{{...}}"</c>) are
+    /// left untouched.
+    /// </summary>
+    private static string[] ExpandInlineBlocks(IReadOnlyList<string> lines)
+    {
+        var expanded = new List<string>(lines.Count);
+        foreach (var line in lines)
+        {
+            ExpandInlineBlockLine(line, expanded);
+        }
+
+        return [.. expanded];
+    }
+
+    private static void ExpandInlineBlockLine(string line, List<string> output)
+    {
+        var leadingWhitespaceLength = line.Length - line.TrimStart().Length;
+        var indent = line[..leadingWhitespaceLength];
+        var content = line[leadingWhitespaceLength..].TrimEnd();
+
+        // Peel a leading standalone close brace (e.g. "} else { ... }") so the brace and the
+        // following inline block land on their own lines.
+        if (content.StartsWith('}') && content.Length > 1)
+        {
+            var afterBrace = content[1..].TrimStart();
+            if (StartsWithBlockKeyword(afterBrace) && TryFindInlineBlock(afterBrace, out _, out _, out _))
+            {
+                output.Add(indent + "}");
+                ExpandInlineBlockLine(indent + afterBrace, output);
+                return;
+            }
+        }
+
+        if (!StartsWithBlockKeyword(content) || !TryFindInlineBlock(content, out var header, out var body, out var trailing))
+        {
+            output.Add(line);
+            return;
+        }
+
+        output.Add(indent + header.TrimEnd() + " {");
+
+        var innerBody = body.Trim();
+        if (innerBody.Length > 0)
+        {
+            ExpandInlineBlockLine(indent + "  " + innerBody, output);
+        }
+
+        var trailingContent = trailing.Trim();
+        if (trailingContent.Length == 0)
+        {
+            output.Add(indent + "}");
+        }
+        else
+        {
+            // Re-attach trailing text to a close brace and re-expand so "} else { ... }"
+            // continuations keep flowing through the same machinery.
+            ExpandInlineBlockLine(indent + "} " + trailingContent, output);
+        }
+    }
+
+    private static bool StartsWithBlockKeyword(string content)
+    {
+        return StartsWithKeywordBoundary(content, "if", allowOpenParenStart: true)
+            || StartsWithKeywordBoundary(content, "while", allowOpenParenStart: true)
+            || StartsWithKeywordBoundary(content, "foreach", allowOpenParenStart: true)
+            || StartsWithKeywordBoundary(content, "for", allowOpenParenStart: true)
+            || StartsWithKeywordBoundary(content, "else", allowOpenParenStart: true);
+    }
+
+    private static bool TryFindInlineBlock(string content, out string header, out string body, out string trailing)
+    {
+        header = string.Empty;
+        body = string.Empty;
+        trailing = string.Empty;
+
+        var openIndex = FindFirstOpenBrace(content);
+        if (openIndex < 0)
+        {
+            return false;
+        }
+
+        // A header whose brace is the last non-whitespace character is an ordinary multi-line
+        // block opener, not an inline block; leave it for the line-oriented parser.
+        if (content[(openIndex + 1)..].Trim().Length == 0)
+        {
+            return false;
+        }
+
+        var closeIndex = FindMatchingCloseBrace(content, openIndex);
+        if (closeIndex < 0)
+        {
+            return false;
+        }
+
+        header = content[..openIndex];
+        body = content[(openIndex + 1)..closeIndex];
+        trailing = content[(closeIndex + 1)..];
+        return true;
+    }
+
+    private static int FindFirstOpenBrace(string text)
+    {
+        var inString = false;
+        var escaped = false;
+        var quote = '\0';
+        for (var index = 0; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (inString)
+            {
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character)) ||
+                     (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote)) && !escaped)
+                {
+                    inString = false;
+                }
+
+                escaped = character == '\\' && !escaped;
+                continue;
+            }
+
+            if (IsSupportedDoubleQuoteDelimiter(character) || character == '\'')
+            {
+                inString = true;
+                escaped = false;
+                quote = character;
+                continue;
+            }
+
+            if (character == '{')
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindMatchingCloseBrace(string text, int openIndex)
+    {
+        var inString = false;
+        var escaped = false;
+        var quote = '\0';
+        var depth = 0;
+        for (var index = openIndex; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (inString)
+            {
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character)) ||
+                     (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote)) && !escaped)
+                {
+                    inString = false;
+                }
+
+                escaped = character == '\\' && !escaped;
+                continue;
+            }
+
+            if (IsSupportedDoubleQuoteDelimiter(character) || character == '\'')
+            {
+                inString = true;
+                escaped = false;
+                quote = character;
+                continue;
+            }
+
+            if (character == '{')
+            {
+                depth++;
+            }
+            else if (character == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return index;
+                }
+            }
+        }
+
+        return -1;
     }
 
     private abstract record StructuredLiteralNode;

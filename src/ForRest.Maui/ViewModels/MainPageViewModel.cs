@@ -1102,6 +1102,13 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	public string CompactRightPaneButtonText => IsInspectorOverlayVisible ? "Close Inspect" : "Inspect";
 
+	// The center pane hosts the Request (code) surface and the Browser surface as tabs. On Android
+	// the native browser WebView paints over the in-pane tab strip, so once the browser is showing
+	// the in-pane tabs can no longer be tapped to return to the editor. The compact action bar lives
+	// below the workbench host and stays tappable, so it carries a toggle that always offers the
+	// opposite surface.
+	public string CompactCenterPaneButtonText => IsBrowserTabVisible ? "Code" : "Browser";
+
 	public GridLength LeftRestoreRailWidth => new(ShowLeftPaneRestoreButton ? CollapsedPaneRailPixels : 0d, GridUnitType.Absolute);
 
 	public GridLength LeftPaneWidth => new(IsLeftPaneVisible ? _leftPanePixels : 0d, GridUnitType.Absolute);
@@ -1865,6 +1872,15 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		ConstrainPaneLayout(_workbenchWidth);
 	}
 
+	public void ToggleCenterPane()
+	{
+		// Switch the center pane between the Request (code) surface and the Browser surface. This is
+		// the only reliable way back to the editor on Android, where the browser WebView renders over
+		// the in-pane tab strip.
+		var targetKey = IsBrowserTabVisible ? "request" : "browser";
+		SelectCenterTab(CenterTabs.FirstOrDefault(tab => string.Equals(tab.Key, targetKey, StringComparison.Ordinal)));
+	}
+
 	public void DismissOverlays()
 	{
 		if (!_isCompactLayout || (!_isExplorerOverlayOpen && !_isInspectorOverlayOpen))
@@ -1988,6 +2004,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		OnPropertyChanged(nameof(IsTestsTabVisible));
 		OnPropertyChanged(nameof(IsVariablesTabVisible));
 		OnPropertyChanged(nameof(IsBrowserTabVisible));
+		OnPropertyChanged(nameof(CompactCenterPaneButtonText));
 		OnPropertyChanged(nameof(CenterSurfaceStatus));
 		ActivateCurrentCenterTabEditor();
 	}

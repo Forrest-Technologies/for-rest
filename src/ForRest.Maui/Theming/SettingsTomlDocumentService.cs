@@ -68,7 +68,14 @@ public sealed class SettingsTomlDocumentService
 		string currentRawText = _themeConfigStore.ReadAllText();
 		ThemeConfigDocument currentDocument = _themeConfigParser.Parse(currentRawText);
 		ThemeNormalizationResult currentNormalized = _themeConfigNormalizer.Normalize(currentDocument);
-		ThemeNormalizationResult editorNormalized = _themeConfigNormalizer.Normalize(_themeConfigParser.Parse(sanitizedText));
+
+		// Resolve theme conflicts relative to the theme currently in effect. When the user flips a
+		// second theme flag to true in the editor (e.g. black = true while light is still true), the
+		// normalizer must keep the newly enabled one; without the current theme it would fall back to
+		// the first flag in the document (light) and silently revert the edit.
+		ThemeNormalizationResult editorNormalized = _themeConfigNormalizer.Normalize(
+			_themeConfigParser.Parse(sanitizedText),
+			currentNormalized.Settings.Theme);
 
 		string editedLicense = editorNormalized.Settings.LicenseKey;
 		string resolvedLicense = string.Equals(editedLicense, SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal)
