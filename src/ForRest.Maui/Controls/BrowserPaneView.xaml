@@ -19,10 +19,14 @@
                      Navigated="OnWebViewNavigated" />
         </Grid>
 
+        <!-- Two rows so the address bar gets a full-width line of its own. Cramming the nav glyphs,
+             address, Go, Record, and Take over onto one row squished the address field on phones. -->
         <Grid Padding="8,6"
               ZIndex="1"
               BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
-              ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto"
+              RowDefinitions="Auto,Auto"
+              RowSpacing="4"
+              ColumnDefinitions="Auto,Auto,Auto,*,Auto"
               ColumnSpacing="4">
             <Button Text="&#x2039;"
                     Style="{StaticResource DenseTabButtonStyle}"
@@ -56,19 +60,21 @@
                     Clicked="OnGoClicked"
                     SemanticProperties.Description="Navigate to the address" />
 
-            <Button Grid.Column="5"
-                    x:Name="RecordButton"
-                    Text="Record"
-                    Style="{StaticResource DenseTabButtonStyle}"
-                    Clicked="OnRecordToggleClicked"
-                    SemanticProperties.Description="Start or stop recording browser actions" />
+            <HorizontalStackLayout Grid.Row="1"
+                                   Grid.ColumnSpan="5"
+                                   Spacing="4">
+                <Button x:Name="RecordButton"
+                        Text="Record"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnRecordToggleClicked"
+                        SemanticProperties.Description="Start or stop recording browser actions" />
 
-            <Button Grid.Column="6"
-                    x:Name="TakeOverButton"
-                    Text="Take over"
-                    Style="{StaticResource DenseTabButtonStyle}"
-                    Clicked="OnTakeOverToggleClicked"
-                    SemanticProperties.Description="Suspend synthetic input so you can drive the page directly" />
+                <Button x:Name="TakeOverButton"
+                        Text="Take over"
+                        Style="{StaticResource DenseTabButtonStyle}"
+                        Clicked="OnTakeOverToggleClicked"
+                        SemanticProperties.Description="Suspend synthetic input so you can drive the page directly" />
+            </HorizontalStackLayout>
         </Grid>
 
         <Label Grid.Row="1"
