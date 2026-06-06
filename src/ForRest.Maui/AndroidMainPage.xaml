@@ -151,7 +151,15 @@
                         Clicked="OnToggleHtmlPreviewClicked"
                         IsVisible="{Binding IsHtmlResponse}"
                         HorizontalOptions="End"
-                        Margin="0,0,80,0" />
+                        Margin="0,0,80,0">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding ShowHtmlPreview}" Value="True">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
+                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
                 <Button x:Name="ResponsePrettyPrintButton"
                         Grid.Row="1"
                         Grid.Column="1"
