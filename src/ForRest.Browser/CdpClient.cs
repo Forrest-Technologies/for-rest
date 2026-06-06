@@ -65,6 +65,29 @@ public sealed class CdpClient(ICdpTransport transport)
         }
     }
 
+    /// <summary>
+    /// Registers a script to run at the start of every new document (<c>Page.addScriptToEvaluateOnNewDocument</c>).
+    /// Navigations wipe injected DOM, so this is how page-level overlays survive across page loads.
+    /// </summary>
+    public Task AddInitScript(string source, CancellationToken cancellationToken = default)
+    {
+        JsonObject parameters = new() { ["source"] = source };
+        return transport.Send("Page.addScriptToEvaluateOnNewDocument", parameters.ToJsonString(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Installs the visible red cursor overlay so it stays present while the engine drives the page:
+    /// it registers the overlay for every future document and creates it on the current one. The
+    /// per-move cursor call still self-heals, but pre-installing means the overlay is there from the
+    /// first frame and survives navigations rather than only appearing on the next mouse move.
+    /// </summary>
+    public async Task InstallCursorOverlay(CancellationToken cancellationToken = default)
+    {
+        string script = BrowserJs.InstallCursor();
+        await AddInitScript(script, cancellationToken);
+        await Evaluate(script, cancellationToken: cancellationToken);
+    }
+
     /// <summary>Evaluates a JavaScript expression in the page and returns the result value as raw JSON (or null).</summary>
     public async Task<string?> Evaluate(string expression, bool returnByValue = true, bool awaitPromise = false, CancellationToken cancellationToken = default)
     {
