@@ -66,6 +66,44 @@
                                LineBreakMode="WordWrap"
                                MaxLines="2"
                                Style="{StaticResource PaneMetaStyle}" />
+
+                        <!-- Prominent Source/Rendered switch for HTML responses, so the rendered
+                             (Chromium) view is discoverable instead of buried in the action row. -->
+                        <Border IsVisible="{Binding IsHtmlResponse}"
+                                Margin="0,8,0,0"
+                                Padding="2"
+                                HorizontalOptions="Start"
+                                BackgroundColor="{DynamicResource ThemeEditorBackgroundColor}"
+                                Stroke="{DynamicResource ThemeDividerColor}"
+                                StrokeThickness="1"
+                                StrokeShape="RoundRectangle 8">
+                            <HorizontalStackLayout Spacing="2">
+                                <Button Text="Source"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnShowResponseSourceClicked"
+                                        SemanticProperties.Description="Show the raw HTML source">
+                                    <Button.Triggers>
+                                        <DataTrigger TargetType="Button" Binding="{Binding ShowHtmlPreview}" Value="False">
+                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
+                                        </DataTrigger>
+                                    </Button.Triggers>
+                                </Button>
+                                <Button Text="Rendered"
+                                        Style="{StaticResource DenseTabButtonStyle}"
+                                        Clicked="OnShowResponseRenderedClicked"
+                                        SemanticProperties.Description="Render the HTML response like a browser">
+                                    <Button.Triggers>
+                                        <DataTrigger TargetType="Button" Binding="{Binding ShowHtmlPreview}" Value="True">
+                                            <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
+                                            <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
+                                            <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
+                                        </DataTrigger>
+                                    </Button.Triggers>
+                                </Button>
+                            </HorizontalStackLayout>
+                        </Border>
                     </VerticalStackLayout>
 
                     <FlexLayout Grid.Row="1"
@@ -100,11 +138,6 @@
                                 Text="{Binding ResponsePrettyPrintButtonText}"
                                 Style="{StaticResource DenseTabButtonStyle}"
                                 Clicked="OnTogglePrettyPrintClicked" />
-                        <Button Margin="0,0,8,8"
-                                Text="{Binding HtmlPreviewButtonText}"
-                                Style="{StaticResource DenseTabButtonStyle}"
-                                Clicked="OnToggleHtmlPreviewClicked"
-                                IsVisible="{Binding IsHtmlResponse}" />
                         <Button Margin="0,0,8,8"
                                 Text="Save Body"
                                 Style="{StaticResource DenseTabButtonStyle}"

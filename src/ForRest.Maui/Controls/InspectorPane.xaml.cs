@@ -277,9 +277,15 @@ public partial class InspectorPane : ContentView
 		await ViewModel.CopyResponseVariableAsync(e.LineNumber, e.Column);
 	}
 
-	private void OnToggleHtmlPreviewClicked(object? sender, EventArgs e)
+	private void OnShowResponseRenderedClicked(object? sender, EventArgs e)
 	{
-		ViewModel.ToggleHtmlPreview();
+		ViewModel.ShowResponseRendered();
+		RefreshResponseBodyViewer();
+	}
+
+	private void OnShowResponseSourceClicked(object? sender, EventArgs e)
+	{
+		ViewModel.ShowResponseSource();
 		RefreshResponseBodyViewer();
 	}
 

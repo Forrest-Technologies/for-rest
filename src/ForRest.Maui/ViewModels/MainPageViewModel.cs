@@ -645,11 +645,26 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	public bool ShowHtmlPreview => IsHtmlResponse && IsHtmlPreviewEnabled;
 
-	public string HtmlPreviewButtonText => IsHtmlPreviewEnabled ? "View Source" : "Render HTML";
+	public string HtmlPreviewButtonText => IsHtmlPreviewEnabled ? "View source" : "Render HTML";
 
 	public void ToggleHtmlPreview()
 	{
 		IsHtmlPreviewEnabled = !IsHtmlPreviewEnabled;
+	}
+
+	// Explicit view-mode setters back the prominent Source/Rendered segmented control in the response
+	// pane. Rendered only applies to HTML responses; switching to source always works.
+	public void ShowResponseRendered()
+	{
+		if (IsHtmlResponse)
+		{
+			IsHtmlPreviewEnabled = true;
+		}
+	}
+
+	public void ShowResponseSource()
+	{
+		IsHtmlPreviewEnabled = false;
 	}
 
 	public string DebugOutputText

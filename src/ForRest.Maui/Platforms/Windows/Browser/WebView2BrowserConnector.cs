@@ -18,6 +18,11 @@ public static class WebView2BrowserConnector
         WebView2CdpTransport transport = new(webView, dispatcher);
         CdpClient client = new(transport);
         await client.EnableDomains();
+
+        // Pre-install the visible cursor overlay so it is present from the first frame and survives
+        // navigation, instead of only materialising on the next synthetic mouse move.
+        await client.InstallCursorOverlay();
+
         provider.Connect(new CdpBrowserDriver(client));
     }
 }
