@@ -15,10 +15,11 @@ namespace ForRest.Maui.Controls;
 /// <summary>
 /// The live browser pane: a dense IDE-style chrome strip (back/forward/reload, address, go, a record
 /// toggle, and a "take over" toggle that suspends synthetic input) above an embedded <see cref="WebView"/>.
-/// On Windows it publishes the WebView2 to the app's <see cref="BrowserAutomationProvider"/> so the
-/// scripting <c>browser.*</c> API and MCP <c>browser_*</c> tools drive the visible page, and it records the
-/// user's actions into a runnable <c>.frs</c> document. On other platforms the provider stays on its no-op
-/// bridge for now (see the platform guards below).
+/// On Windows it publishes the WebView2 (via CDP) to the app's <see cref="BrowserAutomationProvider"/>
+/// and on Android it publishes a JavaScript-bridge driver, so the scripting <c>browser.*</c> API and MCP
+/// <c>browser_*</c> tools drive the visible page on both; on Windows it also records the user's actions
+/// into a runnable <c>.frs</c> document. Other platforms stay on the no-op bridge (see the platform
+/// guards below).
 /// </summary>
 public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
 {
@@ -38,6 +39,9 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
     private CoreWebView2? coreWebView;
     private DispatcherQueue? dispatcher;
     private bool isCoreInitializing;
+#endif
+#if ANDROID
+    private Android.Webkit.WebView? connectedAndroidWebView;
 #endif
 
     #endregion
@@ -75,10 +79,13 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
 #if WINDOWS
         PageWebView.HandlerChanged += OnWebViewHandlerChanged;
         TryInitializeCoreWebView();
+#elif ANDROID
+        PageWebView.HandlerChanged += OnAndroidWebViewHandlerChanged;
+        TryConnectAndroidBridge();
 #else
-        // TODO: connect a JavaScript-bridge browser bridge on Android/macCatalyst so scripts and MCP can
-        // drive the embedded WebView there too. Until then the provider stays on its no-op bridge.
-        logger?.LogInformation("Browser pane live bridge is only wired on Windows; provider remains on the null bridge.");
+        // TODO: connect a JavaScript-bridge browser bridge on macCatalyst so scripts and MCP can drive
+        // the embedded WebView there too. Until then the provider stays on its no-op bridge.
+        logger?.LogInformation("Browser pane live bridge is wired on Windows and Android; provider remains on the null bridge for this platform.");
 #endif
     }
 
@@ -92,6 +99,8 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
         oauthInterception?.Cancel(new OperationCanceledException("The browser pane closed during OAuth sign-in."));
 #if WINDOWS
         PageWebView.HandlerChanged -= OnWebViewHandlerChanged;
+#elif ANDROID
+        PageWebView.HandlerChanged -= OnAndroidWebViewHandlerChanged;
 #endif
     }
 
@@ -367,6 +376,8 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
         }
 
         _ = ConnectBridgeAsync();
+#elif ANDROID
+        TryConnectAndroidBridge();
 #endif
     }
 
@@ -526,6 +537,45 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
         catch (Exception exception)
         {
             logger?.LogWarning(exception, "Failed to inject the browser recorder script.");
+        }
+    }
+#endif
+
+#if ANDROID
+    private void OnAndroidWebViewHandlerChanged(object? sender, EventArgs e)
+    {
+        TryConnectAndroidBridge();
+    }
+
+    private void TryConnectAndroidBridge()
+    {
+        if (provider is null || isTakenOver)
+        {
+            return;
+        }
+
+        if (PageWebView.Handler?.PlatformView is not Android.Webkit.WebView platformWebView)
+        {
+            return;
+        }
+
+        // Rebind if the handler was recreated with a new platform WebView; otherwise the driver would
+        // keep evaluating against a detached WebView and silently do nothing.
+        if (isBridgeConnected && ReferenceEquals(connectedAndroidWebView, platformWebView))
+        {
+            return;
+        }
+
+        try
+        {
+            ForRest.Maui.Platforms.Android.Browser.AndroidBrowserConnector.Connect(platformWebView, provider);
+            connectedAndroidWebView = platformWebView;
+            isBridgeConnected = true;
+            RefreshStatus();
+        }
+        catch (Exception exception)
+        {
+            logger?.LogError(exception, "Failed to connect the Android browser automation bridge.");
         }
     }
 #endif

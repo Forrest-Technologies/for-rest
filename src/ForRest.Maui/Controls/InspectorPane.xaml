@@ -69,7 +69,7 @@
 
                         <!-- Prominent Source/Rendered switch for HTML responses, so the rendered
                              (Chromium) view is discoverable instead of buried in the action row. -->
-                        <Border IsVisible="{Binding IsHtmlResponse}"
+                        <Border IsVisible="{Binding IsRenderableResponse}"
                                 Margin="0,8,0,0"
                                 Padding="2"
                                 HorizontalOptions="Start"
@@ -83,7 +83,7 @@
                                         Clicked="OnShowResponseSourceClicked"
                                         SemanticProperties.Description="Show the raw HTML source">
                                     <Button.Triggers>
-                                        <DataTrigger TargetType="Button" Binding="{Binding ShowHtmlPreview}" Value="False">
+                                        <DataTrigger TargetType="Button" Binding="{Binding ShowRenderedResponse}" Value="False">
                                             <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
                                             <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
                                             <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />
@@ -95,7 +95,7 @@
                                         Clicked="OnShowResponseRenderedClicked"
                                         SemanticProperties.Description="Render the HTML response like a browser">
                                     <Button.Triggers>
-                                        <DataTrigger TargetType="Button" Binding="{Binding ShowHtmlPreview}" Value="True">
+                                        <DataTrigger TargetType="Button" Binding="{Binding ShowRenderedResponse}" Value="True">
                                             <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
                                             <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
                                             <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />

@@ -70,6 +70,15 @@ public partial class InspectorPane : ContentView
 			EnsureResponseBodyViewer();
 		}
 
+		// When the selected response changes (re-run or a different snapshot), the view mode or media
+		// type can change, so rebuild/tear down the rendered viewer instead of leaving a stale
+		// image/PDF/HTML over the new body. ShowRenderedResponse is raised on every snapshot change.
+		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.ShowRenderedResponse), StringComparison.Ordinal))
+		{
+			RefreshResponseBodyViewer();
+		}
+
 		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
 		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorRequestVisible), StringComparison.Ordinal))
 		{
@@ -306,15 +315,18 @@ public partial class InspectorPane : ContentView
 			return;
 		}
 
-		bool needsHtmlViewer = ViewModel.ShowHtmlPreview;
-		bool hasHtmlViewer = ResponseBodyViewerHost.Content is WebView;
+		bool needsRenderedViewer = ViewModel.ShowRenderedResponse;
+		bool hasRenderedViewer = ResponseBodyViewerHost.Content is WebView or Image;
 
-		if (needsHtmlViewer && hasHtmlViewer)
+		// The rendered view (HTML page, PDF, or image) is rebuilt whenever it is active, since the
+		// content and media type can change between responses.
+		if (needsRenderedViewer)
 		{
+			ResponseBodyViewerHost.Content = BuildResponseBodyViewer();
 			return;
 		}
 
-		if (!needsHtmlViewer && ResponseBodyViewerHost.Content is not WebView && ResponseBodyViewerHost.Content is not null)
+		if (!hasRenderedViewer && ResponseBodyViewerHost.Content is not null)
 		{
 			return;
 		}
@@ -324,9 +336,9 @@ public partial class InspectorPane : ContentView
 
 	private View BuildResponseBodyViewer()
 	{
-		if (ViewModel.ShowHtmlPreview)
+		if (ViewModel.ShowRenderedResponse)
 		{
-			return BuildHtmlPreviewViewer();
+			return BuildRenderedResponseViewer();
 		}
 
 		if (AppLaunchGuard.IsSafeModeEnabled)
@@ -344,16 +356,40 @@ public partial class InspectorPane : ContentView
 			: BuildNativeResponseViewer();
 	}
 
-	private View BuildHtmlPreviewViewer()
+	private View BuildRenderedResponseViewer()
 	{
+		// Images render in a native Image control from the captured bytes.
+		if (ViewModel.IsImageResponse)
+		{
+			byte[]? bytes = ViewModel.ResponseBinaryContent;
+			if (bytes is not null)
+			{
+				return new Image
+				{
+					Source = ImageSource.FromStream(() => new MemoryStream(bytes)),
+					Aspect = Aspect.AspectFit,
+					VerticalOptions = LayoutOptions.Fill,
+					HorizontalOptions = LayoutOptions.Fill,
+				};
+			}
+		}
+
 		WebView webView = new()
 		{
 			VerticalOptions = LayoutOptions.Fill,
 			HorizontalOptions = LayoutOptions.Fill,
 		};
 
-		string htmlBody = ViewModel.ResponseBodyText ?? string.Empty;
-		webView.Source = new HtmlWebViewSource { Html = htmlBody };
+		if (ViewModel.IsPdfResponse)
+		{
+			// Chromium (WebView2 on desktop) renders a PDF data URL inline.
+			webView.Source = new UrlWebViewSource { Url = ViewModel.ResponsePdfDataUrl };
+		}
+		else
+		{
+			webView.Source = new HtmlWebViewSource { Html = ViewModel.ResponseBodyText ?? string.Empty };
+		}
+
 		return webView;
 	}
 

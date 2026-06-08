@@ -48,6 +48,14 @@ public sealed record ResponseSnapshot
 
     public string Body { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Base64-encoded raw response bytes, populated only for binary content (images, PDF, octet-stream,
+    /// …) that cannot be shown as text. Text responses leave this null and use <see cref="Body"/>. It
+    /// backs the rendered preview (image/PDF) and byte-accurate download; it is omitted above a size
+    /// cap to keep history compact.
+    /// </summary>
+    public string? BodyBase64 { get; init; }
+
     public string RawResponse { get; init; } = string.Empty;
 
     public List<KeyValueDefinition> Headers { get; init; } = [];

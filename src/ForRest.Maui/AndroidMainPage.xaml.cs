@@ -13,9 +13,30 @@ public partial class AndroidMainPage : ContentPage
 	{
 		InitializeComponent();
 		BindingContext = viewModel;
+		viewModel.PropertyChanged += OnViewModelPropertyChanged;
 		Loaded += OnPageLoaded;
 		SizeChanged += OnPageSizeChanged;
 		UpdateOutputView(AndroidOutputView.Response);
+	}
+
+	private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+	{
+		// Rebuild the output viewer when the response or its render mode changes, so a rendered
+		// image/PDF is not left over a newly received body (text bodies update via binding).
+		if (!string.IsNullOrWhiteSpace(e.PropertyName)
+			&& e.PropertyName is not nameof(MainPageViewModel.ShowRenderedResponse))
+		{
+			return;
+		}
+
+		if (MainThread.IsMainThread)
+		{
+			RefreshResponseOutputViewer();
+		}
+		else
+		{
+			MainThread.BeginInvokeOnMainThread(RefreshResponseOutputViewer);
+		}
 	}
 
 	private MainPageViewModel? ViewModel => BindingContext as MainPageViewModel;
@@ -245,22 +266,50 @@ public partial class AndroidMainPage : ContentPage
 		RefreshResponseOutputViewer();
 	}
 
+	private View BuildRenderedResponseViewer()
+	{
+		if (ViewModel!.IsImageResponse)
+		{
+			byte[]? bytes = ViewModel.ResponseBinaryContent;
+			if (bytes is not null)
+			{
+				return new Image
+				{
+					Source = ImageSource.FromStream(() => new MemoryStream(bytes)),
+					Aspect = Aspect.AspectFit,
+					VerticalOptions = LayoutOptions.Fill,
+					HorizontalOptions = LayoutOptions.Fill,
+				};
+			}
+		}
+
+		WebView webView = new()
+		{
+			VerticalOptions = LayoutOptions.Fill,
+			HorizontalOptions = LayoutOptions.Fill,
+		};
+
+		if (ViewModel.IsPdfResponse)
+		{
+			webView.Source = new UrlWebViewSource { Url = ViewModel.ResponsePdfDataUrl };
+		}
+		else
+		{
+			webView.Source = new HtmlWebViewSource { Html = ViewModel.ResponseBodyText ?? string.Empty };
+		}
+
+		return webView;
+	}
+
 	private void RefreshResponseOutputViewer()
 	{
-		bool needsHtmlViewer = _outputView == AndroidOutputView.Response
+		bool needsRenderedViewer = _outputView == AndroidOutputView.Response
 			&& ViewModel is not null
-			&& ViewModel.ShowHtmlPreview;
+			&& ViewModel.ShowRenderedResponse;
 
-		if (needsHtmlViewer)
+		if (needsRenderedViewer)
 		{
-			string htmlBody = ViewModel!.ResponseBodyText ?? string.Empty;
-			WebView webView = new()
-			{
-				VerticalOptions = LayoutOptions.Fill,
-				HorizontalOptions = LayoutOptions.Fill,
-			};
-			webView.Source = new HtmlWebViewSource { Html = htmlBody };
-			ResponseOutputHost.Content = webView;
+			ResponseOutputHost.Content = BuildRenderedResponseViewer();
 			_responseOutputEditor = null;
 			return;
 		}

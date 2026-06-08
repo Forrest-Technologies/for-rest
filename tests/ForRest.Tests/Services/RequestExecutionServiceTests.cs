@@ -85,10 +85,77 @@ public sealed class RequestExecutionServiceTests
             Assert.AreEqual("Created", result.LatestResponse.ReasonPhrase);
             Assert.AreEqual("application/json", result.LatestResponse.ContentType);
             StringAssert.Contains(result.LatestResponse.Body, "\"received\":true");
+            Assert.IsNull(result.LatestResponse.BodyBase64, "text responses must not carry a binary payload");
             Assert.HasCount(1, result.Runs.Single().Responses);
             StringAssert.Contains(result.Runs.Single().RawRequest, "X-Test-Mode: loopback");
             StringAssert.Contains(result.Runs.Single().RawRequest, "POST http://127.0.0.1:");
             Assert.HasCount(1, historyRepository.Runs);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [TestMethod]
+    public async Task Execute_captures_binary_response_as_base64_with_a_placeholder_body()
+    {
+        var workspaceId = Guid.NewGuid();
+        var requestId = Guid.NewGuid();
+        var historyRepository = new RecordingExecutionHistoryRepository();
+        var requestExecutionService = new RequestExecutionService(
+            new RequestCompiler(new VariableResolver()),
+            new ResponseExtractionService(),
+            historyRepository,
+            new RepeatRunnerService(),
+            new NoOpScriptEngine(),
+            NullLogger<RequestExecutionService>.Instance);
+
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        // The loopback server writes the body bytes verbatim; an image content type makes the pipeline
+        // treat it as binary regardless of the bytes themselves.
+        const string payload = "PNG-binary-bytes";
+        var serverTask = CaptureSingleRequest(
+            listener,
+            new CapturedResponse(200, payload, ReasonPhrase: "OK", ContentType: "image/png"),
+            attempt: 1);
+
+        try
+        {
+            var request = new RequestDefinition
+            {
+                Id = requestId,
+                WorkspaceId = workspaceId,
+                Name = "Loopback Image",
+                Method = HttpMethodKind.Get,
+                UrlTemplate = $"http://127.0.0.1:{port}/image",
+                SaveResponseToHistory = true,
+            };
+
+            var workspace = new WorkspaceSnapshot
+            {
+                Workspace = new()
+                {
+                    Id = workspaceId,
+                    Name = "Loopback Workspace",
+                },
+            };
+
+            var result = await requestExecutionService.Execute(new(), workspace, request, null);
+            await serverTask;
+
+            Assert.AreEqual(ExecutionState.Completed, result.State);
+            Assert.IsNotNull(result.LatestResponse);
+            Assert.AreEqual("image/png", result.LatestResponse.ContentType);
+            // Binary responses additionally carry their raw bytes as base64 for preview/download...
+            Assert.AreEqual(
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(payload)),
+                result.LatestResponse.BodyBase64);
+            // ...while Body stays the decoded text so extraction/assertions/scripts are unaffected.
+            Assert.AreEqual(payload, result.LatestResponse.Body);
         }
         finally
         {
