@@ -55,9 +55,9 @@ public sealed class ScriptRequestApi
 
     private ResponseSnapshot? lastSentResponse;
 
-    private readonly List<ResponseSnapshot> sentResponses = [];
+    private List<ResponseSnapshot> sentResponses = [];
 
-    private readonly List<RequestSnapshot> sentRequests = [];
+    private List<RequestSnapshot> sentRequests = [];
 
     public string Method { get; set; }
 
@@ -159,6 +159,12 @@ public sealed class ScriptRequestApi
         {
             clone.Headers[header.Key] = header.Value;
         }
+
+        // Share the recording buffers so sends made through the clone (e.g. each branch of a
+        // `parallel { }` block) are captured on the originating request and surface as response cards,
+        // not just as values bound to script variables. The lists already guard their own access.
+        clone.sentResponses = sentResponses;
+        clone.sentRequests = sentRequests;
 
         return clone;
     }
