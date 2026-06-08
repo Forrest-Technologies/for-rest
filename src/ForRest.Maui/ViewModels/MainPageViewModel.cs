@@ -638,6 +638,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			if (SetProperty(ref _isHtmlPreviewEnabled, value))
 			{
 				OnPropertyChanged(nameof(ShowHtmlPreview));
+				OnPropertyChanged(nameof(ShowRenderedResponse));
 				OnPropertyChanged(nameof(HtmlPreviewButtonText));
 			}
 		}
@@ -645,7 +646,56 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	public bool ShowHtmlPreview => IsHtmlResponse && IsHtmlPreviewEnabled;
 
-	public string HtmlPreviewButtonText => IsHtmlPreviewEnabled ? "View source" : "Render HTML";
+	public string HtmlPreviewButtonText => IsHtmlPreviewEnabled
+		? "View source"
+		: IsImageResponse ? "View image"
+		: IsPdfResponse ? "View PDF"
+		: "Render HTML";
+
+	/// <summary>The current response is a binary image (png/jpeg/gif/webp/…) captured as bytes.</summary>
+	public bool IsImageResponse =>
+		_selectedInspectorResponseSnapshot?.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true
+		&& !string.IsNullOrEmpty(_selectedInspectorResponseSnapshot?.BodyBase64);
+
+	/// <summary>The current response is a PDF captured as bytes.</summary>
+	public bool IsPdfResponse =>
+		_selectedInspectorResponseSnapshot?.ContentType?.Contains("application/pdf", StringComparison.OrdinalIgnoreCase) == true
+		&& !string.IsNullOrEmpty(_selectedInspectorResponseSnapshot?.BodyBase64);
+
+	/// <summary>Any binary response payload was captured (image, pdf, octet-stream, …).</summary>
+	public bool IsBinaryResponse => !string.IsNullOrEmpty(_selectedInspectorResponseSnapshot?.BodyBase64);
+
+	/// <summary>Whether the response can be shown rendered (HTML page, image, or PDF) as well as source.</summary>
+	public bool IsRenderableResponse => IsHtmlResponse || IsImageResponse || IsPdfResponse;
+
+	/// <summary>The rendered view is active for a renderable response.</summary>
+	public bool ShowRenderedResponse => IsRenderableResponse && IsHtmlPreviewEnabled;
+
+	/// <summary>Decoded bytes of a binary response, or null for text responses.</summary>
+	public byte[]? ResponseBinaryContent
+	{
+		get
+		{
+			var base64 = _selectedInspectorResponseSnapshot?.BodyBase64;
+			if (string.IsNullOrEmpty(base64))
+			{
+				return null;
+			}
+
+			try
+			{
+				return Convert.FromBase64String(base64);
+			}
+			catch (FormatException)
+			{
+				return null;
+			}
+		}
+	}
+
+	/// <summary>A data: URL for embedding a PDF response in a WebView (Chromium renders it inline).</summary>
+	public string ResponsePdfDataUrl =>
+		IsPdfResponse ? $"data:application/pdf;base64,{_selectedInspectorResponseSnapshot!.BodyBase64}" : string.Empty;
 
 	public void ToggleHtmlPreview()
 	{
@@ -653,10 +703,10 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	}
 
 	// Explicit view-mode setters back the prominent Source/Rendered segmented control in the response
-	// pane. Rendered only applies to HTML responses; switching to source always works.
+	// pane. Rendered applies to HTML, image, and PDF responses; switching to source always works.
 	public void ShowResponseRendered()
 	{
-		if (IsHtmlResponse)
+		if (IsRenderableResponse)
 		{
 			IsHtmlPreviewEnabled = true;
 		}
@@ -2650,7 +2700,8 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	public async Task SaveResponseBodyAsync()
 	{
-		if (!CanCopyResponseBody || _selectedInspectorResponseSnapshot is null)
+		if (_selectedInspectorResponseSnapshot is null ||
+			(!CanCopyResponseBody && !IsBinaryResponse))
 		{
 			ExecutionStatus = "No response body available to save.";
 			return;
@@ -2660,7 +2711,19 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			_selectedInspectorResponseSnapshot.ContentType);
 		string fileName = $"forrest-response-{DateTime.Now:yyyyMMdd-HHmmss}{extension}";
 		string filePath = Path.Combine(FileSystem.Current.CacheDirectory, fileName);
-		await File.WriteAllTextAsync(filePath, ResponseBodyText);
+
+		// Binary responses (images, PDFs, octet-stream, …) are written byte-for-byte so the saved file
+		// is the real artifact; text responses keep saving the displayed body.
+		byte[]? bytes = ResponseBinaryContent;
+		if (bytes is not null)
+		{
+			await File.WriteAllBytesAsync(filePath, bytes);
+		}
+		else
+		{
+			await File.WriteAllTextAsync(filePath, ResponseBodyText);
+		}
+
 		await Share.Default.RequestAsync(
 			new ShareFileRequest
 			{
@@ -5622,8 +5685,16 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private void ApplySelectedResponseSnapshot(ResponseSnapshot? response)
 	{
 		_selectedInspectorResponseSnapshot = response;
-		IsHtmlPreviewEnabled = false;
+
+		// Images and PDFs default to the rendered view (their source is raw bytes); HTML and text
+		// default to source so developers see the payload first.
+		IsHtmlPreviewEnabled = IsImageResponse || IsPdfResponse;
 		OnPropertyChanged(nameof(IsHtmlResponse));
+		OnPropertyChanged(nameof(IsImageResponse));
+		OnPropertyChanged(nameof(IsPdfResponse));
+		OnPropertyChanged(nameof(IsBinaryResponse));
+		OnPropertyChanged(nameof(IsRenderableResponse));
+		OnPropertyChanged(nameof(ShowRenderedResponse));
 		RefreshResponsePresentation();
 		ResponseHeaderRows.Clear();
 		foreach (KeyValueDefinition header in response?.Headers ?? [])

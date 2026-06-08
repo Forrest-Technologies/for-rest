@@ -149,11 +149,11 @@
                         Text="{Binding HtmlPreviewButtonText}"
                         Style="{StaticResource DenseTabButtonStyle}"
                         Clicked="OnToggleHtmlPreviewClicked"
-                        IsVisible="{Binding IsHtmlResponse}"
+                        IsVisible="{Binding IsRenderableResponse}"
                         HorizontalOptions="End"
                         Margin="0,0,80,0">
                     <Button.Triggers>
-                        <DataTrigger TargetType="Button" Binding="{Binding ShowHtmlPreview}" Value="True">
+                        <DataTrigger TargetType="Button" Binding="{Binding ShowRenderedResponse}" Value="True">
                             <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
                             <Setter Property="BorderColor" Value="{DynamicResource ThemeSelectionBorderColor}" />
                             <Setter Property="TextColor" Value="{DynamicResource ThemeSelectionTextColor}" />

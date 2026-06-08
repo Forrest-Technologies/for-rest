@@ -28,6 +28,13 @@ internal static class BrowserJs
     /// <summary>Builds an expression that returns the page's interactive elements as a JSON string.</summary>
     internal static string Snapshot() => $"({SnapshotFunction})()";
 
+    /// <summary>Dispatches a key on the active element. <c>Enter</c> also submits the enclosing form.</summary>
+    internal static string PressKey(string keys)
+    {
+        string key = JsonValue.Create(keys)!.ToJsonString();
+        return $"({PressFunction})({key})";
+    }
+
     /// <summary>Moves (and lazily creates) the visible red cursor overlay to a page coordinate.</summary>
     internal static string MoveCursor(double x, double y)
     {
@@ -141,6 +148,19 @@ internal static class BrowserJs
           else if(op==='attr'){out=el.getAttribute(arg);}
           else if(op==='scroll'){el.scrollIntoView({block:'center',inline:'center'});}
           else if(op==='select'){el.value=arg;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}
+          else if(op==='hover'){el.scrollIntoView({block:'center',inline:'center'});['mouseover','mousemove','mouseenter'].forEach(function(t){el.dispatchEvent(new MouseEvent(t,{bubbles:true}));});}
+          else if(op==='click'){
+            el.scrollIntoView({block:'center',inline:'center'});
+            if(el.focus){try{el.focus();}catch(e){}}
+            ['mousedown','mouseup','click'].forEach(function(t){el.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window}));});
+          }
+          else if(op==='type'){
+            if(el.focus){try{el.focus();}catch(e){}}
+            if(el.isContentEditable){el.textContent=arg;}
+            else{el.value=arg;}
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+            el.dispatchEvent(new Event('change',{bubbles:true}));
+          }
           return JSON.stringify({ok:true,value:out});
         }
         """;
@@ -180,6 +200,20 @@ internal static class BrowserJs
             c.style.opacity='0';
           }
           return true;
+        }
+        """;
+
+    private const string PressFunction =
+        """
+        function(key){
+          var el=document.activeElement||document.body;
+          var opts={bubbles:true,cancelable:true,key:key};
+          ['keydown','keypress','keyup'].forEach(function(t){el.dispatchEvent(new KeyboardEvent(t,opts));});
+          if(key==='Enter'){
+            if(el.form){try{if(el.form.requestSubmit){el.form.requestSubmit();}else{el.form.submit();}}catch(e){}}
+            else if(el.tagName&&el.tagName.toLowerCase()==='a'&&el.click){el.click();}
+          }
+          return JSON.stringify({ok:true});
         }
         """;
 

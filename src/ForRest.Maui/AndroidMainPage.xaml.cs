@@ -245,22 +245,50 @@ public partial class AndroidMainPage : ContentPage
 		RefreshResponseOutputViewer();
 	}
 
+	private View BuildRenderedResponseViewer()
+	{
+		if (ViewModel!.IsImageResponse)
+		{
+			byte[]? bytes = ViewModel.ResponseBinaryContent;
+			if (bytes is not null)
+			{
+				return new Image
+				{
+					Source = ImageSource.FromStream(() => new MemoryStream(bytes)),
+					Aspect = Aspect.AspectFit,
+					VerticalOptions = LayoutOptions.Fill,
+					HorizontalOptions = LayoutOptions.Fill,
+				};
+			}
+		}
+
+		WebView webView = new()
+		{
+			VerticalOptions = LayoutOptions.Fill,
+			HorizontalOptions = LayoutOptions.Fill,
+		};
+
+		if (ViewModel.IsPdfResponse)
+		{
+			webView.Source = new UrlWebViewSource { Url = ViewModel.ResponsePdfDataUrl };
+		}
+		else
+		{
+			webView.Source = new HtmlWebViewSource { Html = ViewModel.ResponseBodyText ?? string.Empty };
+		}
+
+		return webView;
+	}
+
 	private void RefreshResponseOutputViewer()
 	{
-		bool needsHtmlViewer = _outputView == AndroidOutputView.Response
+		bool needsRenderedViewer = _outputView == AndroidOutputView.Response
 			&& ViewModel is not null
-			&& ViewModel.ShowHtmlPreview;
+			&& ViewModel.ShowRenderedResponse;
 
-		if (needsHtmlViewer)
+		if (needsRenderedViewer)
 		{
-			string htmlBody = ViewModel!.ResponseBodyText ?? string.Empty;
-			WebView webView = new()
-			{
-				VerticalOptions = LayoutOptions.Fill,
-				HorizontalOptions = LayoutOptions.Fill,
-			};
-			webView.Source = new HtmlWebViewSource { Html = htmlBody };
-			ResponseOutputHost.Content = webView;
+			ResponseOutputHost.Content = BuildRenderedResponseViewer();
 			_responseOutputEditor = null;
 			return;
 		}

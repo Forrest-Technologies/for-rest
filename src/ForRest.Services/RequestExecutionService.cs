@@ -575,9 +575,29 @@ public sealed class RequestExecutionService(
         return stringContent;
     }
 
+    // Binary responses above this size are not inlined for preview/download — they would bloat the
+    // history payload and memory. The status, size, type, and text body are still recorded.
+    private const long MaxInlineBinaryBytes = 12L * 1024 * 1024;
+
     private static async Task<ResponseSnapshot> BuildResponseSnapshot(HttpResponseMessage response, long durationMilliseconds, CancellationToken cancellationToken)
     {
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+
+        // Body stays the decoded string for every response (unchanged behaviour), so extraction,
+        // assertions, scripts, and the raw view keep seeing the real payload. Binary responses
+        // additionally carry their raw bytes as base64 to back the rendered preview and download.
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        string? bodyBase64 = null;
+        if (!IsTextResponse(contentType))
+        {
+            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            if (bytes.Length > 0 && bytes.Length <= MaxInlineBinaryBytes)
+            {
+                bodyBase64 = Convert.ToBase64String(bytes);
+            }
+        }
+
         var headers = response.Headers
             .Concat(response.Content.Headers)
             .SelectMany(
@@ -601,14 +621,58 @@ public sealed class RequestExecutionService(
         {
             StatusCode = (int)response.StatusCode,
             ReasonPhrase = response.ReasonPhrase ?? string.Empty,
-            ContentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty,
+            ContentType = contentType,
             SizeBytes = Encoding.UTF8.GetByteCount(body),
             DurationMilliseconds = durationMilliseconds,
             Body = body,
+            BodyBase64 = bodyBase64,
             RawResponse = BuildRawResponse(response, body),
             Headers = headers,
             Cookies = cookies,
             ReceivedUtc = DateTimeOffset.UtcNow,
+        };
+    }
+
+    /// <summary>
+    /// Classifies a response media type as text (shown and edited as a string) or binary (kept as bytes
+    /// for image/PDF preview and byte-accurate download). Empty/unknown types are treated as text so the
+    /// default behaviour — show the body in the editor — is preserved.
+    /// </summary>
+    internal static bool IsTextResponse(string contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return true;
+        }
+
+        var media = contentType.Trim().ToLowerInvariant();
+        if (media.StartsWith("text/", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (media.EndsWith("+json", StringComparison.Ordinal) ||
+            media.EndsWith("+xml", StringComparison.Ordinal) ||
+            media.EndsWith("+yaml", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return media switch
+        {
+            "application/json" => true,
+            "application/xml" => true,
+            "application/xhtml+xml" => true,
+            "application/javascript" => true,
+            "application/ecmascript" => true,
+            "application/x-www-form-urlencoded" => true,
+            "application/yaml" => true,
+            "application/x-yaml" => true,
+            "application/graphql" => true,
+            "application/x-ndjson" => true,
+            "application/ld+json" => true,
+            "image/svg+xml" => true,
+            _ => false,
         };
     }
 
