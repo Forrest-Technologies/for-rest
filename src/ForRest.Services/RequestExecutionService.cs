@@ -671,7 +671,6 @@ public sealed class RequestExecutionService(
             "application/graphql" => true,
             "application/x-ndjson" => true,
             "application/ld+json" => true,
-            "image/svg+xml" => true,
             _ => false,
         };
     }

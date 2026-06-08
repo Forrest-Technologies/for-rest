@@ -40,6 +40,9 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
     private DispatcherQueue? dispatcher;
     private bool isCoreInitializing;
 #endif
+#if ANDROID
+    private Android.Webkit.WebView? connectedAndroidWebView;
+#endif
 
     #endregion
 
@@ -546,7 +549,7 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
 
     private void TryConnectAndroidBridge()
     {
-        if (provider is null || isBridgeConnected || isTakenOver)
+        if (provider is null || isTakenOver)
         {
             return;
         }
@@ -556,9 +559,17 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
             return;
         }
 
+        // Rebind if the handler was recreated with a new platform WebView; otherwise the driver would
+        // keep evaluating against a detached WebView and silently do nothing.
+        if (isBridgeConnected && ReferenceEquals(connectedAndroidWebView, platformWebView))
+        {
+            return;
+        }
+
         try
         {
             ForRest.Maui.Platforms.Android.Browser.AndroidBrowserConnector.Connect(platformWebView, provider);
+            connectedAndroidWebView = platformWebView;
             isBridgeConnected = true;
             RefreshStatus();
         }

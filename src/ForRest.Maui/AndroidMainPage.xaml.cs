@@ -13,9 +13,30 @@ public partial class AndroidMainPage : ContentPage
 	{
 		InitializeComponent();
 		BindingContext = viewModel;
+		viewModel.PropertyChanged += OnViewModelPropertyChanged;
 		Loaded += OnPageLoaded;
 		SizeChanged += OnPageSizeChanged;
 		UpdateOutputView(AndroidOutputView.Response);
+	}
+
+	private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+	{
+		// Rebuild the output viewer when the response or its render mode changes, so a rendered
+		// image/PDF is not left over a newly received body (text bodies update via binding).
+		if (!string.IsNullOrWhiteSpace(e.PropertyName)
+			&& e.PropertyName is not nameof(MainPageViewModel.ShowRenderedResponse))
+		{
+			return;
+		}
+
+		if (MainThread.IsMainThread)
+		{
+			RefreshResponseOutputViewer();
+		}
+		else
+		{
+			MainThread.BeginInvokeOnMainThread(RefreshResponseOutputViewer);
+		}
 	}
 
 	private MainPageViewModel? ViewModel => BindingContext as MainPageViewModel;

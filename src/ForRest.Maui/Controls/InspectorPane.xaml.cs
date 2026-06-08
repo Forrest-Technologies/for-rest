@@ -70,6 +70,15 @@ public partial class InspectorPane : ContentView
 			EnsureResponseBodyViewer();
 		}
 
+		// When the selected response changes (re-run or a different snapshot), the view mode or media
+		// type can change, so rebuild/tear down the rendered viewer instead of leaving a stale
+		// image/PDF/HTML over the new body. ShowRenderedResponse is raised on every snapshot change.
+		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
+		    string.Equals(e.PropertyName, nameof(MainPageViewModel.ShowRenderedResponse), StringComparison.Ordinal))
+		{
+			RefreshResponseBodyViewer();
+		}
+
 		if (string.IsNullOrWhiteSpace(e.PropertyName) ||
 		    string.Equals(e.PropertyName, nameof(MainPageViewModel.IsInspectorRequestVisible), StringComparison.Ordinal))
 		{

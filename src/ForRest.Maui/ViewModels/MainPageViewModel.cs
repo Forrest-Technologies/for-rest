@@ -5695,6 +5695,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		OnPropertyChanged(nameof(IsBinaryResponse));
 		OnPropertyChanged(nameof(IsRenderableResponse));
 		OnPropertyChanged(nameof(ShowRenderedResponse));
+		OnPropertyChanged(nameof(HtmlPreviewButtonText));
 		RefreshResponsePresentation();
 		ResponseHeaderRows.Clear();
 		foreach (KeyValueDefinition header in response?.Headers ?? [])
