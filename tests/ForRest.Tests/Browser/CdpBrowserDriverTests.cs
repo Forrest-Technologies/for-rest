@@ -46,6 +46,43 @@ public sealed class CdpBrowserDriverTests
     }
 
     [TestMethod]
+    public async Task Click_with_visible_motion_drives_the_red_cursor_overlay()
+    {
+        FakeCdpTransport transport = new()
+        {
+            Responder = (method, _) => method == "Runtime.evaluate"
+                ? FakeCdpTransport.LocateResult(50, 30)
+                : "{}",
+        };
+        CdpBrowserDriver driver = new(new CdpClient(transport));
+
+        // CursorMotion.Default is visible, so the engine should animate the red cursor to the target.
+        await driver.Click(BrowserTarget.Css("#target"), CursorMotion.Default);
+
+        Assert.IsTrue(
+            transport.Calls.Any(call => call.Method == "Runtime.evaluate" && call.Parameters.Contains("__forrest_cursor__")),
+            "expected the visible cursor overlay to be driven during a click");
+    }
+
+    [TestMethod]
+    public async Task Click_with_instant_motion_does_not_draw_the_cursor_overlay()
+    {
+        FakeCdpTransport transport = new()
+        {
+            Responder = (method, _) => method == "Runtime.evaluate"
+                ? FakeCdpTransport.LocateResult(50, 30)
+                : "{}",
+        };
+        CdpBrowserDriver driver = new(new CdpClient(transport));
+
+        await driver.Click(BrowserTarget.Css("#target"), CursorMotion.Instant);
+
+        Assert.IsFalse(
+            transport.Calls.Any(call => call.Method == "Runtime.evaluate" && call.Parameters.Contains("__forrest_cursor__")),
+            "an invisible (instant) motion must not paint the cursor overlay");
+    }
+
+    [TestMethod]
     public async Task Type_clicks_then_inserts_text()
     {
         FakeCdpTransport transport = new()

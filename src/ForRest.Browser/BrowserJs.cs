@@ -39,6 +39,15 @@ internal static class BrowserJs
     /// <summary>Hides the visible red cursor overlay.</summary>
     internal static string HideCursor() => $"({CursorFunction})(0,0,false)";
 
+    /// <summary>
+    /// Builds a self-running script that pre-creates the hidden cursor overlay as soon as the document
+    /// is ready. Register it with <c>Page.addScriptToEvaluateOnNewDocument</c> (so it re-installs after
+    /// every navigation, which wipes injected DOM) and evaluate it once for the current document. The
+    /// per-move <see cref="MoveCursor"/> call still self-heals if the overlay is missing.
+    /// </summary>
+    internal static string InstallCursor() =>
+        $"(function(){{var f=({CursorFunction});function b(){{try{{f(-100,-100,false);}}catch(e){{}}}}if(document.body){{b();}}else if(document.addEventListener){{document.addEventListener('DOMContentLoaded',b);}}}})()";
+
     /// <summary>Plays a brief click ripple at a page coordinate so taps read clearly to a watching human.</summary>
     internal static string ClickRipple(double x, double y)
     {
@@ -155,17 +164,21 @@ internal static class BrowserJs
         """
         function(x,y,show){
           var id='__forrest_cursor__';
+          if(!document.body){return false;}
           var c=document.getElementById(id);
-          if(!show){if(c){c.style.opacity='0';}return true;}
           if(!c){
             c=document.createElement('div');c.id=id;
-            c.style.cssText='position:fixed;z-index:2147483647;left:0;top:0;width:22px;height:30px;pointer-events:none;will-change:transform;transition:transform 70ms cubic-bezier(0.22,0.61,0.36,1),opacity 120ms ease;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45));transform:translate(0px,0px);';
+            c.style.cssText='position:fixed;z-index:2147483647;left:0;top:0;width:22px;height:30px;pointer-events:none;opacity:0;will-change:transform;transition:transform 70ms cubic-bezier(0.22,0.61,0.36,1),opacity 120ms ease;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45));transform:translate(-100px,-100px);';
             c.innerHTML='<svg width="22" height="30" viewBox="0 0 22 30" xmlns="http://www.w3.org/2000/svg"><path d="M1 1 L1 22 L6.5 16.5 L10 25 L13 23.7 L9.6 15.4 L17 15 Z" fill="#dc3545" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/></svg>';
             document.body.appendChild(c);
           }
-          c.style.opacity='1';
-          // Tip of the arrow sits at the requested coordinate (svg hotspot is at its top-left).
-          c.style.transform='translate('+x+'px,'+y+'px)';
+          if(show){
+            c.style.opacity='1';
+            // Tip of the arrow sits at the requested coordinate (svg hotspot is at its top-left).
+            c.style.transform='translate('+x+'px,'+y+'px)';
+          }else{
+            c.style.opacity='0';
+          }
           return true;
         }
         """;

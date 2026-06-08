@@ -23,6 +23,25 @@ public sealed class CdpClientTests
     }
 
     [TestMethod]
+    public async Task InstallCursorOverlay_registers_init_script_and_installs_current_document()
+    {
+        FakeCdpTransport transport = new();
+        CdpClient client = new(transport);
+
+        await client.InstallCursorOverlay();
+
+        // Registers the overlay for every future document (so it survives navigation)...
+        (string initMethod, string initParameters) = transport.Calls.Single(call => call.Method == "Page.addScriptToEvaluateOnNewDocument");
+        Assert.AreEqual("Page.addScriptToEvaluateOnNewDocument", initMethod);
+        StringAssert.Contains(initParameters, "__forrest_cursor__");
+
+        // ...and installs it on the document that is already loaded.
+        (string evalMethod, string evalParameters) = transport.Calls.Single(call => call.Method == "Runtime.evaluate");
+        Assert.AreEqual("Runtime.evaluate", evalMethod);
+        StringAssert.Contains(evalParameters, "__forrest_cursor__");
+    }
+
+    [TestMethod]
     public async Task Navigate_sends_url()
     {
         FakeCdpTransport transport = new();
