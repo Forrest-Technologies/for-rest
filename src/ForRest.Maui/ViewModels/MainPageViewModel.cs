@@ -5734,6 +5734,10 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		OnPropertyChanged(nameof(CanSelectNextResponseSnapshot));
 		if (ResponseSnapshotEntries.Count == 0)
 		{
+			// No responses for this run (e.g. a failed send): clear the displayed body explicitly so a
+			// failed run can never leave the previous run's response on screen. Setting
+			// SelectedResponseSnapshotEntry to null above only clears it when an entry was selected.
+			ApplySelectedResponseSnapshot(null);
 			OnPropertyChanged(nameof(SelectedResponseSnapshotSummaryText));
 			return;
 		}

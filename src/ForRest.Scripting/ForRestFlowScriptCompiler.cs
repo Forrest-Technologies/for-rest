@@ -1170,11 +1170,19 @@ internal static class ForRestFlowScriptCompiler
                 builder.AppendLine(";");
             }
 
+            // Label each branch with its destructured name (or method+url) so its response is a
+            // distinguishable card in the response rail rather than being invisible.
+            var label = requestIdx <= destructuredNames.Count
+                ? destructuredNames[requestIdx - 1]
+                : string.IsNullOrWhiteSpace(url) ? method : $"{method} {url}";
+
             builder.Append("var ");
             builder.Append(taskVar);
             builder.Append(" = ");
             builder.Append(cloneVar);
-            builder.AppendLine(".SendAsync();");
+            builder.Append(".SendAsync(");
+            builder.Append(RenderString(label));
+            builder.AppendLine(");");
 
             index++;
         }
@@ -1419,7 +1427,83 @@ internal static class ForRestFlowScriptCompiler
             trimmed = trimmed[..^1].TrimEnd();
         }
 
-        return TranslateExpression(trimmed, locals) + suffix;
+        var expression = TranslateExpression(trimmed, locals);
+        if (suffix == ";")
+        {
+            // A bare send/await translates to "(await x)", which is a legal sub-expression but NOT a
+            // legal C# expression-statement ("(await x);" is CS0201). As a standalone statement it must
+            // be the unparenthesised "await x;". This is what makes a bare `request.send()` line — used
+            // by the default new-request template — compile and run.
+            expression = UnwrapParenthesizedAwaitStatement(expression);
+        }
+
+        return expression + suffix;
+    }
+
+    private static string UnwrapParenthesizedAwaitStatement(string expression)
+    {
+        var trimmed = expression.Trim();
+        if (trimmed.StartsWith("(await ", StringComparison.Ordinal) && IsWhollyParenthesized(trimmed))
+        {
+            return trimmed[1..^1];
+        }
+
+        return expression;
+    }
+
+    /// <summary>
+    /// Returns true when the leading '(' of the expression is closed by the final ')', i.e. the whole
+    /// expression is one parenthesised group (string-aware so quotes containing parens do not confuse it).
+    /// </summary>
+    private static bool IsWhollyParenthesized(string text)
+    {
+        if (text.Length < 2 || text[0] != '(')
+        {
+            return false;
+        }
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        var quote = '\0';
+        for (var index = 0; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (inString)
+            {
+                if (((IsSupportedDoubleQuoteDelimiter(quote) && IsSupportedDoubleQuoteDelimiter(character)) ||
+                     (!IsSupportedDoubleQuoteDelimiter(quote) && character == quote)) && !escaped)
+                {
+                    inString = false;
+                }
+
+                escaped = character == '\\' && !escaped;
+                continue;
+            }
+
+            if (IsSupportedDoubleQuoteDelimiter(character) || character == '\'')
+            {
+                inString = true;
+                escaped = false;
+                quote = character;
+                continue;
+            }
+
+            if (character == '(')
+            {
+                depth++;
+            }
+            else if (character == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return index == text.Length - 1;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool TryTranslateStructuredRequestBodyAssignment(

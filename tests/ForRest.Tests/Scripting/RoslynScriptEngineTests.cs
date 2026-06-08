@@ -905,6 +905,59 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_records_parallel_branch_responses_as_labelled_cards()
+    {
+        // A parallel block sends through cloned requests; those responses must still be recorded on the
+        // originating request (and labelled with their destructured names) so they surface as response
+        // cards, not only as values bound to the a/b/c variables.
+        var diagnostics = new System.Collections.Generic.List<ForRestScriptDiagnostic>();
+        var flow = ForRestFlowScriptCompiler.Compile(
+            """
+            let [alpha, beta, gamma] = parallel {
+              GET "https://api.example.test/one"
+              GET "https://api.example.test/two"
+              GET "https://api.example.test/three"
+            }
+            """,
+            [],
+            [],
+            diagnostics);
+
+        var sendCount = 0;
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script = flow,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+                MaxSendIterations = 5,
+                SendAsync = _ =>
+                {
+                    var index = Interlocked.Increment(ref sendCount);
+                    return Task.FromResult<ResponseSnapshot?>(new()
+                    {
+                        StatusCode = 200,
+                        Body = $$"""{"index":{{index}}}""",
+                        ContentType = "application/json",
+                    });
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual(3, sendCount);
+        Assert.HasCount(3, result.SentResponses);
+        CollectionAssert.AreEquivalent(
+            new[] { "alpha", "beta", "gamma" },
+            result.SentResponses.Select(static item => item.Label).ToArray());
+    }
+
+    [TestMethod]
     public async Task Run_supports_workspace_execute_and_merges_nested_runtime_outputs()
     {
         var result = await scriptEngine.Run(

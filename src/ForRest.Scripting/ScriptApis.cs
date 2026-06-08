@@ -22,12 +22,29 @@ public sealed class ScriptRequestApi
         VariablesApi variablesApi,
         Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync = null,
         int maxSendIterations = 0)
+        : this(request, responseApi, variablesApi, sendAsync, maxSendIterations, null, null)
+    {
+    }
+
+    private ScriptRequestApi(
+        PreparedRequest request,
+        ScriptResponseApi responseApi,
+        VariablesApi variablesApi,
+        Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync,
+        int maxSendIterations,
+        List<ResponseSnapshot>? sharedResponses,
+        List<RequestSnapshot>? sharedRequests)
     {
         originalRequest = request;
         this.responseApi = responseApi;
         this.variablesApi = variablesApi;
         this.sendAsync = sendAsync;
         this.maxSendIterations = Math.Max(0, maxSendIterations);
+
+        // A clone records into the originating request's buffers (passed here) so its sends — e.g. each
+        // branch of a parallel block — surface as response cards. A fresh request owns new buffers.
+        sentResponses = sharedResponses ?? [];
+        sentRequests = sharedRequests ?? [];
         Method = request.Method.ToString().ToUpperInvariant();
         Url = request.Uri.ToString();
         Body = request.Body.RawContent;
@@ -55,9 +72,9 @@ public sealed class ScriptRequestApi
 
     private ResponseSnapshot? lastSentResponse;
 
-    private readonly List<ResponseSnapshot> sentResponses = [];
+    private readonly List<ResponseSnapshot> sentResponses;
 
-    private readonly List<RequestSnapshot> sentRequests = [];
+    private readonly List<RequestSnapshot> sentRequests;
 
     public string Method { get; set; }
 
@@ -145,7 +162,9 @@ public sealed class ScriptRequestApi
             clonedResponse,
             variablesApi,
             sendAsync,
-            maxSendIterations)
+            maxSendIterations,
+            sentResponses,
+            sentRequests)
         {
             Method = Method,
             Url = Url,
