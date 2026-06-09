@@ -16,6 +16,7 @@
     "editorIndentGuide.activeBackground": "#3E4B57"
   },
   "tokenColors": [
+    { "settings": { "foreground": "#EEF3F7" } },
     { "scope": ["keyword.other.directive.forrest", "keyword.other.directive.toml"], "settings": { "foreground": "#7EBEFF", "fontStyle": "bold" } },
     { "scope": "keyword.other.method.forrest", "settings": { "foreground": "#5EA9F1", "fontStyle": "bold" } },
     { "scope": "keyword.control.flow.forrest", "settings": { "foreground": "#91BCE8", "fontStyle": "bold" } },
