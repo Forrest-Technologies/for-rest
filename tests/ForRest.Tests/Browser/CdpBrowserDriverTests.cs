@@ -101,6 +101,25 @@ public sealed class CdpBrowserDriverTests
     }
 
     [TestMethod]
+    public async Task Type_with_visible_motion_sends_one_key_event_pair_per_character()
+    {
+        FakeCdpTransport transport = new()
+        {
+            Responder = (method, _) => method == "Runtime.evaluate"
+                ? FakeCdpTransport.LocateResult(10, 10)
+                : "{}",
+        };
+        CdpBrowserDriver driver = new(new CdpClient(transport));
+
+        // A human cadence types character by character with real key events (no single insertText).
+        await driver.Type(BrowserTarget.Css("#name"), "hey", CursorMotion.Default with { Steps = 1, StepDelayMs = 0 }, new TypingCadence { MinDelayMs = 1, MaxDelayMs = 1, Seed = 1 });
+
+        Assert.IsFalse(transport.Calls.Any(call => call.Method == "Input.insertText"), "human typing should not insert the whole string at once");
+        int keyDowns = transport.Calls.Count(call => call.Method == "Input.dispatchKeyEvent" && Type(call.Parameters) == "keyDown");
+        Assert.AreEqual(3, keyDowns, "should press one key per character");
+    }
+
+    [TestMethod]
     public async Task Press_named_key_dispatches_key_events()
     {
         FakeCdpTransport transport = new();

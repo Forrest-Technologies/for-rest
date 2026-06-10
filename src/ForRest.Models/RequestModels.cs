@@ -120,6 +120,12 @@ public sealed record ExtractionDefinition
     [JsonConverter(typeof(JsonStringEnumConverter<VariableScope>))]
     public VariableScope TargetScope { get; init; } = VariableScope.Runtime;
 
+    /// <summary>
+    /// When true, the extracted variable is flagged secret so it is DPAPI-protected at rest and masked
+    /// in previews — use for extracted tokens, keys, and other sensitive response values.
+    /// </summary>
+    public bool IsSecret { get; init; }
+
     public bool IsEnabled { get; init; } = true;
 }
 

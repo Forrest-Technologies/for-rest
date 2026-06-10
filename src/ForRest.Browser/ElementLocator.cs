@@ -140,6 +140,43 @@ public static class ElementLocator
         return (int)Math.Round(baseDelayMs * factor);
     }
 
+    /// <summary>
+    /// Produces the per-character pause (in milliseconds) to wait before each keystroke of <paramref name="text"/>,
+    /// giving typing a natural, slightly irregular rhythm. The pause after whitespace is nudged longer (as a
+    /// person hesitates between words). Deterministic when the cadence carries a seed.
+    /// </summary>
+    public static IReadOnlyList<int> KeystrokeDelays(string text, TypingCadence cadence)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return [];
+        }
+
+        int min = Math.Max(0, Math.Min(cadence.MinDelayMs, cadence.MaxDelayMs));
+        int max = Math.Max(min, Math.Max(cadence.MinDelayMs, cadence.MaxDelayMs));
+        if (max == 0)
+        {
+            return new int[text.Length];
+        }
+
+        Random random = cadence.Seed is int seed ? new Random(seed) : new Random();
+        int[] delays = new int[text.Length];
+        for (int i = 0; i < text.Length; i++)
+        {
+            int delay = random.Next(min, max + 1);
+
+            // People pause a little longer after finishing a word.
+            if (i > 0 && char.IsWhiteSpace(text[i - 1]))
+            {
+                delay += (max - min) / 2;
+            }
+
+            delays[i] = delay;
+        }
+
+        return delays;
+    }
+
     #endregion
 
     #region Private Methods

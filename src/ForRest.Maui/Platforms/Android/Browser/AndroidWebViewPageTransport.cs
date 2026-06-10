@@ -1,5 +1,8 @@
 #if ANDROID
+using System.Globalization;
 using Android.Graphics;
+using Android.OS;
+using Android.Views;
 using Android.Webkit;
 using ForRest.Browser;
 using Microsoft.Maui.ApplicationModel;
@@ -12,8 +15,12 @@ namespace ForRest.Maui.Platforms.Android.Browser;
 /// shared <see cref="JsBridgeBrowserDriver"/> can drive it. It marshals every call onto the UI thread,
 /// runs scripts through <c>WebView.EvaluateJavascript</c>, navigates with <c>LoadUrl</c> and waits for
 /// <c>document.readyState</c> to settle, and captures a screenshot by drawing the view to a bitmap.
+///
+/// It also implements <see cref="IBrowserTrustedInput"/>: taps are delivered as real
+/// <see cref="MotionEvent"/>s through the WebView's own touch pipeline, so the page sees OS-trusted
+/// (<c>event.isTrusted = true</c>) input rather than synthetic DOM events.
 /// </summary>
-internal sealed class AndroidWebViewPageTransport(AWebView webView) : IBrowserPageTransport
+internal sealed class AndroidWebViewPageTransport(AWebView webView) : IBrowserPageTransport, IBrowserTrustedInput
 {
     #region Private Fields
 
@@ -24,6 +31,8 @@ internal sealed class AndroidWebViewPageTransport(AWebView webView) : IBrowserPa
     #region Properties
 
     public bool IsAvailable => true;
+
+    public bool SupportsTrustedTap => true;
 
     #endregion
 
@@ -91,9 +100,75 @@ internal sealed class AndroidWebViewPageTransport(AWebView webView) : IBrowserPa
         return completion.Task.WaitAsync(cancellationToken);
     }
 
+    public async Task<bool> TryTrustedTap(double cssX, double cssY, CancellationToken cancellationToken = default)
+    {
+        // Page rects are CSS pixels relative to the viewport; the WebView's touch pipeline wants physical
+        // pixels relative to the view. devicePixelRatio is exactly that CSS->physical scale.
+        double ratio = await GetDevicePixelRatio(cancellationToken);
+        float deviceX = (float)(cssX * ratio);
+        float deviceY = (float)(cssY * ratio);
+
+        TaskCompletionSource<bool> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            try
+            {
+                long downTime = SystemClock.UptimeMillis();
+
+                // down -> a couple of tiny moves (so it reads as a finger, not a teleport) -> up, with
+                // event-time offsets that keep the gesture inside tap (not long-press) timing.
+                bool dispatched = DispatchTouch(MotionEventActions.Down, deviceX, deviceY, downTime, downTime);
+                DispatchTouch(MotionEventActions.Move, deviceX + 0.6f, deviceY + 0.4f, downTime, downTime + 12);
+                DispatchTouch(MotionEventActions.Up, deviceX, deviceY, downTime, downTime + 58);
+                completion.TrySetResult(dispatched);
+            }
+            catch (Exception)
+            {
+                // Any failure falls back to the synthetic DOM click in the driver.
+                completion.TrySetResult(false);
+            }
+        });
+
+        return await completion.Task.WaitAsync(cancellationToken);
+    }
+
     #endregion
 
     #region Helpers
+
+    private bool DispatchTouch(MotionEventActions action, float x, float y, long downTime, long eventTime)
+    {
+        MotionEvent? motionEvent = MotionEvent.Obtain(downTime, eventTime, action, x, y, 0);
+        if (motionEvent is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return webView.DispatchTouchEvent(motionEvent);
+        }
+        finally
+        {
+            motionEvent.Recycle();
+        }
+    }
+
+    private async Task<double> GetDevicePixelRatio(CancellationToken cancellationToken)
+    {
+        try
+        {
+            string raw = await Evaluate("window.devicePixelRatio", cancellationToken);
+            string trimmed = (raw ?? string.Empty).Trim().Trim('"');
+            return double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out double ratio) && ratio > 0
+                ? ratio
+                : 1d;
+        }
+        catch (Exception)
+        {
+            return 1d;
+        }
+    }
 
     private sealed class JsValueCallback(TaskCompletionSource<string> completion)
         : Java.Lang.Object, IValueCallback

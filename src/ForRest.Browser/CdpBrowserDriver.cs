@@ -10,6 +10,8 @@ public sealed class CdpBrowserDriver(CdpClient client) : IBrowserAutomationBridg
 {
     #region Private Fields
 
+    private const int ClickSettleMilliseconds = 45;
+
     private CursorPoint cursor;
 
     #endregion
@@ -44,6 +46,9 @@ public sealed class CdpBrowserDriver(CdpClient client) : IBrowserAutomationBridg
         await MoveTo(info.X, info.Y, resolved, cancellationToken);
         if (resolved.Visible)
         {
+            // A brief settle on arrival before the press reads as a deliberate human click rather than
+            // an instantaneous machine tap; then the ripple marks where the click lands.
+            await Task.Delay(ClickSettleMilliseconds, cancellationToken);
             await client.Evaluate(BrowserJs.ClickRipple(info.X, info.Y), cancellationToken: cancellationToken);
         }
 
@@ -51,10 +56,32 @@ public sealed class CdpBrowserDriver(CdpClient client) : IBrowserAutomationBridg
         await client.DispatchMouse("mouseReleased", info.X, info.Y, "left", 1, cancellationToken);
     }
 
-    public async Task Type(BrowserTarget target, string text, CursorMotion? motion = null, CancellationToken cancellationToken = default)
+    public async Task Type(BrowserTarget target, string text, CursorMotion? motion = null, TypingCadence? cadence = null, CancellationToken cancellationToken = default)
     {
-        await Click(target, motion, cancellationToken);
-        await client.InsertText(text, cancellationToken);
+        CursorMotion resolvedMotion = motion ?? CursorMotion.Default;
+        await Click(target, resolvedMotion, cancellationToken);
+
+        text ??= string.Empty;
+
+        // An invisible (headless/fast-replay) move types in one shot; a visible, human move types
+        // character by character with real key events and a natural, slightly irregular rhythm.
+        TypingCadence resolvedCadence = cadence ?? (resolvedMotion.Visible ? TypingCadence.Default : TypingCadence.Instant);
+        IReadOnlyList<int> delays = ElementLocator.KeystrokeDelays(text, resolvedCadence);
+        if (delays.Count == 0 || delays.All(static delay => delay == 0))
+        {
+            await client.InsertText(text, cancellationToken);
+            return;
+        }
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (delays[i] > 0)
+            {
+                await Task.Delay(delays[i], cancellationToken);
+            }
+
+            await client.TypeCharacter(text[i].ToString(), cancellationToken);
+        }
     }
 
     public async Task Press(string keys, CancellationToken cancellationToken = default)

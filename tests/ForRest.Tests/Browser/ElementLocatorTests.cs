@@ -109,4 +109,27 @@ public sealed class ElementLocatorTests
         Assert.IsTrue(start > mid, "cursor should move slower at the start than mid-travel");
         Assert.AreEqual(0, ElementLocator.StepDelay(0, 0.5));
     }
+
+    [TestMethod]
+    public void KeystrokeDelays_returns_one_delay_per_character_within_range_and_is_deterministic()
+    {
+        TypingCadence cadence = new() { MinDelayMs = 20, MaxDelayMs = 60, Seed = 7 };
+
+        IReadOnlyList<int> first = ElementLocator.KeystrokeDelays("hi there", cadence);
+        IReadOnlyList<int> second = ElementLocator.KeystrokeDelays("hi there", cadence);
+
+        Assert.AreEqual("hi there".Length, first.Count);
+        CollectionAssert.AreEqual(first.ToArray(), second.ToArray(), "a seeded cadence must reproduce identical timing");
+        // The character after the space gets a longer hesitation, but every value stays sane (>= min).
+        Assert.IsTrue(first.All(delay => delay >= 20), "no keystroke should be faster than the minimum");
+    }
+
+    [TestMethod]
+    public void KeystrokeDelays_instant_cadence_has_no_pauses()
+    {
+        IReadOnlyList<int> delays = ElementLocator.KeystrokeDelays("abc", TypingCadence.Instant);
+
+        Assert.AreEqual(3, delays.Count);
+        Assert.IsTrue(delays.All(delay => delay == 0));
+    }
 }

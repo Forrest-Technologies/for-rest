@@ -875,12 +875,17 @@ public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
 
     public void Set(string key, string value, VariableScope scope = VariableScope.Runtime, bool isSecret = false)
     {
+        // Preserve secret status when reassigning an existing secret variable. Without this a script
+        // that updates a DPAPI-secured variable (e.g. refreshing an OAuth token) would silently drop
+        // the secret flag, and the new value would be persisted in plaintext.
+        bool resolvedIsSecret = isSecret || (variables.TryGetValue(key, out VariableDefinition? existing) && existing.IsSecret);
+
         variables[key] = new()
         {
             Key = key,
             Value = value,
             Scope = scope,
-            IsSecret = isSecret,
+            IsSecret = resolvedIsSecret,
         };
     }
 
@@ -903,9 +908,15 @@ public sealed class VariablesApi(IEnumerable<VariableDefinition> seedVariables)
     {
         foreach (VariableDefinition variable in runtimeVariables.Where(static item => item.Scope == VariableScope.Runtime))
         {
+            // Keep the secret flag if either side considers the variable secret, so an incoming
+            // plaintext-flagged value never downgrades a secret that already lives in the map.
+            bool resolvedIsSecret = variable.IsSecret
+                || (variables.TryGetValue(variable.Key, out VariableDefinition? existing) && existing.IsSecret);
+
             variables[variable.Key] = variable with
             {
                 Scope = VariableScope.Runtime,
+                IsSecret = resolvedIsSecret,
             };
         }
     }
@@ -2298,10 +2309,18 @@ public sealed class ScriptBrowserApi(IBrowserAutomationBridge bridge)
     /// <summary>Whether the visible red cursor overlay animates during moves.</summary>
     public bool ShowCursor { get; set; } = true;
 
+    /// <summary>Shortest pause between keystrokes in milliseconds when typing.</summary>
+    public int TypeMinDelayMs { get; set; } = 28;
+
+    /// <summary>Longest pause between keystrokes in milliseconds when typing; the actual gap is random within the range.</summary>
+    public int TypeMaxDelayMs { get; set; } = 95;
+
     /// <summary>Whether a live browser pane is connected.</summary>
     public bool IsAvailable => bridge.IsAvailable;
 
     private CursorMotion Motion => new() { Steps = MouseSteps, StepDelayMs = MouseStepDelayMs, Visible = ShowCursor };
+
+    private TypingCadence Cadence => new() { MinDelayMs = TypeMinDelayMs, MaxDelayMs = TypeMaxDelayMs };
 
     #endregion
 
@@ -2311,7 +2330,7 @@ public sealed class ScriptBrowserApi(IBrowserAutomationBridge bridge)
 
     public Task click(string target) => bridge.Click(BrowserTarget.Parse(target), Motion);
 
-    public Task type(string target, string text) => bridge.Type(BrowserTarget.Parse(target), text, Motion);
+    public Task type(string target, string text) => bridge.Type(BrowserTarget.Parse(target), text, Motion, Cadence);
 
     public Task press(string keys) => bridge.Press(keys);
 

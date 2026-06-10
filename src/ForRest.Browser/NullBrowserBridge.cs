@@ -31,7 +31,7 @@ public sealed class NullBrowserBridge : IBrowserAutomationBridge
 
     public Task Click(BrowserTarget target, CursorMotion? motion = null, CancellationToken cancellationToken = default) => throw Fail();
 
-    public Task Type(BrowserTarget target, string text, CursorMotion? motion = null, CancellationToken cancellationToken = default) => throw Fail();
+    public Task Type(BrowserTarget target, string text, CursorMotion? motion = null, TypingCadence? cadence = null, CancellationToken cancellationToken = default) => throw Fail();
 
     public Task Press(string keys, CancellationToken cancellationToken = default) => throw Fail();
 

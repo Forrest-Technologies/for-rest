@@ -40,6 +40,30 @@ public sealed class ResponseExtractionServiceTests
     }
 
     [TestMethod]
+    public void Extract_flags_the_variable_secret_when_the_extraction_is_secret()
+    {
+        var response = new ResponseSnapshot
+        {
+            Body = """{"access_token":"super-secret-token"}""",
+        };
+
+        var result = responseExtractionService.Extract(
+            response,
+            [
+                new()
+                {
+                    Selector = "$.access_token",
+                    TargetVariableName = "token",
+                    IsSecret = true,
+                },
+            ]);
+
+        Assert.HasCount(1, result);
+        Assert.AreEqual("super-secret-token", result.Single().Value);
+        Assert.IsTrue(result.Single().IsSecret, "an extraction marked secret must produce a secret variable");
+    }
+
+    [TestMethod]
     public void Extract_unescapes_json_string_values()
     {
         var response = new ResponseSnapshot
