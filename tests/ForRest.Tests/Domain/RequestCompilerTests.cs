@@ -188,6 +188,34 @@ public sealed class RequestCompilerTests
         Assert.AreEqual("api://forrest/.default", result.Value.Auth.Scopes);
     }
 
+    [TestMethod]
+    public void Prepare_url_encodes_form_values_in_raw_request_preview()
+    {
+        var request = new RequestDefinition
+        {
+            Method = HttpMethodKind.Post,
+            UrlTemplate = "https://api.example.test/form",
+            Body = new()
+            {
+                Mode = RequestBodyMode.FormUrlEncoded,
+                FormValues =
+                [
+                    new()
+                    {
+                        Key = "search",
+                        Value = "a&b c",
+                    },
+                ],
+            },
+        };
+
+        var result = requestCompiler.Prepare(request, [], [], [], [], []);
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.IsNotNull(result.Value);
+        StringAssert.Contains(result.Value!.RawRequest, $"search={WebUtility.UrlEncode("a&b c")}");
+    }
+
     #endregion
 
     #region Private Methods

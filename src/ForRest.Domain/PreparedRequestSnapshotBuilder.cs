@@ -50,11 +50,16 @@ public static class PreparedRequestSnapshotBuilder
 
         if (body.Mode is RequestBodyMode.FormUrlEncoded or RequestBodyMode.MultipartFormData)
         {
+            // Form-urlencoded snapshots mirror the percent-encoding FormUrlEncodedContent applies
+            // on send; multipart snapshots stay a readable field listing.
+            bool encode = body.Mode == RequestBodyMode.FormUrlEncoded;
             return string.Join(
                 "&",
                 body.FormValues
                     .Where(static item => item.IsEnabled)
-                    .Select(static item => $"{item.Key}={item.Value}"));
+                    .Select(item => encode
+                        ? $"{System.Net.WebUtility.UrlEncode(item.Key)}={System.Net.WebUtility.UrlEncode(item.Value)}"
+                        : $"{item.Key}={item.Value}"));
         }
 
         return body.RawContent ?? string.Empty;

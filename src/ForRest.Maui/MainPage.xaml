@@ -26,6 +26,7 @@
                 <Button Grid.Column="1"
                         Text="✕"
                         Clicked="OnDismissStatusBannerClicked"
+                        SemanticProperties.Description="Dismiss the status banner"
                         Padding="8,2"
                         VerticalOptions="Start"
                         HorizontalOptions="End" />
@@ -52,6 +53,7 @@
                         Style="{StaticResource CollapsedPaneRailBorderStyle}">
                     <Button Text="Explorer"
                             Clicked="OnToggleLeftPaneClicked"
+                            SemanticProperties.Description="Show the explorer pane with workspaces, requests, and history"
                             VerticalOptions="Start"
                             HorizontalOptions="Fill"
                             Style="{StaticResource CollapsedPaneRestoreButtonStyle}" />
@@ -101,6 +103,7 @@
                         Style="{StaticResource CollapsedPaneRailBorderStyle}">
                     <Button Text="Inspect"
                             Clicked="OnToggleRightPaneClicked"
+                            SemanticProperties.Description="Show the inspector pane with response, headers, and trace"
                             VerticalOptions="Start"
                             HorizontalOptions="Fill"
                             Style="{StaticResource CollapsedPaneRestoreButtonStyle}" />
@@ -160,6 +163,7 @@
                           ColumnSpacing="8">
                         <Button Text="{Binding CompactLeftPaneButtonText}"
                                 Clicked="OnToggleLeftPaneClicked"
+                                SemanticProperties.Description="Show or hide the explorer pane"
                                 Style="{StaticResource MobileFooterButtonStyle}" />
                         <Button Grid.Column="1"
                                 Text="{Binding CompactCenterPaneButtonText}"
@@ -169,6 +173,7 @@
                         <Button Grid.Column="2"
                                 Text="{Binding CompactRightPaneButtonText}"
                                 Clicked="OnToggleRightPaneClicked"
+                                SemanticProperties.Description="Show or hide the inspector pane"
                                 Style="{StaticResource MobileFooterButtonStyle}" />
                         <Label Grid.Column="3"
                                Text="{Binding RequestStateStatus}"

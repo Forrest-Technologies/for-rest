@@ -125,11 +125,19 @@ public partial class InspectorPane : ContentView
 	private async void OnCopyResponseClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyResponseBodyAsync();
+		if (ViewModel.CanCopyResponseBody)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private async void OnCopyRequestClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyRequestBodyAsync();
+		if (ViewModel.CanCopyRequestBody)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private void OnPreviousResponseSnapshotClicked(object? sender, EventArgs e)
@@ -191,21 +199,37 @@ public partial class InspectorPane : ContentView
 	private async void OnCopyRawResponseClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyRawResponseAsync();
+		if (ViewModel.CanCopyRawResponse)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private async void OnCopyRawRequestClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyRawRequestAsync();
+		if (ViewModel.CanCopyRawRequest)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private async void OnCopyStashClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyStashAsync();
+		if (ViewModel.CanCopyStash)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private async void OnCopySelectedStashClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopySelectedStashRowAsync();
+		if (ViewModel.CanCopySelectedStashRow)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private void OnClearStashFilterClicked(object? sender, EventArgs e)
@@ -239,21 +263,57 @@ public partial class InspectorPane : ContentView
 	private async void OnCopyHeadersClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyHeadersAsync();
+		if (ViewModel.CanCopyHeaders)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private async void OnCopyTraceClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyTraceAsync();
+		if (ViewModel.CanCopyTrace)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private async void OnCopyDebugClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyDebugOutputAsync();
+		if (ViewModel.CanCopyDebugOutput)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
 	}
 
 	private async void OnCopyDebugSummaryClicked(object? sender, EventArgs e)
 	{
 		await ViewModel.CopyDebugSummaryAsync();
+		if (ViewModel.CanCopyDebugSummary)
+		{
+			await ShowCopiedStateAsync(sender);
+		}
+	}
+
+	private static async Task ShowCopiedStateAsync(object? sender)
+	{
+		if (sender is not Button button)
+		{
+			return;
+		}
+
+		string originalText = button.Text;
+		button.Text = "Copied";
+
+		try
+		{
+			await Task.Delay(1200);
+		}
+		finally
+		{
+			button.Text = originalText;
+		}
 	}
 
 	private async void OnExportStashClicked(object? sender, EventArgs e)

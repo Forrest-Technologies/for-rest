@@ -57,7 +57,8 @@ public sealed class SqliteAppDatabase(ILogger<SqliteAppDatabase> logger)
 
     public SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection($"Data Source={databasePath}");
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ConnectionString;
+        var connection = new SqliteConnection(connectionString);
         connection.Open();
         return connection;
     }

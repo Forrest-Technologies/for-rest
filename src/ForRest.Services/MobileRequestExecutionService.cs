@@ -162,15 +162,8 @@ public sealed class MobileRequestExecutionService(
 		HttpMethod method = new(preparedRequest.Method.ToString().ToUpperInvariant());
 		HttpRequestMessage request = new(method, preparedRequest.Uri);
 
-		foreach (KeyValueDefinition header in preparedRequest.Headers.Where(static item => item.IsEnabled))
-		{
-			if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value))
-			{
-				request.Content ??= new ByteArrayContent([]);
-				request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-			}
-		}
-
+		// Assign the body before headers so content headers (Content-Type, Content-Disposition, ...)
+		// land on the final content instead of a placeholder that the body assignment would replace.
 		request.Content = preparedRequest.Body.Mode switch
 		{
 			RequestBodyMode.None => null,
@@ -182,6 +175,15 @@ public sealed class MobileRequestExecutionService(
 			RequestBodyMode.Json => BuildStringContent(preparedRequest.Body.RawContent, preparedRequest.Body.ContentType, "application/json"),
 			_ => BuildStringContent(preparedRequest.Body.RawContent, preparedRequest.Body.ContentType, "text/plain"),
 		};
+
+		foreach (KeyValueDefinition header in preparedRequest.Headers.Where(static item => item.IsEnabled))
+		{
+			if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value))
+			{
+				request.Content ??= new ByteArrayContent([]);
+				request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+			}
+		}
 
 		return request;
 	}
@@ -339,6 +341,11 @@ public sealed class MobileRequestExecutionService(
 				}
 
 				response.Dispose();
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				// A user cancel is not a transient failure — don't burn the remaining retries on it.
+				throw;
 			}
 			catch (Exception exception)
 			{

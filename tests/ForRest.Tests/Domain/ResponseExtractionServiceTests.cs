@@ -40,6 +40,28 @@ public sealed class ResponseExtractionServiceTests
     }
 
     [TestMethod]
+    public void Extract_unescapes_json_string_values()
+    {
+        var response = new ResponseSnapshot
+        {
+            Body = """{"message":"line1\nsaid \"hi\" to c:\\temp"}""",
+        };
+
+        var result = responseExtractionService.Extract(
+            response,
+            [
+                new()
+                {
+                    Selector = "$.message",
+                    TargetVariableName = "message",
+                },
+            ]);
+
+        Assert.HasCount(1, result);
+        Assert.AreEqual("line1\nsaid \"hi\" to c:\\temp", result.Single().Value);
+    }
+
+    [TestMethod]
     public void Extract_returns_empty_collection_for_invalid_json_or_missing_paths()
     {
         var invalidResult = responseExtractionService.Extract(

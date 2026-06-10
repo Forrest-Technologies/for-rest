@@ -40,7 +40,9 @@ public sealed class JsonNodeSelector
 
         return currentNode switch
         {
-            JsonValue value => value.ToJsonString().Trim('"'),
+            // GetValue unescapes JSON string values (\" \\ \n ...); ToJsonString would keep the
+            // escape sequences and Trim('"') would also eat quotes that belong to the value.
+            JsonValue value => value.TryGetValue(out string? text) ? text : value.ToJsonString(),
             _ => currentNode.ToJsonString(),
         };
     }

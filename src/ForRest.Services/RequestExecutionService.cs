@@ -533,15 +533,8 @@ public sealed class RequestExecutionService(
         var method = new HttpMethod(preparedRequest.Method.ToString().ToUpperInvariant());
         var request = new HttpRequestMessage(method, preparedRequest.Uri);
 
-        foreach (var header in preparedRequest.Headers.Where(static item => item.IsEnabled))
-        {
-            if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value))
-            {
-                request.Content ??= new ByteArrayContent([]);
-                request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-        }
-
+        // Assign the body before headers so content headers (Content-Type, Content-Disposition, ...)
+        // land on the final content instead of a placeholder that the body assignment would replace.
         request.Content = preparedRequest.Body.Mode switch
         {
             RequestBodyMode.None => null,
@@ -553,6 +546,15 @@ public sealed class RequestExecutionService(
             RequestBodyMode.Json => BuildStringContent(preparedRequest.Body.RawContent, preparedRequest.Body.ContentType, "application/json"),
             _ => BuildStringContent(preparedRequest.Body.RawContent, preparedRequest.Body.ContentType, "text/plain"),
         };
+
+        foreach (var header in preparedRequest.Headers.Where(static item => item.IsEnabled))
+        {
+            if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value))
+            {
+                request.Content ??= new ByteArrayContent([]);
+                request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
 
         return request;
     }
@@ -589,9 +591,11 @@ public sealed class RequestExecutionService(
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
         string? bodyBase64 = null;
+        long? binarySizeBytes = null;
         if (!IsTextResponse(contentType))
         {
             var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            binarySizeBytes = bytes.Length;
             if (bytes.Length > 0 && bytes.Length <= MaxInlineBinaryBytes)
             {
                 bodyBase64 = Convert.ToBase64String(bytes);
@@ -622,7 +626,8 @@ public sealed class RequestExecutionService(
             StatusCode = (int)response.StatusCode,
             ReasonPhrase = response.ReasonPhrase ?? string.Empty,
             ContentType = contentType,
-            SizeBytes = Encoding.UTF8.GetByteCount(body),
+            // Binary payloads report their true byte count; the decoded string is lossy for them.
+            SizeBytes = binarySizeBytes ?? Encoding.UTF8.GetByteCount(body),
             DurationMilliseconds = durationMilliseconds,
             Body = body,
             BodyBase64 = bodyBase64,
@@ -792,6 +797,11 @@ public sealed class RequestExecutionService(
                 }
 
                 response.Dispose();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // A user cancel is not a transient failure — don't burn the remaining retries on it.
+                throw;
             }
             catch (Exception exception)
             {
