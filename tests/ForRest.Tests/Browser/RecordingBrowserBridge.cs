@@ -36,7 +36,7 @@ internal sealed class RecordingBrowserBridge : IBrowserAutomationBridge
         return Task.CompletedTask;
     }
 
-    public Task Type(BrowserTarget target, string text, CursorMotion? motion = null, CancellationToken cancellationToken = default)
+    public Task Type(BrowserTarget target, string text, CursorMotion? motion = null, TypingCadence? cadence = null, CancellationToken cancellationToken = default)
     {
         Calls.Add($"type:{target}={text}");
         return Task.CompletedTask;

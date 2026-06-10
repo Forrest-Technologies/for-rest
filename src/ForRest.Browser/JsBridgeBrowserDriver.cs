@@ -8,14 +8,18 @@ namespace ForRest.Browser;
 /// dispatching synthetic DOM events. A visible red cursor is moved to the target before interactions so
 /// a watching human can follow along.
 ///
-/// Synthetic events are not OS-trusted input, so a small number of sites that gate on
-/// <c>event.isTrusted</c> will not react — that is the documented trade-off of a JS bridge versus CDP.
-/// All page IO goes through <see cref="IBrowserPageTransport"/>, so the driver is fully unit-testable
-/// against a fake transport.
+/// When the transport also implements <see cref="IBrowserTrustedInput"/> (Android does, via real
+/// <c>MotionEvent</c>s), taps are delivered as OS-trusted touches so sites gating on
+/// <c>event.isTrusted</c> react to the ghost as they would to a person; otherwise it falls back to
+/// synthetic DOM events, whose one trade-off is those isTrusted-gated sites. Typing is paced per
+/// keystroke with real key events. All page IO goes through <see cref="IBrowserPageTransport"/>, so the
+/// driver is fully unit-testable against a fake transport.
 /// </summary>
 public sealed class JsBridgeBrowserDriver(IBrowserPageTransport transport) : IBrowserAutomationBridge
 {
     #region Private Fields
+
+    private const int ClickSettleMilliseconds = 45;
 
     private bool cursorInstalled;
     private CursorPoint cursor;
@@ -53,14 +57,56 @@ public sealed class JsBridgeBrowserDriver(IBrowserPageTransport transport) : IBr
 
     public async Task Click(BrowserTarget target, CursorMotion? motion = null, CancellationToken cancellationToken = default)
     {
-        await MoveCursorTo(target, motion ?? CursorMotion.Default, cancellationToken);
+        CursorMotion resolved = motion ?? CursorMotion.Default;
+        BrowserElementInfo info = await Query(target, cancellationToken);
+        if (!info.Found)
+        {
+            throw new InvalidOperationException($"Element {target} was not found.");
+        }
+
+        await AnimateCursorTo(new CursorPoint(info.X, info.Y), resolved, cancellationToken);
+        if (resolved.Visible)
+        {
+            // A brief settle on arrival before the tap reads as a deliberate human click rather than
+            // an instantaneous machine tap; then the ripple marks where the click lands.
+            await Task.Delay(ClickSettleMilliseconds, cancellationToken);
+            await transport.Evaluate(BrowserJs.ClickRipple(info.X, info.Y), cancellationToken);
+        }
+
+        // Prefer an OS-trusted tap (a real touch the platform dispatches) so sites gating on
+        // event.isTrusted react to the ghost as they would to a person; fall back to a synthetic
+        // DOM click when the transport cannot deliver one or the tap did not land.
+        if (transport is IBrowserTrustedInput { SupportsTrustedTap: true } trusted
+            && await trusted.TryTrustedTap(info.X, info.Y, cancellationToken))
+        {
+            return;
+        }
+
         await Operate(target, "click", string.Empty, cancellationToken);
     }
 
-    public async Task Type(BrowserTarget target, string text, CursorMotion? motion = null, CancellationToken cancellationToken = default)
+    public async Task Type(BrowserTarget target, string text, CursorMotion? motion = null, TypingCadence? cadence = null, CancellationToken cancellationToken = default)
     {
         await MoveCursorTo(target, motion ?? CursorMotion.Default, cancellationToken);
-        await Operate(target, "type", text, cancellationToken);
+
+        TypingCadence resolvedCadence = cadence ?? TypingCadence.Default;
+        text ??= string.Empty;
+
+        // Empty target text still clears the field; otherwise type character by character, firing real
+        // key events per keystroke with a human-like gap so search-as-you-type and validation react.
+        await Operate(target, "cleartype", string.Empty, cancellationToken);
+        IReadOnlyList<int> delays = ElementLocator.KeystrokeDelays(text, resolvedCadence);
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (delays[i] > 0)
+            {
+                await Task.Delay(delays[i], cancellationToken);
+            }
+
+            await Operate(target, "typechar", text[i].ToString(), cancellationToken);
+        }
+
+        await Operate(target, "typecommit", string.Empty, cancellationToken);
     }
 
     public async Task Press(string keys, CancellationToken cancellationToken = default)
@@ -156,11 +202,22 @@ public sealed class JsBridgeBrowserDriver(IBrowserPageTransport transport) : IBr
             return;
         }
 
+        await AnimateCursorTo(new CursorPoint(info.X, info.Y), motion, cancellationToken);
+    }
+
+    private async Task AnimateCursorTo(CursorPoint destination, CursorMotion motion, CancellationToken cancellationToken)
+    {
+        if (!motion.Visible)
+        {
+            // Keep the tracked position coherent so the next visible move starts from the right place.
+            cursor = destination;
+            return;
+        }
+
         await EnsureCursor(cancellationToken);
 
         // Animate the overlay along a human-like curved path (same easing/jitter as the CDP driver)
         // instead of teleporting, so the ghost cursor reads as a real hand on WebView platforms too.
-        CursorPoint destination = new(info.X, info.Y);
         IReadOnlyList<CursorPoint> path = ElementLocator.HumanPath(cursor, destination, motion);
         for (int i = 0; i < path.Count; i++)
         {

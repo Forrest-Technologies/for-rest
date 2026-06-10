@@ -142,6 +142,30 @@ public sealed class CdpClient(ICdpTransport transport)
         return transport.Send("Input.insertText", parameters.ToJsonString(), cancellationToken);
     }
 
+    /// <summary>
+    /// Types a single character as a real key press: a <c>keyDown</c> carrying the character text (which
+    /// inserts it and fires <c>keydown</c>/<c>input</c>) followed by a <c>keyUp</c>. This is what makes
+    /// per-keystroke typing read as human and lets pages that listen for key events respond as they would
+    /// to a person at the keyboard.
+    /// </summary>
+    public async Task TypeCharacter(string character, CancellationToken cancellationToken = default)
+    {
+        JsonObject down = new()
+        {
+            ["type"] = "keyDown",
+            ["text"] = character,
+            ["key"] = character,
+        };
+        await transport.Send("Input.dispatchKeyEvent", down.ToJsonString(), cancellationToken);
+
+        JsonObject up = new()
+        {
+            ["type"] = "keyUp",
+            ["key"] = character,
+        };
+        await transport.Send("Input.dispatchKeyEvent", up.ToJsonString(), cancellationToken);
+    }
+
     public async Task DispatchKey(string key, string code, int virtualKeyCode, string? text, CancellationToken cancellationToken = default)
     {
         JsonObject down = new()

@@ -161,6 +161,27 @@ internal static class BrowserJs
             el.dispatchEvent(new Event('input',{bubbles:true}));
             el.dispatchEvent(new Event('change',{bubbles:true}));
           }
+          else if(op==='cleartype'){
+            if(el.focus){try{el.focus();}catch(e){}}
+            if(el.isContentEditable){el.textContent='';}
+            else{el.value='';}
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+          }
+          else if(op==='typechar'){
+            if(el.focus&&document.activeElement!==el){try{el.focus();}catch(e){}}
+            var ch=arg;
+            var ke={bubbles:true,cancelable:true,key:ch,view:window};
+            el.dispatchEvent(new KeyboardEvent('keydown',ke));
+            el.dispatchEvent(new KeyboardEvent('keypress',ke));
+            try{el.dispatchEvent(new InputEvent('beforeinput',{bubbles:true,cancelable:true,data:ch,inputType:'insertText'}));}catch(e){}
+            if(el.isContentEditable){el.textContent=(el.textContent||'')+ch;}
+            else{el.value=(el.value||'')+ch;}
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+            el.dispatchEvent(new KeyboardEvent('keyup',ke));
+          }
+          else if(op==='typecommit'){
+            el.dispatchEvent(new Event('change',{bubbles:true}));
+          }
           return JSON.stringify({ok:true,value:out});
         }
         """;

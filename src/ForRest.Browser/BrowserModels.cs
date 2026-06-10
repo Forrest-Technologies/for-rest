@@ -105,3 +105,32 @@ public sealed record CursorMotion
 
 /// <summary>A single point along a cursor path.</summary>
 public readonly record struct CursorPoint(double X, double Y);
+
+/// <summary>
+/// Controls how synthetic typing is paced so replayed automation enters text the way a person would —
+/// one character at a time with a small, slightly irregular gap between keystrokes — rather than the
+/// whole string appearing at once. Each keystroke also dispatches real key events (keydown/keyup) so
+/// sites that react to typing (search-as-you-type, validation, character counters) behave correctly.
+/// </summary>
+public sealed record TypingCadence
+{
+    /// <summary>Shortest pause between keystrokes in milliseconds.</summary>
+    public int MinDelayMs { get; init; } = 28;
+
+    /// <summary>Longest pause between keystrokes in milliseconds; the actual gap is random within the range.</summary>
+    public int MaxDelayMs { get; init; } = 95;
+
+    /// <summary>Optional seed so keystroke timing is deterministic for tests and exact replays.</summary>
+    public int? Seed { get; init; }
+
+    /// <summary>Smooth, human-like default typing.</summary>
+    public static TypingCadence Default { get; } = new();
+
+    /// <summary>Types every character with no delay; ideal for tests and fast replays.</summary>
+    public static TypingCadence Instant { get; } = new()
+    {
+        MinDelayMs = 0,
+        MaxDelayMs = 0,
+    };
+}
+

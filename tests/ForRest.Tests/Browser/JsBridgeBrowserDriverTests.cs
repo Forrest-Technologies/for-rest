@@ -63,11 +63,27 @@ public sealed class JsBridgeBrowserDriverTests
         };
         JsBridgeBrowserDriver driver = new(transport);
 
-        await driver.Type(BrowserTarget.Css("#name"), "hello", CursorMotion.Instant);
+        await driver.Type(BrowserTarget.Css("#name"), "hello", CursorMotion.Instant, TypingCadence.Instant);
 
         Assert.IsTrue(
-            transport.Scripts.Any(script => script.Contains("\"type\"") && script.Contains("hello")),
-            "should dispatch a type operation carrying the text");
+            transport.Scripts.Any(script => script.Contains("\"cleartype\"")),
+            "should clear the field before typing");
+        int charStrokes = transport.Scripts.Count(script => script.Contains("\"typechar\""));
+        Assert.AreEqual(5, charStrokes, "should type one character at a time, firing a keystroke per character");
+    }
+
+    [TestMethod]
+    public async Task Type_paces_keystrokes_when_a_human_cadence_is_used()
+    {
+        FakeBrowserPageTransport transport = new()
+        {
+            Responder = _ => """{"found":true,"x":10,"y":10,"ok":true}""",
+        };
+        JsBridgeBrowserDriver driver = new(transport);
+
+        await driver.Type(BrowserTarget.Css("#name"), "hi", CursorMotion.Instant, new TypingCadence { MinDelayMs = 0, MaxDelayMs = 0, Seed = 1 });
+
+        Assert.AreEqual(2, transport.Scripts.Count(script => script.Contains("\"typechar\"")));
     }
 
     [TestMethod]
@@ -155,6 +171,43 @@ public sealed class JsBridgeBrowserDriverTests
         Assert.AreEqual("base64png", shot);
     }
 
+    [TestMethod]
+    public async Task Click_prefers_a_trusted_tap_when_the_transport_supports_it()
+    {
+        TrustedFakeBrowserPageTransport transport = new()
+        {
+            Responder = _ => """{"found":true,"x":120,"y":48,"width":40,"height":10,"ok":true}""",
+            TrustedTapResult = true,
+        };
+        JsBridgeBrowserDriver driver = new(transport);
+
+        await driver.Click(BrowserTarget.Css("#target"), CursorMotion.Instant);
+
+        Assert.HasCount(1, transport.TrustedTaps);
+        Assert.AreEqual((120d, 48d), transport.TrustedTaps[0]);
+        Assert.IsFalse(
+            transport.Scripts.Any(script => script.Contains("\"click\"")),
+            "a delivered trusted tap must replace the synthetic DOM click, not double-fire it");
+    }
+
+    [TestMethod]
+    public async Task Click_falls_back_to_a_synthetic_click_when_the_trusted_tap_declines()
+    {
+        TrustedFakeBrowserPageTransport transport = new()
+        {
+            Responder = _ => """{"found":true,"x":10,"y":10,"ok":true}""",
+            TrustedTapResult = false,
+        };
+        JsBridgeBrowserDriver driver = new(transport);
+
+        await driver.Click(BrowserTarget.Css("#target"), CursorMotion.Instant);
+
+        Assert.HasCount(1, transport.TrustedTaps);
+        Assert.IsTrue(
+            transport.Scripts.Any(script => script.Contains("\"click\"")),
+            "when the trusted tap cannot land, the driver must still click synthetically");
+    }
+
     private sealed class FakeBrowserPageTransport : IBrowserPageTransport
     {
         public List<string> Scripts { get; } = [];
@@ -179,5 +232,37 @@ public sealed class JsBridgeBrowserDriverTests
 
         public Task<string> CaptureScreenshot(CancellationToken cancellationToken = default) =>
             Task.FromResult("base64png");
+    }
+
+    private sealed class TrustedFakeBrowserPageTransport : IBrowserPageTransport, IBrowserTrustedInput
+    {
+        public List<string> Scripts { get; } = [];
+
+        public List<(double X, double Y)> TrustedTaps { get; } = [];
+
+        public Func<string, string>? Responder { get; set; }
+
+        public bool TrustedTapResult { get; set; } = true;
+
+        public bool IsAvailable => true;
+
+        public bool SupportsTrustedTap => true;
+
+        public Task<string> Evaluate(string script, CancellationToken cancellationToken = default)
+        {
+            Scripts.Add(script);
+            return Task.FromResult(Responder?.Invoke(script) ?? "{}");
+        }
+
+        public Task Navigate(string url, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<string> CaptureScreenshot(CancellationToken cancellationToken = default) =>
+            Task.FromResult("base64png");
+
+        public Task<bool> TryTrustedTap(double cssX, double cssY, CancellationToken cancellationToken = default)
+        {
+            TrustedTaps.Add((cssX, cssY));
+            return Task.FromResult(TrustedTapResult);
+        }
     }
 }

@@ -19,7 +19,7 @@ public interface IBrowserAutomationBridge
 
     Task Click(BrowserTarget target, CursorMotion? motion = null, CancellationToken cancellationToken = default);
 
-    Task Type(BrowserTarget target, string text, CursorMotion? motion = null, CancellationToken cancellationToken = default);
+    Task Type(BrowserTarget target, string text, CursorMotion? motion = null, TypingCadence? cadence = null, CancellationToken cancellationToken = default);
 
     Task Press(string keys, CancellationToken cancellationToken = default);
 
