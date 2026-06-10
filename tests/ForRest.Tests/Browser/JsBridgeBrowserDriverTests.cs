@@ -98,6 +98,24 @@ public sealed class JsBridgeBrowserDriverTests
     }
 
     [TestMethod]
+    public async Task Click_animates_the_cursor_along_a_multi_step_path()
+    {
+        FakeBrowserPageTransport transport = new()
+        {
+            Responder = _ => """{"found":true,"x":300,"y":200,"width":40,"height":10,"ok":true}""",
+        };
+        JsBridgeBrowserDriver driver = new(transport);
+
+        await driver.Click(BrowserTarget.Css("#target"), CursorMotion.Default with { StepDelayMs = 0 });
+
+        int cursorMoves = transport.Scripts.Count(script => script.Contains("__forrest_cursor__") && !script.Contains("DOMContentLoaded"));
+        Assert.IsGreaterThan(
+            1,
+            cursorMoves,
+            "a human-like move must paint the cursor at many interpolated points, not teleport in one jump");
+    }
+
+    [TestMethod]
     public async Task Press_dispatches_a_key_event()
     {
         FakeBrowserPageTransport transport = new();

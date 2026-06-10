@@ -62,6 +62,7 @@ public sealed class ResponseExtractionService
             Key = extraction.TargetVariableName,
             Value = value,
             Scope = extraction.TargetScope,
+            IsSecret = extraction.IsSecret,
         };
     }
 

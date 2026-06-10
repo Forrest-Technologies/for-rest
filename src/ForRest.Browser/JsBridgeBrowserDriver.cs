@@ -18,6 +18,7 @@ public sealed class JsBridgeBrowserDriver(IBrowserPageTransport transport) : IBr
     #region Private Fields
 
     private bool cursorInstalled;
+    private CursorPoint cursor;
 
     #endregion
 
@@ -156,7 +157,24 @@ public sealed class JsBridgeBrowserDriver(IBrowserPageTransport transport) : IBr
         }
 
         await EnsureCursor(cancellationToken);
-        await transport.Evaluate(BrowserJs.MoveCursor(info.X, info.Y), cancellationToken);
+
+        // Animate the overlay along a human-like curved path (same easing/jitter as the CDP driver)
+        // instead of teleporting, so the ghost cursor reads as a real hand on WebView platforms too.
+        CursorPoint destination = new(info.X, info.Y);
+        IReadOnlyList<CursorPoint> path = ElementLocator.HumanPath(cursor, destination, motion);
+        for (int i = 0; i < path.Count; i++)
+        {
+            CursorPoint point = path[i];
+            await transport.Evaluate(BrowserJs.MoveCursor(point.X, point.Y), cancellationToken);
+
+            int delay = ElementLocator.StepDelay(motion.StepDelayMs, (double)(i + 1) / path.Count);
+            if (delay > 0)
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        cursor = destination;
     }
 
     private async Task EnsureCursor(CancellationToken cancellationToken)

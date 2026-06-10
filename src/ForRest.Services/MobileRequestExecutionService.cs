@@ -304,9 +304,15 @@ public sealed class MobileRequestExecutionService(
 
 		foreach (VariableDefinition variable in incomingVariables.Where(static item => item.Scope == VariableScope.Runtime))
 		{
+			// Preserve secret status across the merge so a script-assigned value that lost its flag
+			// cannot downgrade an existing secret runtime variable into plaintext on persistence.
+			bool resolvedIsSecret = variable.IsSecret
+				|| (merged.TryGetValue(variable.Key, out VariableDefinition? existing) && existing.IsSecret);
+
 			merged[variable.Key] = variable with
 			{
 				Scope = VariableScope.Runtime,
+				IsSecret = resolvedIsSecret,
 			};
 		}
 
