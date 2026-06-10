@@ -295,7 +295,12 @@ public sealed class ScriptRequestApi
             builder.AppendLine();
             if (body.Mode is RequestBodyMode.FormUrlEncoded or RequestBodyMode.MultipartFormData)
             {
-                builder.AppendLine(string.Join("&", body.FormValues.Where(static item => item.IsEnabled).Select(static item => $"{item.Key}={item.Value}")));
+                // Form-urlencoded previews mirror the percent-encoding FormUrlEncodedContent applies
+                // on send; multipart previews stay a readable field listing.
+                bool encode = body.Mode == RequestBodyMode.FormUrlEncoded;
+                builder.AppendLine(string.Join("&", body.FormValues.Where(static item => item.IsEnabled).Select(item => encode
+                    ? $"{System.Net.WebUtility.UrlEncode(item.Key)}={System.Net.WebUtility.UrlEncode(item.Value)}"
+                    : $"{item.Key}={item.Value}")));
             }
             else
             {

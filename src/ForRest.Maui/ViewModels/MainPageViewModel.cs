@@ -1665,6 +1665,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 
 		_isShuttingDown = true;
+		_themeService.ThemeChanged -= OnThemeChanged;
 		CancelPendingRequestMetadataRefresh();
 		CancelPendingRequestAutosave();
 		CancelPendingSettingsAutosave();
