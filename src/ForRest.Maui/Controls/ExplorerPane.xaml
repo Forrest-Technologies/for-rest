@@ -85,7 +85,8 @@
                                                     Style="{StaticResource ExplorerGroupAddButtonStyle}"
                                                     Clicked="OnAddRequestClicked"
                                                     IsVisible="{Binding SupportsRequestActions}"
-                                                    SemanticProperties.Description="Add request or script file" />
+                                                    SemanticProperties.Description="Add request or script file"
+                                                    ToolTipProperties.Text="Add a request or script file to this workspace" />
                                         </Grid>
                                         <VerticalStackLayout Spacing="0"
                                                              BindableLayout.ItemsSource="{Binding Items}">
@@ -111,7 +112,8 @@
                                                                     Style="{StaticResource ExplorerRowActionStyle}"
                                                                     Clicked="OnItemActionsClicked"
                                                                     CommandParameter="{Binding .}"
-                                                                    SemanticProperties.Description="Row actions" />
+                                                                    SemanticProperties.Description="Row actions"
+                                                                    ToolTipProperties.Text="Rename, duplicate, or delete this item" />
                                                         </Grid>
                                                         <Border.Triggers>
                                                             <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
@@ -195,12 +197,14 @@
                                         Style="{StaticResource ExplorerRowActionStyle}"
                                         Clicked="OnMoveWorkspaceLeftClicked"
                                         IsEnabled="{Binding CanMoveWorkspaceLeft}"
-                                        SemanticProperties.Description="Move selected workspace up" />
+                                        SemanticProperties.Description="Move selected workspace up"
+                                        ToolTipProperties.Text="Move the selected workspace up" />
                                 <Button Text="&#x2304;"
                                         Style="{StaticResource ExplorerRowActionStyle}"
                                         Clicked="OnMoveWorkspaceRightClicked"
                                         IsEnabled="{Binding CanMoveWorkspaceRight}"
-                                        SemanticProperties.Description="Move selected workspace down" />
+                                        SemanticProperties.Description="Move selected workspace down"
+                                        ToolTipProperties.Text="Move the selected workspace down" />
                             </HorizontalStackLayout>
                         </Grid>
 
@@ -234,7 +238,8 @@
                                                         Style="{StaticResource ExplorerRowActionStyle}"
                                                         Clicked="OnWorkspaceActionsClicked"
                                                         CommandParameter="{Binding .}"
-                                                        SemanticProperties.Description="Workspace actions" />
+                                                        SemanticProperties.Description="Workspace actions"
+                                                        ToolTipProperties.Text="Rename or delete this workspace" />
                                             </Grid>
                                             <Border.Triggers>
                                                 <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
@@ -253,7 +258,8 @@
                                 Margin="10,4,10,12"
                                 Style="{StaticResource SubtleToolbarButtonStyle}"
                                 Clicked="OnAddWorkspaceClicked"
-                                SemanticProperties.Description="Add workspace" />
+                                SemanticProperties.Description="Add workspace"
+                                ToolTipProperties.Text="Add a new workspace" />
                     </Grid>
                 </Border>
             </Grid>

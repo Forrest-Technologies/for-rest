@@ -487,7 +487,8 @@ public sealed class ForRestMcpHost(
             Tests: [.. execution.Tests.Select(MapTest)],
             Logs: [.. execution.ConsoleEntries.Select(MapLog)],
             Stash: MapStash(execution.Stash),
-            ErrorMessage: primaryRun?.ErrorMessage);
+            ErrorMessage: primaryRun?.ErrorMessage,
+            SecretValues: CollectSecretValues(execution.RuntimeVariables));
     }
 
     #endregion
@@ -523,7 +524,23 @@ public sealed class ForRestMcpHost(
             Tests: [.. run.Tests.Select(MapTest)],
             Logs: [.. run.ConsoleEntries.Select(MapLog)],
             Stash: MapStash(run.Stash),
-            RawRequest: run.RawRequest);
+            RawRequest: run.RawRequest,
+            SecretValues: CollectSecretValues(run.RuntimeVariables));
+    }
+
+    /// <summary>
+    /// The secret values a run is known to have handled, so the MCP tools can scrub them from
+    /// outgoing payloads (a script may have logged one, or a server may echo one back).
+    /// </summary>
+    private static IReadOnlyList<string> CollectSecretValues(IEnumerable<VariableDefinition> variables)
+    {
+        return
+        [
+            .. variables
+                .Where(static variable => variable.IsSecret && !string.IsNullOrWhiteSpace(variable.Value))
+                .Select(static variable => variable.Value)
+                .Distinct(StringComparer.Ordinal),
+        ];
     }
 
     #endregion
@@ -850,7 +867,9 @@ public sealed class ForRestMcpHost(
             TargetUri: run.TargetUri,
             Status: run.Response?.StatusCode,
             DurationMilliseconds: run.Response?.DurationMilliseconds,
-            ErrorMessage: run.ErrorMessage);
+            // Exception text can quote a secret (e.g. a failed auth header value); summaries go
+            // straight to external agents via list_runs, so scrub here rather than in the tools.
+            ErrorMessage: McpSecretValueScrubber.Scrub(run.ErrorMessage, CollectSecretValues(run.RuntimeVariables)));
     }
 
     private static ForRestMcpStashView? MapStash(StashTable? stash)

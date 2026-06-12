@@ -55,17 +55,38 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private async void OnEditorSendRequested(object? sender, EventArgs e)
 	{
-		await SendActiveDocumentAsync();
+		try
+		{
+			await SendActiveDocumentAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Send", exception);
+		}
 	}
 
 	private async void OnEditorUndoRequested(object? sender, EventArgs e)
 	{
-		await UndoActiveDocumentAsync();
+		try
+		{
+			await UndoActiveDocumentAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Undo", exception);
+		}
 	}
 
 	private async void OnEditorRedoRequested(object? sender, EventArgs e)
 	{
-		await RedoActiveDocumentAsync();
+		try
+		{
+			await RedoActiveDocumentAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Redo", exception);
+		}
 	}
 
 	private void OnEditorCursorPositionChanged(object? sender, EditorCursorPositionChangedEventArgs e)
@@ -82,27 +103,70 @@ public partial class WorkbenchCenterPane : ContentView
 			return;
 		}
 
-		await SendActiveDocumentAsync();
+		try
+		{
+			await SendActiveDocumentAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Send", exception);
+		}
 	}
 
 	private async void OnCopyClicked(object? sender, EventArgs e)
 	{
-		await ViewModel.CopyActiveEditorAsync();
+		// Clipboard access can fail outright (e.g. the clipboard is held by another app);
+		// an unguarded async void handler would crash the process instead of reporting it.
+		try
+		{
+			await ViewModel.CopyActiveEditorAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Copy", exception);
+		}
 	}
 
 	private async void OnPasteClicked(object? sender, EventArgs e)
 	{
-		await PasteActiveDocumentAsync();
+		try
+		{
+			await PasteActiveDocumentAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Paste", exception);
+		}
 	}
 
 	private async void OnUndoClicked(object? sender, EventArgs e)
 	{
-		await UndoActiveDocumentAsync();
+		try
+		{
+			await UndoActiveDocumentAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Undo", exception);
+		}
 	}
 
 	private async void OnRedoClicked(object? sender, EventArgs e)
 	{
-		await RedoActiveDocumentAsync();
+		try
+		{
+			await RedoActiveDocumentAsync();
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Redo", exception);
+		}
+	}
+
+	private void ReportActionFailure(string action, Exception exception)
+	{
+		AppLaunchGuard.RecordException($"{action} failed in the center pane.", exception);
+		ViewModel.ExecutionStatus = $"{action} failed: {exception.Message}";
 	}
 
 	private void OnToggleLanguageHelpClicked(object? sender, EventArgs e)
@@ -120,11 +184,18 @@ public partial class WorkbenchCenterPane : ContentView
 
 	private async void OnCopyLanguageHelpExampleClicked(object? sender, EventArgs e)
 	{
-		await ViewModel.CopySelectedLanguageHelpExampleAsync();
-
-		if (sender is Button button && ViewModel.CanCopyLanguageHelpExample)
+		try
 		{
-			await ShowCopiedStateAsync(button);
+			await ViewModel.CopySelectedLanguageHelpExampleAsync();
+
+			if (sender is Button button && ViewModel.CanCopyLanguageHelpExample)
+			{
+				await ShowCopiedStateAsync(button);
+			}
+		}
+		catch (Exception exception)
+		{
+			ReportActionFailure("Copy", exception);
 		}
 	}
 

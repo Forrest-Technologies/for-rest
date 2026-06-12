@@ -4276,7 +4276,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		SelectedMethod = compilation.Payload.Request.Method.ToString().ToUpperInvariant();
 		RequestTarget = compilation.Payload.Request.UrlTemplate;
 		RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
-		ExecutionStatus = "Request document ready";
+		ExecutionStatus = "Request document ready.";
 		UpdateCurrentDocumentMetadata();
 	}
 
