@@ -98,6 +98,49 @@ public sealed class RequestExecutionServiceTests
     }
 
     [TestMethod]
+    public async Task Execute_reports_invalid_content_type_as_failed_run_instead_of_throwing()
+    {
+        var workspaceId = Guid.NewGuid();
+        var requestExecutionService = new RequestExecutionService(
+            new RequestCompiler(new VariableResolver()),
+            new ResponseExtractionService(),
+            new RecordingExecutionHistoryRepository(),
+            new RepeatRunnerService(),
+            new NoOpScriptEngine(),
+            NullLogger<RequestExecutionService>.Instance);
+
+        var request = new RequestDefinition
+        {
+            Id = Guid.NewGuid(),
+            WorkspaceId = workspaceId,
+            Name = "Bad Content Type",
+            Method = HttpMethodKind.Post,
+            UrlTemplate = "http://127.0.0.1:1/never-sent",
+            Body = new()
+            {
+                Mode = RequestBodyMode.Json,
+                ContentType = "not a==valid type",
+                RawContent = "{}",
+            },
+            SaveResponseToHistory = false,
+        };
+
+        var workspace = new WorkspaceSnapshot
+        {
+            Workspace = new()
+            {
+                Id = workspaceId,
+                Name = "Invalid Content Type Workspace",
+            },
+        };
+
+        var result = await requestExecutionService.Execute(new(), workspace, request, null);
+
+        Assert.AreEqual(ExecutionState.Failed, result.State);
+        StringAssert.Contains(result.Runs.Single().ErrorMessage, "not a valid media type");
+    }
+
+    [TestMethod]
     public async Task Execute_captures_binary_response_as_base64_with_a_placeholder_body()
     {
         var workspaceId = Guid.NewGuid();

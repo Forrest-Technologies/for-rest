@@ -421,6 +421,24 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    public async Task Get_run_redacts_credential_headers_in_raw_request()
+    {
+        ForRestMcpRunDetail run = SampleRun("body") with
+        {
+            RawRequest = "POST https://x.test/v1\nAuthorization: Bearer abc123\nX-Api-Key: key-456\nAccept: application/json",
+        };
+        FakeHost host = new() { Run = run };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.get_run("ws", "run-1");
+
+        StringAssert.Contains(json, "Authorization: ***");
+        StringAssert.Contains(json, "Accept: application/json");
+        Assert.IsFalse(json.Contains("abc123", System.StringComparison.Ordinal));
+        Assert.IsFalse(json.Contains("key-456", System.StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task Get_run_reports_missing_run()
     {
         ForRestMcpTools tools = CreateTools(new FakeHost());

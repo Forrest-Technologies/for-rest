@@ -594,7 +594,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(async host => Serialize((await host.ListRuns(workspace_id, limit, CancellationToken.None)).Select(MapRunSummary)));
     }
 
-    [Description("Returns the full detail of a single execution run: response (status, headers, cookies, body), all responses for multi-send flows, tests, debug logs, stash, and the raw request.")]
+    [Description("Returns the full detail of a single execution run: response (status, headers, cookies, body), all responses for multi-send flows, tests, debug logs, stash, and the raw request (credential-bearing header values are redacted).")]
     public Task<string> get_run(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Run id (GUID) from list_runs.")] string run_id)
@@ -615,7 +615,7 @@ public sealed class ForRestMcpTools
                 tests = run.Tests.Select(MapTest),
                 logs = run.Logs.Select(MapLog),
                 stash = MapStash(run.Stash),
-                rawRequest = run.RawRequest,
+                rawRequest = McpRawRequestRedactor.Redact(run.RawRequest),
             });
         });
     }

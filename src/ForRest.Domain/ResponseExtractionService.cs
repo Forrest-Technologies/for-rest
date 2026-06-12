@@ -7,6 +7,10 @@ public sealed class ResponseExtractionService
 {
     #region Private Fields
 
+    // Extraction patterns are user-authored and run against arbitrary response bodies; a
+    // catastrophic-backtracking pattern must time out instead of hanging the run.
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromSeconds(2);
+
     private readonly JsonNodeSelector jsonNodeSelector = new();
 
     #endregion
@@ -88,7 +92,7 @@ public sealed class ResponseExtractionService
 
         try
         {
-            var match = Regex.Match(input, pattern, RegexOptions.CultureInvariant);
+            var match = Regex.Match(input, pattern, RegexOptions.CultureInvariant, RegexMatchTimeout);
             if (!match.Success || group < 0 || group >= match.Groups.Count)
             {
                 return null;
@@ -97,6 +101,10 @@ public sealed class ResponseExtractionService
             return match.Groups[group].Value;
         }
         catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (RegexMatchTimeoutException)
         {
             return null;
         }

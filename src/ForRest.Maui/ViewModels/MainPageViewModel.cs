@@ -3585,8 +3585,11 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		{
 			await _requestWorkbenchStateStore.SaveAsync(BuildWorkbenchState());
 		}
-		catch
+		catch (Exception exception)
 		{
+			// Background persistence must never interrupt the user, but a silent failure would
+			// mean the workbench quietly stops saving — leave a diagnostic trail.
+			AppLaunchGuard.RecordException("Workbench state persistence failed.", exception);
 		}
 	}
 
