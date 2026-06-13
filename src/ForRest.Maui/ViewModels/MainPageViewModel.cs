@@ -66,6 +66,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private readonly IAppActivationService _appActivationService;
 	private readonly IWorkbenchAiSettingsProvider _aiSettingsProvider;
 	private readonly IAiInlineConversationService _aiInlineConversationService;
+	private readonly IAiWorkspaceConversationService _aiWorkspaceConversationService;
 	private readonly Dictionary<Guid, RequestWorkbenchWorkspaceState> _workspaceStates = [];
 	private readonly Dictionary<string, DocumentTextHistory> _documentTextHistories = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly Guid HttpBinWorkspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -195,7 +196,8 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		ForRestScriptDocumentTextService documentTextService,
 		IAppActivationService appActivationService,
 		IWorkbenchAiSettingsProvider aiSettingsProvider,
-		IAiInlineConversationService aiInlineConversationService)
+		IAiInlineConversationService aiInlineConversationService,
+		IAiWorkspaceConversationService aiWorkspaceConversationService)
 	{
 		_themeService = themeService;
 		_settingsTomlDocumentService = settingsTomlDocumentService;
@@ -207,6 +209,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		_appActivationService = appActivationService;
 		_aiSettingsProvider = aiSettingsProvider;
 		_aiInlineConversationService = aiInlineConversationService;
+		_aiWorkspaceConversationService = aiWorkspaceConversationService;
 		_languageHelpSourceEntries =
 		[
 			.. ForRestLanguageCatalog.GetEntries().Select(
@@ -1711,6 +1714,14 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 
 		AiSettings aiSettings = _aiSettingsProvider.GetCurrentSettings();
+		if (IsWorkspaceAssistantActive)
+		{
+			// The pinned assistant document is a conversation surface, not a request.
+			// Route its send to the workspace-scoped assistant instead of executing it.
+			await TryHandleWorkspaceAiAsync(aiSettings);
+			return;
+		}
+
 		if (await TryHandleInlineAiAsync(aiSettings))
 		{
 			return;
@@ -4459,6 +4470,268 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			IsSending = false;
 		}
 	}
+
+	#region Workspace assistant
+
+	internal const string WorkspaceAssistantLocation = "workspace://assistant";
+	internal const string WorkspaceAssistantTitle = "✦ Workspace Assistant";
+
+	private static bool IsWorkspaceAssistantLocation(string? location)
+	{
+		return string.Equals(location, WorkspaceAssistantLocation, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private bool IsWorkspaceAssistantActive => IsWorkspaceAssistantLocation(RequestLocation);
+
+	private async Task TryHandleWorkspaceAiAsync(AiSettings aiSettings)
+	{
+		string assistantLocation = RequestLocation;
+		string workspaceId = _selectedWorkspaceId.ToString();
+		string originalSource = RequestEditorText;
+		AiWorkspaceConversationRequest request = new(
+			WorkspaceId: workspaceId,
+			WorkspaceName: SelectedWorkspace,
+			Language: ActiveEditorLanguage,
+			SourceText: originalSource,
+			CursorLineNumber: _activeEditorLineNumber,
+			Settings: aiSettings,
+			WorkspaceHost: new WorkspaceAssistantHost(this, workspaceId));
+
+		CancellationTokenSource? aiRequestTimeoutSource = null;
+		IsSending = true;
+		ExecutionStatus = "Workspace assistant working...";
+		try
+		{
+			int aiTimeoutSeconds = Math.Max(1, aiSettings.Conversation.ExecutionTimeoutSeconds);
+			aiRequestTimeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(aiTimeoutSeconds));
+			_activeActionSource = aiRequestTimeoutSource;
+			AiWorkspaceConversationResult result = await _aiWorkspaceConversationService.TryHandleAsync(request, aiRequestTimeoutSource.Token);
+			if (!result.Handled)
+			{
+				ExecutionStatus = "Type a request after ## and send to ask the workspace assistant.";
+				return;
+			}
+
+			// A tool may have created or opened another script during the turn; return focus
+			// to the assistant document before rendering the reply into its transcript.
+			McpSetActiveDocument(workspaceId, assistantLocation);
+			ApplyAiConversationText(result.UpdatedText, historyBaselineText: originalSource);
+			await PersistCurrentRequestAsync();
+			ExecutionStatus = result.StatusText;
+			DebugOutputText = result.DebugText;
+			WriteInlineAiDebugTrace(DebugOutputText);
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("assistant", result.StatusText, DateTime.Now.ToString("T"), result.Succeeded ? _successColor : _warningColor));
+			OnPropertyChanged(nameof(CanCopyTrace));
+			if (!result.Succeeded)
+			{
+				FocusRightPaneTab("debug");
+				RevealInspectorOnCompactLayout();
+			}
+		}
+		catch (OperationCanceledException) when (aiRequestTimeoutSource?.IsCancellationRequested == true)
+		{
+			ExecutionStatus = "Workspace assistant timed out.";
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("assistant", "Workspace assistant timed out.", DateTime.Now.ToString("T"), _dangerColor));
+			OnPropertyChanged(nameof(CanCopyTrace));
+		}
+		catch (Exception exception)
+		{
+			ExecutionStatus = "Workspace assistant failed";
+			DebugOutputText = exception.ToString();
+			WriteInlineAiDebugTrace(DebugOutputText);
+			TraceEntries.Clear();
+			TraceEntries.Add(new TraceEntryViewModel("assistant", exception.Message, DateTime.Now.ToString("T"), _dangerColor));
+			OnPropertyChanged(nameof(CanCopyTrace));
+			FocusRightPaneTab("debug");
+			RevealInspectorOnCompactLayout();
+		}
+		finally
+		{
+			if (ReferenceEquals(_activeActionSource, aiRequestTimeoutSource))
+			{
+				_activeActionSource = null;
+			}
+
+			aiRequestTimeoutSource?.Dispose();
+			IsSending = false;
+		}
+	}
+
+	private AiWorkspaceContext? BuildWorkspaceAssistantContext(string workspaceId)
+	{
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return null;
+		}
+
+		List<AiWorkspaceScriptSummary> scripts =
+		[
+			.. workspace.Documents
+				.Where(static document => !IsWorkspaceAssistantLocation(document.Location))
+				.Select(static document => new AiWorkspaceScriptSummary(
+					document.Location,
+					document.Title,
+					document.Method,
+					document.Summary))
+		];
+
+		return new AiWorkspaceContext(workspace.Id.ToString(), workspace.Name, scripts);
+	}
+
+	private AiWorkspaceScriptDocument? ReadWorkspaceAssistantScript(string workspaceId, string scriptId)
+	{
+		if (!McpTryGetWorkspace(workspaceId, out RequestWorkbenchWorkspaceState workspace))
+		{
+			return null;
+		}
+
+		RequestWorkbenchDocumentState? document = McpFindDocument(workspace, scriptId);
+		if (document is null || IsWorkspaceAssistantLocation(document.Location))
+		{
+			return null;
+		}
+
+		return new AiWorkspaceScriptDocument(
+			document.Location,
+			document.Title,
+			"forrest",
+			BuildConversationFreeRequestSource(document.RequestSource),
+			[]);
+	}
+
+	private AiActiveDocumentUpdateResult CreateWorkspaceAssistantScript(string workspaceId, string name, string sourceText)
+	{
+		McpWorkbenchResult result = McpCreateScript(workspaceId, name, sourceText);
+		return result.Succeeded
+			? AiActiveDocumentUpdateResult.Success(result.Id ?? string.Empty)
+			: AiActiveDocumentUpdateResult.Failure(result.Message ?? "Failed to create the workspace script.");
+	}
+
+	private AiActiveDocumentUpdateResult UpdateWorkspaceAssistantScript(string workspaceId, string scriptId, string sourceText)
+	{
+		if (IsWorkspaceAssistantLocation(scriptId))
+		{
+			return AiActiveDocumentUpdateResult.Failure("The workspace assistant transcript cannot be edited as a request script.");
+		}
+
+		McpWorkbenchResult result = McpUpdateScript(workspaceId, scriptId, sourceText);
+		return result.Succeeded
+			? AiActiveDocumentUpdateResult.Success(result.Id ?? string.Empty)
+			: AiActiveDocumentUpdateResult.Failure(result.Message ?? "Failed to update the workspace script.");
+	}
+
+	/// <summary>
+	/// Opens (creating it on first use) the pinned workspace-assistant conversation document
+	/// for the active workspace and brings it into focus. This is the workspace-level prompt
+	/// entry point shared by desktop and mobile.
+	/// </summary>
+	public void OpenWorkspaceAssistant()
+	{
+		if (!_isInitialized)
+		{
+			return;
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return;
+		}
+
+		RequestWorkbenchWorkspaceState ensured = EnsureWorkspaceAssistantDocument(workspace) with
+		{
+			SelectedDocumentLocation = WorkspaceAssistantLocation,
+		};
+		_workspaceStates[ensured.Id] = ensured;
+		ApplyWorkspaceSelection(ensured.Id);
+		_ = PersistWorkbenchStateInBackground();
+	}
+
+	private static RequestWorkbenchWorkspaceState EnsureWorkspaceAssistantDocument(RequestWorkbenchWorkspaceState workspace)
+	{
+		if (workspace.Documents.Any(static document => IsWorkspaceAssistantLocation(document.Location)))
+		{
+			return workspace;
+		}
+
+		// Pin the assistant at the top of the workspace so it reads as a dedicated surface
+		// rather than just another request. It deliberately keeps the existing selected
+		// document so adding the pin never steals focus on load.
+		return workspace with
+		{
+			Documents = [BuildWorkspaceAssistantDocument(), .. workspace.Documents],
+		};
+	}
+
+	private static RequestWorkbenchDocumentState BuildWorkspaceAssistantDocument()
+	{
+		return new()
+		{
+			Title = WorkspaceAssistantTitle,
+			Method = "AI",
+			Summary = "Ask across this workspace",
+			Location = WorkspaceAssistantLocation,
+			RequestSource = BuildWorkspaceAssistantSeedText(),
+			PreRequestScript = string.Empty,
+		};
+	}
+
+	private static string BuildWorkspaceAssistantSeedText()
+	{
+		return string.Join(
+			"\n",
+			[
+				"# Workspace Assistant",
+				"# Ask me to work across this whole workspace - scaffold requests, refactor",
+				"# existing ones, or wire up test flows. I can read, create, and update any",
+				"# request script here, not just the file in focus.",
+				"#",
+				"# Type your request after the ## below and press Send. For example:",
+				"#   ## scaffold full CRUD tests for the users API and stash the ids",
+				"",
+				"## ",
+				"",
+			]);
+	}
+
+	private sealed class WorkspaceAssistantHost(MainPageViewModel owner, string workspaceId) : IAiWorkspaceHost
+	{
+		private readonly MainPageViewModel _owner = owner;
+		private readonly string _workspaceId = workspaceId;
+
+		public AiWorkspaceContext? GetWorkspaceContext()
+		{
+			AiWorkspaceContext? context = null;
+			InvokeOnViewModelThreadAsync(() => context = _owner.BuildWorkspaceAssistantContext(_workspaceId)).GetAwaiter().GetResult();
+			return context;
+		}
+
+		public AiWorkspaceScriptDocument? ReadScript(string scriptId)
+		{
+			AiWorkspaceScriptDocument? document = null;
+			InvokeOnViewModelThreadAsync(() => document = _owner.ReadWorkspaceAssistantScript(_workspaceId, scriptId)).GetAwaiter().GetResult();
+			return document;
+		}
+
+		public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText)
+		{
+			AiActiveDocumentUpdateResult result = AiActiveDocumentUpdateResult.Failure("Workbench is not ready yet.");
+			InvokeOnViewModelThreadAsync(() => result = _owner.CreateWorkspaceAssistantScript(_workspaceId, name, sourceText)).GetAwaiter().GetResult();
+			return result;
+		}
+
+		public AiActiveDocumentUpdateResult UpdateScript(string scriptId, string sourceText)
+		{
+			AiActiveDocumentUpdateResult result = AiActiveDocumentUpdateResult.Failure("Workbench is not ready yet.");
+			InvokeOnViewModelThreadAsync(() => result = _owner.UpdateWorkspaceAssistantScript(_workspaceId, scriptId, sourceText)).GetAwaiter().GetResult();
+			return result;
+		}
+	}
+
+	#endregion
 
 	private static bool CanStreamInlineAiResponse(
 		AiSettings settings,

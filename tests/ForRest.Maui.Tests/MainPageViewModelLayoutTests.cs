@@ -2229,7 +2229,8 @@ public sealed class MainPageViewModelLayoutTests
 				new ForRestScriptDocumentTextService(),
 				appActivationService ?? new FakeAppActivationService(),
 				aiSettingsProvider,
-				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)));
+				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)),
+				new FakeAiWorkspaceConversationService());
 		}
 
 		public void Dispose()
@@ -2447,6 +2448,14 @@ public sealed class MainPageViewModelLayoutTests
 				? request.SourceText
 				: _result.UpdatedText;
 			return Task.FromResult(_result with { UpdatedText = updatedText });
+		}
+	}
+
+	private sealed class FakeAiWorkspaceConversationService : IAiWorkspaceConversationService
+	{
+		public Task<AiWorkspaceConversationResult> TryHandleAsync(AiWorkspaceConversationRequest request, CancellationToken cancellationToken = default)
+		{
+			return Task.FromResult(AiWorkspaceConversationResult.NotHandled(request.SourceText));
 		}
 	}
 

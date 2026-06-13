@@ -90,6 +90,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IAiRuntimeFactory, AgentFrameworkAiRuntimeFactory>();
 		builder.Services.AddSingleton<IAiTurnExecutor, AgentFrameworkAiTurnExecutor>();
 		builder.Services.AddSingleton<IAiInlineConversationService, AiInlineConversationService>();
+		builder.Services.AddSingleton<IAiWorkspaceConversationService, AiWorkspaceConversationService>();
 		builder.Services.AddSingleton<MainPageViewModel>();
 		builder.Services.AddTransient<MainPage>();
 		builder.Services.AddTransient<AndroidMainPage>();

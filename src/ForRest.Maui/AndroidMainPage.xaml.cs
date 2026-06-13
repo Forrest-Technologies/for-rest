@@ -104,6 +104,11 @@ public partial class AndroidMainPage : ContentPage
 		ViewModel?.DismissStatusBanner();
 	}
 
+	private void OnOpenWorkspaceAssistantClicked(object? sender, EventArgs e)
+	{
+		ViewModel?.OpenWorkspaceAssistant();
+	}
+
 	private async void OnCopyRequestClicked(object? sender, EventArgs e)
 	{
 		if (ViewModel is null)

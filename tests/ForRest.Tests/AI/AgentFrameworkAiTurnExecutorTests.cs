@@ -263,7 +263,8 @@ public sealed class AgentFrameworkAiTurnExecutorTests
             AiSettings settings,
             string objective,
             IAiActiveDocumentHost? activeDocumentHost = null,
-            string? prompt = null)
+            string? prompt = null,
+            IAiWorkspaceHost? workspaceHost = null)
         {
             return new(new(string.Empty, [], []), [], agent, new AiDebugTraceBuffer());
         }

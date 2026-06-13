@@ -35,6 +35,11 @@ public partial class ExplorerPane : ContentView
 		ViewModel.ToggleLeftPane();
 	}
 
+	private void OnOpenWorkspaceAssistantClicked(object? sender, EventArgs e)
+	{
+		ViewModel.OpenWorkspaceAssistant();
+	}
+
 	private void OnTabClicked(object? sender, EventArgs e)
 	{
 		if (sender is Button { CommandParameter: PaneTabViewModel tab })

@@ -142,7 +142,8 @@ public sealed class AiTurnExecutorTests
             AiSettings settings,
             string objective,
             IAiActiveDocumentHost? activeDocumentHost = null,
-            string? prompt = null)
+            string? prompt = null,
+            IAiWorkspaceHost? workspaceHost = null)
         {
             LastPrompt = prompt;
             return new(new AiPromptManifest("test", [], []), [], agent, new AiDebugTraceBuffer());

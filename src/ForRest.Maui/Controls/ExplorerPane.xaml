@@ -10,7 +10,7 @@
             <Grid RowDefinitions="Auto,Auto,Auto,*">
                 <!-- Workspace switcher -->
                 <Grid Padding="10,8,10,6"
-                      ColumnDefinitions="*,Auto"
+                      ColumnDefinitions="*,Auto,Auto"
                       ColumnSpacing="8">
                     <Border Style="{StaticResource WorkspaceSwitcherStyle}">
                         <Border.GestureRecognizers>
@@ -29,6 +29,11 @@
                         </Grid>
                     </Border>
                     <Button Grid.Column="1"
+                            Text="&#x2726; Ask"
+                            Style="{StaticResource SubtleToolbarButtonStyle}"
+                            Clicked="OnOpenWorkspaceAssistantClicked"
+                            SemanticProperties.Description="Open the workspace assistant" />
+                    <Button Grid.Column="2"
                             Text="Hide"
                             Style="{StaticResource SubtleToolbarButtonStyle}"
                             Clicked="OnHideClicked" />
