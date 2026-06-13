@@ -28,7 +28,8 @@ public interface IAiRuntimeFactory
         AiSettings settings,
         string objective,
         IAiActiveDocumentHost? activeDocumentHost = null,
-        string? prompt = null);
+        string? prompt = null,
+        IAiWorkspaceHost? workspaceHost = null);
 }
 
 public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
@@ -46,6 +47,8 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
     private readonly IAiToolCatalog _toolCatalog;
     private readonly IAiActiveDocumentToolCatalog _activeDocumentToolCatalog;
     private readonly IAiActiveDocumentToolService _activeDocumentToolService;
+    private readonly IAiWorkspaceToolCatalog _workspaceToolCatalog;
+    private readonly IAiWorkspaceToolService _workspaceToolService;
     private readonly IAiPromptManifestBuilder _promptManifestBuilder;
     private readonly IAiKnowledgeCatalog _knowledgeCatalog;
     private readonly IAiDocumentationSearchService _documentationSearchService;
@@ -63,6 +66,8 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         _toolCatalog = toolCatalog;
         _activeDocumentToolCatalog = new AiActiveDocumentToolCatalog();
         _activeDocumentToolService = new AiActiveDocumentToolService(documentPatchService);
+        _workspaceToolCatalog = new AiWorkspaceToolCatalog();
+        _workspaceToolService = new AiWorkspaceToolService();
         _promptManifestBuilder = promptManifestBuilder;
         _knowledgeCatalog = knowledgeCatalog;
         _documentationSearchService = documentationSearchService;
@@ -73,7 +78,8 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         AiSettings settings,
         string objective,
         IAiActiveDocumentHost? activeDocumentHost = null,
-        string? prompt = null)
+        string? prompt = null,
+        IAiWorkspaceHost? workspaceHost = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -82,9 +88,10 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         IReadOnlyList<AiToolDescriptor> tools =
         [
             .. _toolCatalog.GetTools(settings, activeDocumentHost),
-            .. _activeDocumentToolCatalog.GetTools(settings, activeDocumentHost)
+            .. _activeDocumentToolCatalog.GetTools(settings, activeDocumentHost),
+            .. _workspaceToolCatalog.GetTools(settings, workspaceHost)
         ];
-        IReadOnlyList<AiPromptTopic> topics = BuildPromptTopics(settings, objective, prompt, activeDocumentHost, debugTrace);
+        IReadOnlyList<AiPromptTopic> topics = BuildPromptTopics(settings, objective, prompt, activeDocumentHost, workspaceHost, debugTrace);
         AiPromptManifest manifest = _promptManifestBuilder.Build(settings, objective, tools, topics);
         debugTrace.AddSection(
             "Runtime preparation summary",
@@ -108,7 +115,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             return new(manifest, issues, Agent: null, debugTrace);
         }
 
-        AITool[] runtimeTools = BuildRuntimeTools(settings, activeDocumentHost, debugTrace);
+        AITool[] runtimeTools = BuildRuntimeTools(settings, activeDocumentHost, workspaceHost, debugTrace);
         AIAgent agent = settings.Provider.ProviderKind switch
         {
             AiProviderKind.AzureOpenAI => CreateAzureAgent(settings, manifest.SystemPrompt, runtimeTools),
@@ -128,6 +135,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         string objective,
         string? prompt,
         IAiActiveDocumentHost? activeDocumentHost,
+        IAiWorkspaceHost? workspaceHost,
         AiDebugTraceBuffer debugTrace)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -142,6 +150,28 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         if (preflightTopics.Count > 0)
         {
             topics.InsertRange(Math.Min(1, topics.Count), preflightTopics);
+        }
+
+        AiWorkspaceContext? workspaceAssistantContext = workspaceHost?.GetWorkspaceContext();
+        if (workspaceAssistantContext is not null)
+        {
+            string workspaceOverview = string.Join(
+                Environment.NewLine,
+                [
+                    $"Workspace: {workspaceAssistantContext.WorkspaceName} (ID: {workspaceAssistantContext.WorkspaceId})",
+                    $"Scripts in workspace ({workspaceAssistantContext.Scripts.Count}):",
+                    .. workspaceAssistantContext.Scripts.Select(
+                        static script => $"  - [{script.ScriptId}] {script.Name}: {script.Method} {script.UrlTemplate}"),
+                    "Use list_workspace_scripts / read_workspace_script for full source before editing, and create_workspace_script / update_workspace_script to change the workspace.",
+                ]);
+            topics.Insert(
+                0,
+                new(
+                    "Workspace overview",
+                    "Every request script in the active workspace with its id, name, method, and URL. Operate across these scripts instead of asking the user to paste them.",
+                    "workspace-overview",
+                    workspaceOverview));
+            debugTrace.AddSection("Workspace assistant overview", workspaceOverview);
         }
 
         if (activeDocument is null)
@@ -645,7 +675,11 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             : normalized[..maxLength].TrimEnd() + " ...";
     }
 
-    private AITool[] BuildRuntimeTools(AiSettings settings, IAiActiveDocumentHost? activeDocumentHost, AiDebugTraceBuffer debugTrace)
+    private AITool[] BuildRuntimeTools(
+        AiSettings settings,
+        IAiActiveDocumentHost? activeDocumentHost,
+        IAiWorkspaceHost? workspaceHost,
+        AiDebugTraceBuffer debugTrace)
     {
         List<AITool> tools = [];
         if (settings.Tools.EnableDocsSearch)
@@ -663,6 +697,14 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         else if (settings.Tools.EnableDocumentPatch)
         {
             tools.Add(AIFunctionFactory.Create((Func<string, string, string, string>)PatchDocument));
+        }
+
+        if (settings.Tools.EnableDocumentPatch && workspaceHost is not null)
+        {
+            tools.Add(AIFunctionFactory.Create((Func<string>)ListWorkspaceScripts));
+            tools.Add(AIFunctionFactory.Create((Func<string, string>)ReadWorkspaceScript));
+            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)CreateWorkspaceScriptInWorkspace));
+            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)UpdateWorkspaceScript));
         }
 
         return [.. tools];
@@ -812,6 +854,63 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
                     ]),
                 () => _activeDocumentToolService.CreateWorkspaceScript(settings, activeDocumentHost, name, sourceText),
                 maxResultLength: 1600);
+        }
+
+        [Description("List every request script in the current workspace with its id, name, method, and URL template.")]
+        string ListWorkspaceScripts()
+        {
+            return TraceToolCall(
+                "list_workspace_scripts",
+                "(no arguments)",
+                () => _workspaceToolService.ListScripts(settings, workspaceHost),
+                maxResultLength: 2400);
+        }
+
+        [Description("Read the full source and compiler diagnostics for a single workspace script by id.")]
+        string ReadWorkspaceScript(
+            [Description("The id of the workspace script to read, as returned by list_workspace_scripts.")] string scriptId)
+        {
+            return TraceToolCall(
+                "read_workspace_script",
+                $"scriptId: {scriptId}",
+                () => _workspaceToolService.ReadScript(settings, workspaceHost, scriptId),
+                maxResultLength: 3200);
+        }
+
+        [Description("Create a new request script in the current workspace from a name and full ForRest source text.")]
+        string CreateWorkspaceScriptInWorkspace(
+            [Description("The name for the new script.")] string name,
+            [Description("The complete ForRest source text for the new script.")] string sourceText)
+        {
+            return TraceToolCall(
+                "create_workspace_script",
+                string.Join(
+                    Environment.NewLine,
+                    [
+                        $"name: {name}",
+                        "sourceText:",
+                        sourceText,
+                    ]),
+                () => _workspaceToolService.CreateScript(settings, workspaceHost, name, sourceText),
+                maxResultLength: 1600);
+        }
+
+        [Description("Replace the entire source of an existing workspace script identified by id.")]
+        string UpdateWorkspaceScript(
+            [Description("The id of the workspace script to rewrite, as returned by list_workspace_scripts.")] string scriptId,
+            [Description("The complete replacement ForRest source text for the script.")] string updatedSourceText)
+        {
+            return TraceToolCall(
+                "update_workspace_script",
+                string.Join(
+                    Environment.NewLine,
+                    [
+                        $"scriptId: {scriptId}",
+                        "updatedSourceText:",
+                        updatedSourceText,
+                    ]),
+                () => _workspaceToolService.UpdateScript(settings, workspaceHost, scriptId, updatedSourceText),
+                maxResultLength: 3200);
         }
 
         string TraceToolCall(string toolName, string arguments, Func<string> action, int maxResultLength = 1600)

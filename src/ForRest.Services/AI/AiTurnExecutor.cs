@@ -15,7 +15,8 @@ public sealed record AiTurnExecutionRequest(
     string Objective,
     string Prompt,
     AiSettings Settings,
-    IAiActiveDocumentHost? ActiveDocumentHost = null);
+    IAiActiveDocumentHost? ActiveDocumentHost = null,
+    IAiWorkspaceHost? WorkspaceHost = null);
 
 public sealed record AiTurnExecutionResult(
     bool Succeeded,
@@ -57,7 +58,8 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
             request.Settings,
             request.Objective,
             request.ActiveDocumentHost,
-            request.Prompt);
+            request.Prompt,
+            request.WorkspaceHost);
         runtime.DebugTrace.AddSection(
             "Executor request",
             string.Join(
