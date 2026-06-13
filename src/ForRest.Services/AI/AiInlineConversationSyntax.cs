@@ -119,17 +119,33 @@ public static class AiInlineConversationPromptResolver
 
             // Touch/mobile flow: editors like the Android Sora pane do not auto-insert a
             // `## ` continuation on Enter (the way Monaco does), so after typing a prompt
-            // the caret lands on a plain blank line directly beneath it. When the nearest
-            // non-blank line above the caret is an unanswered prompt, treat that prompt as
-            // the actionable target so tapping send routes to the AI instead of executing
-            // the request. Gating on the prompt being unanswered keeps normal sends intact.
-            if (cursorLine.Kind == AiInlineConversationLineKind.Blank)
+            // the caret lands on a plain line beneath it — either a blank line, or a
+            // free-text continuation the user kept typing without the `##` marker. When the
+            // nearest conversation line above the caret is an unanswered prompt, treat that
+            // prompt as the actionable target so tapping send routes to the AI instead of
+            // executing the request. Gating on the prompt being unanswered (and bailing the
+            // moment we hit a response line) keeps normal sends and answered prompts intact.
+            if (cursorLine.Kind is AiInlineConversationLineKind.Blank
+                or AiInlineConversationLineKind.Text
+                or AiInlineConversationLineKind.Comment)
             {
-                AiInlineConversationPrompt? pendingPrompt = ResolvePendingPromptAboveBlankCursor(document, cursorLineNumber);
+                AiInlineConversationPrompt? pendingPrompt = ResolvePendingPromptAboveCursor(document, cursorLineNumber);
                 if (pendingPrompt is not null)
                 {
                     return pendingPrompt;
                 }
+            }
+        }
+        else if (cursorLineNumber > document.Lines.Count && document.Lines.Count > 0)
+        {
+            // A trailing newline is not parsed as its own line, so when the user types a
+            // prompt at the end of the document and the caret rests on the empty final line,
+            // the reported cursor sits one past the parsed line count. Treat it as a caret on
+            // a trailing blank and look for the pending prompt above it.
+            AiInlineConversationPrompt? pendingPrompt = ResolvePendingPromptAboveCursor(document, document.Lines.Count + 1);
+            if (pendingPrompt is not null)
+            {
+                return pendingPrompt;
             }
         }
 
@@ -144,17 +160,22 @@ public static class AiInlineConversationPromptResolver
         return null;
     }
 
-    private static AiInlineConversationPrompt? ResolvePendingPromptAboveBlankCursor(
+    private static AiInlineConversationPrompt? ResolvePendingPromptAboveCursor(
         AiInlineConversationDocument document,
         int cursorLineNumber)
     {
-        // Walk up from the line directly above the caret, skipping blank lines, to the
-        // nearest non-blank line. Only resolve when it is a prompt line whose block has no
-        // active response — i.e. a question the user just typed and has not yet submitted.
+        // Walk up from the line directly above the caret toward the nearest conversation
+        // line. Blank, plain-text, and comment lines are skipped: on mobile the user can
+        // type a `## ` prompt and keep going on un-prefixed lines (or press Enter several
+        // times) before tapping send, so those lines all belong to the same pending turn.
+        // Stop the moment we reach a response line — that marks an already-answered
+        // exchange, so the send must run the request rather than re-trigger the AI.
         for (int lineIndex = cursorLineNumber - 2; lineIndex >= 0; lineIndex--)
         {
             AiInlineConversationLine line = document.Lines[lineIndex];
-            if (line.Kind == AiInlineConversationLineKind.Blank)
+            if (line.Kind is AiInlineConversationLineKind.Blank
+                or AiInlineConversationLineKind.Text
+                or AiInlineConversationLineKind.Comment)
             {
                 continue;
             }
