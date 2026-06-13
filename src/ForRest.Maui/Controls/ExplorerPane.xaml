@@ -32,6 +32,7 @@
                             Text="&#x2726; Ask"
                             Style="{StaticResource SubtleToolbarButtonStyle}"
                             Clicked="OnOpenWorkspaceAssistantClicked"
+                            IsVisible="{Binding IsAiEnabled}"
                             SemanticProperties.Description="Open the workspace assistant" />
                     <Button Grid.Column="2"
                             Text="Hide"

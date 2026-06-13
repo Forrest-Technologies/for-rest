@@ -67,6 +67,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private readonly IWorkbenchAiSettingsProvider _aiSettingsProvider;
 	private readonly IAiInlineConversationService _aiInlineConversationService;
 	private readonly IAiWorkspaceConversationService _aiWorkspaceConversationService;
+	private bool _isAiEnabled;
 	private readonly Dictionary<Guid, RequestWorkbenchWorkspaceState> _workspaceStates = [];
 	private readonly Dictionary<string, DocumentTextHistory> _documentTextHistories = new(StringComparer.OrdinalIgnoreCase);
 	private static readonly Guid HttpBinWorkspaceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -1654,10 +1655,12 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			? state.SelectedWorkspaceId
 			: Workspaces.FirstOrDefault()?.Id ?? Guid.Empty;
 
+		_isAiEnabled = ReadAiEnabledSafe(fallback: false);
 		ApplyWorkspaceSelection(selectedWorkspaceId);
 		await ReloadHistoryAsync();
 		await RefreshActivationStatusAsync();
 		_isInitialized = true;
+		OnPropertyChanged(nameof(IsAiEnabled));
 	}
 
 	public async Task PrepareForShutdownAsync()
@@ -1716,9 +1719,14 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		AiSettings aiSettings = _aiSettingsProvider.GetCurrentSettings();
 		if (IsWorkspaceAssistantActive)
 		{
-			// The pinned assistant document is a conversation surface, not a request.
-			// Route its send to the workspace-scoped assistant instead of executing it.
-			await TryHandleWorkspaceAiAsync(aiSettings);
+			// The pinned assistant document is a conversation surface, not a request. Route
+			// its send to the workspace-scoped assistant when AI is enabled; when AI is off
+			// it simply does nothing rather than trying to execute the transcript.
+			if (IsAiEnabled)
+			{
+				await TryHandleWorkspaceAiAsync(aiSettings);
+			}
+
 			return;
 		}
 
@@ -3391,7 +3399,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 
 		OpenDocuments.Clear();
-		foreach (RequestWorkbenchDocumentState document in workspace.Documents)
+		foreach (RequestWorkbenchDocumentState document in GetExplorerVisibleDocuments(workspace))
 		{
 			OpenDocuments.Add(new RequestDocumentViewModel(document.Title, document.Method, document.Summary, document.Location, false, false));
 		}
@@ -3430,36 +3438,37 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	{
 		List<NavigationSectionViewModel> sections = [];
 		bool supportsRequestActionsAssigned = false;
+		List<RequestWorkbenchDocumentState> documents = [.. GetExplorerVisibleDocuments(workspace)];
 
 		AddExplorerSection(
 			sections,
 			"Requests",
 			"Runnable request programs",
-			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "requests")),
+			documents.Where(document => IsExplorerLocationInBucket(document.Location, "requests")),
 			ref supportsRequestActionsAssigned);
 		AddExplorerSection(
 			sections,
 			"Scratch",
 			"Ad hoc probes and experiments",
-			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "scratch")),
+			documents.Where(document => IsExplorerLocationInBucket(document.Location, "scratch")),
 			ref supportsRequestActionsAssigned);
 		AddExplorerSection(
 			sections,
 			"Scripts",
 			"Shared helpers and reusable flows",
-			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "scripts")),
+			documents.Where(document => IsExplorerLocationInBucket(document.Location, "scripts")),
 			ref supportsRequestActionsAssigned);
 		AddExplorerSection(
 			sections,
 			"Browser",
 			"Recorded browser automation flows",
-			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "browser")),
+			documents.Where(document => IsExplorerLocationInBucket(document.Location, "browser")),
 			ref supportsRequestActionsAssigned);
 		AddExplorerSection(
 			sections,
 			"Files",
 			"Other workspace documents",
-			workspace.Documents.Where(document => IsExplorerLocationInBucket(document.Location, "files")),
+			documents.Where(document => IsExplorerLocationInBucket(document.Location, "files")),
 			ref supportsRequestActionsAssigned);
 
 		if (!supportsRequestActionsAssigned)
@@ -4483,6 +4492,72 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	private bool IsWorkspaceAssistantActive => IsWorkspaceAssistantLocation(RequestLocation);
 
+	/// <summary>
+	/// Whether the AI features are switched on in settings. AI is off by default, and every
+	/// workspace-assistant affordance (the explorer entry point button and the pinned
+	/// assistant document) is hidden until the user opts in.
+	/// </summary>
+	public bool IsAiEnabled
+	{
+		get => _isAiEnabled;
+		private set
+		{
+			if (SetProperty(ref _isAiEnabled, value))
+			{
+				OnAiEnabledChanged();
+			}
+		}
+	}
+
+	private void RefreshAiEnabledState()
+	{
+		IsAiEnabled = ReadAiEnabledSafe(_isAiEnabled);
+	}
+
+	private bool ReadAiEnabledSafe(bool fallback)
+	{
+		try
+		{
+			return _aiSettingsProvider.GetCurrentSettings().Enabled;
+		}
+		catch
+		{
+			// If settings cannot be read, keep the last known state rather than flickering
+			// AI affordances on a transient parse failure.
+			return fallback;
+		}
+	}
+
+	private void OnAiEnabledChanged()
+	{
+		if (!_isInitialized)
+		{
+			return;
+		}
+
+		// Showing/hiding the pinned assistant changes the explorer contents. If the assistant
+		// is the active document when AI is switched off, move focus to a real request first
+		// so the user is never stranded on a now-hidden surface.
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (!_isAiEnabled && workspace is not null && IsWorkspaceAssistantLocation(workspace.SelectedDocumentLocation))
+		{
+			string fallbackLocation = workspace.Documents
+				.FirstOrDefault(static document => !IsWorkspaceAssistantLocation(document.Location))?.Location
+				?? string.Empty;
+			RequestWorkbenchWorkspaceState updated = workspace with { SelectedDocumentLocation = fallbackLocation };
+			_workspaceStates[updated.Id] = updated;
+		}
+
+		ApplyWorkspaceSelection(_selectedWorkspaceId);
+	}
+
+	private IEnumerable<RequestWorkbenchDocumentState> GetExplorerVisibleDocuments(RequestWorkbenchWorkspaceState workspace)
+	{
+		return _isAiEnabled
+			? workspace.Documents
+			: workspace.Documents.Where(static document => !IsWorkspaceAssistantLocation(document.Location));
+	}
+
 	private async Task TryHandleWorkspaceAiAsync(AiSettings aiSettings)
 	{
 		string assistantLocation = RequestLocation;
@@ -4629,7 +4704,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	/// </summary>
 	public void OpenWorkspaceAssistant()
 	{
-		if (!_isInitialized)
+		if (!_isInitialized || !IsAiEnabled)
 		{
 			return;
 		}
@@ -5718,6 +5793,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 				return;
 			}
 
+			RefreshAiEnabledState();
 			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
 		}
 
