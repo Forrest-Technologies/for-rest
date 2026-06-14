@@ -28,7 +28,7 @@ public sealed class SqliteExecutionHistoryRepository(SqliteAppDatabase database,
         {
             if (reader.GetString(0) is { Length: > 0 } payload)
             {
-                runs.Add(JsonSerializer.Deserialize<ExecutionRun>(payload, database.JsonOptions) ?? new ExecutionRun());
+                runs.Add(Unprotect(JsonSerializer.Deserialize<ExecutionRun>(payload, database.JsonOptions) ?? new ExecutionRun()));
             }
         }
 
@@ -50,11 +50,72 @@ public sealed class SqliteExecutionHistoryRepository(SqliteAppDatabase database,
         command.Parameters.AddWithValue("$id", run.Id.ToString("D"));
         command.Parameters.AddWithValue("$workspaceId", run.WorkspaceId.ToString("D"));
         command.Parameters.AddWithValue("$startedUtc", run.StartedUtc.ToString("O"));
-        command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(run, database.JsonOptions));
+        command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(Protect(run), database.JsonOptions));
         command.ExecuteNonQuery();
 
         logger.LogInformation("Stored execution run {RunId} for request {RequestId}", run.Id, run.RequestId);
         return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    // Runs carry secret runtime variables (extractions marked secret, acquired OAuth tokens), so
+    // they get the same at-rest protection as workspace state. DPAPI is Windows-only; on other
+    // platforms values pass through unchanged, matching SqliteWorkspaceRepository's reach.
+    private static ExecutionRun Protect(ExecutionRun run)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return run;
+        }
+
+        return run with
+        {
+            RuntimeVariables = [.. run.RuntimeVariables.Select(ProtectVariable)],
+        };
+    }
+
+    private static ExecutionRun Unprotect(ExecutionRun run)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return run;
+        }
+
+        return run with
+        {
+            RuntimeVariables = [.. run.RuntimeVariables.Select(UnprotectVariable)],
+        };
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static VariableDefinition ProtectVariable(VariableDefinition variable)
+    {
+        if (!variable.IsSecret)
+        {
+            return variable;
+        }
+
+        return variable with
+        {
+            Value = SecretProtector.Protect(variable.Value),
+        };
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static VariableDefinition UnprotectVariable(VariableDefinition variable)
+    {
+        if (!variable.IsSecret)
+        {
+            return variable;
+        }
+
+        return variable with
+        {
+            Value = SecretProtector.Unprotect(variable.Value),
+        };
     }
 
     #endregion

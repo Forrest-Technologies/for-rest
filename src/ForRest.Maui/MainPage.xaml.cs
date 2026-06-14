@@ -261,27 +261,36 @@ public partial class MainPage : ContentPage
 
 	private async void OnNativeKeyDown(object sender, KeyRoutedEventArgs e)
 	{
-		bool isControlPressed = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-		bool isShiftPressed = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-		if (e.Key == VirtualKey.F5 || (e.Key == VirtualKey.Enter && isControlPressed))
+		// async void: an exception escaping past the first await would take down the process,
+		// not just the shortcut, so the whole handler stays guarded.
+		try
 		{
-			e.Handled = true;
-			await CenterPane.FlushActiveEditorAsync();
-			await ViewModel.SendAsync();
-			return;
-		}
+			bool isControlPressed = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+			bool isShiftPressed = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+			if (e.Key == VirtualKey.F5 || (e.Key == VirtualKey.Enter && isControlPressed))
+			{
+				e.Handled = true;
+				await CenterPane.FlushActiveEditorAsync();
+				await ViewModel.SendAsync();
+				return;
+			}
 
-		if (isControlPressed && e.Key == VirtualKey.Z && !isShiftPressed)
-		{
-			e.Handled = true;
-			await CenterPane.UndoActiveDocumentAsync();
-			return;
-		}
+			if (isControlPressed && e.Key == VirtualKey.Z && !isShiftPressed)
+			{
+				e.Handled = true;
+				await CenterPane.UndoActiveDocumentAsync();
+				return;
+			}
 
-		if (isControlPressed && (e.Key == VirtualKey.Y || (isShiftPressed && e.Key == VirtualKey.Z)))
+			if (isControlPressed && (e.Key == VirtualKey.Y || (isShiftPressed && e.Key == VirtualKey.Z)))
+			{
+				e.Handled = true;
+				await CenterPane.RedoActiveDocumentAsync();
+			}
+		}
+		catch (Exception exception)
 		{
-			e.Handled = true;
-			await CenterPane.RedoActiveDocumentAsync();
+			AppLaunchGuard.RecordException("Keyboard shortcut handling failed.", exception);
 		}
 	}
 #endif

@@ -421,6 +421,43 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    public async Task Get_run_redacts_credential_headers_in_raw_request()
+    {
+        ForRestMcpRunDetail run = SampleRun("body") with
+        {
+            RawRequest = "POST https://x.test/v1\nAuthorization: Bearer abc123\nX-Api-Key: key-456\nAccept: application/json",
+        };
+        FakeHost host = new() { Run = run };
+        ForRestMcpTools tools = CreateTools(host);
+
+        string json = await tools.get_run("ws", "run-1");
+
+        StringAssert.Contains(json, "Authorization: ***");
+        StringAssert.Contains(json, "Accept: application/json");
+        Assert.IsFalse(json.Contains("abc123", System.StringComparison.Ordinal));
+        Assert.IsFalse(json.Contains("key-456", System.StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Get_run_and_logs_scrub_secret_values_from_output()
+    {
+        ForRestMcpRunDetail run = SampleRun("response with runtime-token-9000 echoed") with
+        {
+            Logs = [new ForRestMcpLogView("Info", "token is runtime-token-9000", System.DateTimeOffset.UtcNow)],
+            Tests = [new ForRestMcpTestView("auth", "Failed", "Expected 'x', received 'runtime-token-9000'.")],
+            SecretValues = ["runtime-token-9000"],
+        };
+        ForRestMcpTools tools = CreateTools(new FakeHost { Run = run });
+
+        string detailJson = await tools.get_run("ws", "run-1");
+        string logsJson = await tools.get_run_logs("ws", "run-1");
+
+        Assert.IsFalse(detailJson.Contains("runtime-token-9000", System.StringComparison.Ordinal));
+        Assert.IsFalse(logsJson.Contains("runtime-token-9000", System.StringComparison.Ordinal));
+        StringAssert.Contains(logsJson, "token is ***");
+    }
+
+    [TestMethod]
     public async Task Get_run_reports_missing_run()
     {
         ForRestMcpTools tools = CreateTools(new FakeHost());

@@ -101,9 +101,20 @@ public static class ForRestScriptDocumentRenderer
         EnsureSeparated(lines);
         foreach (ForRestScriptVariableDeclaration variable in variables)
         {
-            string scope = variable.Scope == ForRestScriptVariableScope.Request ? "request" : "runtime";
-            lines.Add($"{scope} {variable.Key} = {RenderExpression(variable.Expression)}");
+            lines.Add($"{RenderVariableScope(variable.Scope)} {variable.Key} = {RenderExpression(variable.Expression)}");
         }
+    }
+
+    // Rendering must round-trip every scope keyword the parser accepts; collapsing 'secret' to
+    // 'runtime' would silently strip masking and at-rest protection on the next compile.
+    private static string RenderVariableScope(ForRestScriptVariableScope scope)
+    {
+        return scope switch
+        {
+            ForRestScriptVariableScope.Request => "request",
+            ForRestScriptVariableScope.Secret => "secret",
+            _ => "runtime",
+        };
     }
 
     private static void AppendNamedValues(List<string> lines, string keyword, IReadOnlyList<ForRestScriptNamedValue> values)

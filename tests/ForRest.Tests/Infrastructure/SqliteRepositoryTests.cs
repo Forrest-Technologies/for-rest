@@ -106,6 +106,59 @@ public sealed class SqliteRepositoryTests
         Assert.AreEqual(200, loaded.Single().Response?.StatusCode);
     }
 
+    [TestMethod]
+    public async Task Execution_history_repository_protects_secret_runtime_values()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Secret runtime variables round-trip through DPAPI, which is Windows-only —
+            // the same constraint the workspace repository test documents above.
+            Assert.Inconclusive("Execution history secret protection via DPAPI is Windows-only.");
+            return;
+        }
+
+        var workspaceId = Guid.NewGuid();
+        var run = new ExecutionRun
+        {
+            WorkspaceId = workspaceId,
+            RequestId = Guid.NewGuid(),
+            RequestName = "Login",
+            RuntimeVariables =
+            [
+                new()
+                {
+                    Key = "accessToken",
+                    Value = "runtime-token-value",
+                    Scope = VariableScope.Runtime,
+                    IsSecret = true,
+                },
+                new()
+                {
+                    Key = "plainValue",
+                    Value = "visible",
+                    Scope = VariableScope.Runtime,
+                },
+            ],
+        };
+
+        var database = new SqliteAppDatabase(NullLogger<SqliteAppDatabase>.Instance);
+        var repository = new SqliteExecutionHistoryRepository(database, NullLogger<SqliteExecutionHistoryRepository>.Instance);
+
+        await repository.Add(run);
+        var loaded = await repository.Load(workspaceId);
+
+        Assert.AreEqual("runtime-token-value", loaded.Single().RuntimeVariables.Single(static item => item.Key == "accessToken").Value);
+        Assert.AreEqual("visible", loaded.Single().RuntimeVariables.Single(static item => item.Key == "plainValue").Value);
+
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT run_json FROM execution_history;";
+        var payload = command.ExecuteScalar()?.ToString() ?? string.Empty;
+
+        Assert.IsFalse(payload.Contains("runtime-token-value", StringComparison.Ordinal));
+        StringAssert.Contains(payload, "dpapi:");
+    }
+
     #endregion
 
     #region Private Methods

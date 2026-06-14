@@ -39,6 +39,35 @@ public sealed class ForRestScriptDocumentTextServiceTests
     }
 
     [TestMethod]
+    public void Extract_and_rerender_keep_the_secret_scope_keyword()
+    {
+        var service = new ForRestScriptDocumentTextService();
+        var source =
+            """
+            name "Login"
+            method POST
+            url "https://api.example.test/login"
+
+            secret api_token = "super-secret"
+            runtime trace_id = guid()
+            """;
+
+        var sections = service.Extract(source);
+        StringAssert.Contains(
+            sections.Variables,
+            "secret api_token = \"super-secret\"",
+            "the editable variables section must not demote 'secret' declarations to 'runtime'");
+
+        // Any upsert re-renders the whole document; the secret keyword must survive the round trip
+        // or the variable silently loses masking and at-rest protection on the next compile.
+        var renamed = service.UpsertMetaName(source, "Login v2");
+        StringAssert.Contains(renamed, "secret api_token = \"super-secret\"");
+        Assert.IsFalse(
+            renamed.Contains("runtime api_token", System.StringComparison.Ordinal),
+            "renaming the document must not rewrite the secret declaration as a runtime variable");
+    }
+
+    [TestMethod]
     public void Upsert_updates_target_sections_without_removing_other_blocks()
     {
         var service = new ForRestScriptDocumentTextService();
