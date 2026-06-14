@@ -27,6 +27,7 @@
                         Text="✕"
                         Clicked="OnDismissStatusBannerClicked"
                         SemanticProperties.Description="Dismiss the status banner"
+                        ToolTipProperties.Text="Dismiss"
                         Padding="8,2"
                         VerticalOptions="Start"
                         HorizontalOptions="End" />
@@ -54,6 +55,7 @@
                     <Button Text="Explorer"
                             Clicked="OnToggleLeftPaneClicked"
                             SemanticProperties.Description="Show the explorer pane with workspaces, requests, and history"
+                            ToolTipProperties.Text="Show the explorer pane"
                             VerticalOptions="Start"
                             HorizontalOptions="Fill"
                             Style="{StaticResource CollapsedPaneRestoreButtonStyle}" />
@@ -104,6 +106,7 @@
                     <Button Text="Inspect"
                             Clicked="OnToggleRightPaneClicked"
                             SemanticProperties.Description="Show the inspector pane with response, headers, and trace"
+                            ToolTipProperties.Text="Show the inspector pane"
                             VerticalOptions="Start"
                             HorizontalOptions="Fill"
                             Style="{StaticResource CollapsedPaneRestoreButtonStyle}" />
@@ -164,16 +167,19 @@
                         <Button Text="{Binding CompactLeftPaneButtonText}"
                                 Clicked="OnToggleLeftPaneClicked"
                                 SemanticProperties.Description="Show or hide the explorer pane"
+                                ToolTipProperties.Text="Show or hide the explorer pane"
                                 Style="{StaticResource MobileFooterButtonStyle}" />
                         <Button Grid.Column="1"
                                 Text="{Binding CompactCenterPaneButtonText}"
                                 Clicked="OnToggleCenterPaneClicked"
                                 SemanticProperties.Description="Switch the center pane between the code editor and the browser"
+                                ToolTipProperties.Text="Switch between the code editor and the browser"
                                 Style="{StaticResource MobileFooterButtonStyle}" />
                         <Button Grid.Column="2"
                                 Text="{Binding CompactRightPaneButtonText}"
                                 Clicked="OnToggleRightPaneClicked"
                                 SemanticProperties.Description="Show or hide the inspector pane"
+                                ToolTipProperties.Text="Show or hide the inspector pane"
                                 Style="{StaticResource MobileFooterButtonStyle}" />
                         <Label Grid.Column="3"
                                Text="{Binding RequestStateStatus}"

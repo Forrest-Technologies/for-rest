@@ -99,7 +99,8 @@ public sealed record ForRestMcpExecutionResult(
     IReadOnlyList<ForRestMcpTestView> Tests,
     IReadOnlyList<ForRestMcpLogView> Logs,
     ForRestMcpStashView? Stash,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    IReadOnlyList<string>? SecretValues = null);
 
 #endregion
 
@@ -117,6 +118,8 @@ public sealed record ForRestMcpRunSummary(
     long? DurationMilliseconds,
     string ErrorMessage);
 
+/// <param name="SecretValues">The run's known secret values (secret runtime variables). Never
+/// serialized to clients — used only to scrub outgoing payloads. See <see cref="McpSecretValueScrubber"/>.</param>
 public sealed record ForRestMcpRunDetail(
     ForRestMcpRunSummary Summary,
     ForRestMcpResponseView? Response,
@@ -124,7 +127,8 @@ public sealed record ForRestMcpRunDetail(
     IReadOnlyList<ForRestMcpTestView> Tests,
     IReadOnlyList<ForRestMcpLogView> Logs,
     ForRestMcpStashView? Stash,
-    string RawRequest);
+    string RawRequest,
+    IReadOnlyList<string>? SecretValues = null);
 
 #endregion
 

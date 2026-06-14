@@ -202,8 +202,16 @@ public sealed class MobileRequestExecutionService(
 	private static StringContent BuildStringContent(string body, string contentType, string defaultContentType)
 	{
 		StringContent stringContent = new(body ?? string.Empty, Encoding.UTF8);
-		stringContent.Headers.ContentType = MediaTypeHeaderValue.Parse(
-			string.IsNullOrWhiteSpace(contentType) ? defaultContentType : contentType);
+		string mediaType = string.IsNullOrWhiteSpace(contentType) ? defaultContentType : contentType;
+		try
+		{
+			stringContent.Headers.ContentType = MediaTypeHeaderValue.Parse(mediaType);
+		}
+		catch (FormatException)
+		{
+			throw new InvalidOperationException($"The request content type '{mediaType}' is not a valid media type.");
+		}
+
 		return stringContent;
 	}
 
@@ -332,7 +340,20 @@ public sealed class MobileRequestExecutionService(
 
 		for (int attempt = 1; attempt <= attempts; attempt++)
 		{
-			using HttpRequestMessage attemptRequest = BuildHttpRequest(preparedRequest);
+			HttpRequestMessage attemptRequest;
+			try
+			{
+				attemptRequest = BuildHttpRequest(preparedRequest);
+			}
+			catch (Exception exception)
+			{
+				// Construction failures (e.g. a malformed content type) are not transient; fail the
+				// run with the reason instead of letting the exception escape the pipeline.
+				logger.LogWarning(exception, "Could not build the HTTP request for {RequestName}", request.Name);
+				return (null, durationMilliseconds, exception.Message);
+			}
+
+			using HttpRequestMessage requestScope = attemptRequest;
 
 			Stopwatch stopwatch = Stopwatch.StartNew();
 			try

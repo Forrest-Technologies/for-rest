@@ -105,7 +105,14 @@ public sealed class ForRestScriptDocumentTextService
 
     private static string RenderVariable(ForRestScriptVariableDeclaration variable)
     {
-        string scope = variable.Scope == ForRestScriptVariableScope.Request ? "request" : "runtime";
+        // Keep every scope keyword the parser accepts; collapsing 'secret' to 'runtime' would
+        // silently strip masking and at-rest protection when the section is written back.
+        string scope = variable.Scope switch
+        {
+            ForRestScriptVariableScope.Request => "request",
+            ForRestScriptVariableScope.Secret => "secret",
+            _ => "runtime",
+        };
         return $"{scope} {variable.Key} = {RenderExpression(variable.Expression)}";
     }
 

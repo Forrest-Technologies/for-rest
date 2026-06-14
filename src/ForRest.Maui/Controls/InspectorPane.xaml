@@ -81,7 +81,8 @@
                                 <Button Text="Source"
                                         Style="{StaticResource DenseTabButtonStyle}"
                                         Clicked="OnShowResponseSourceClicked"
-                                        SemanticProperties.Description="Show the raw HTML source">
+                                        SemanticProperties.Description="Show the raw HTML source"
+                                        ToolTipProperties.Text="Show the raw response source">
                                     <Button.Triggers>
                                         <DataTrigger TargetType="Button" Binding="{Binding ShowRenderedResponse}" Value="False">
                                             <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />
@@ -93,7 +94,8 @@
                                 <Button Text="Rendered"
                                         Style="{StaticResource DenseTabButtonStyle}"
                                         Clicked="OnShowResponseRenderedClicked"
-                                        SemanticProperties.Description="Render the HTML response like a browser">
+                                        SemanticProperties.Description="Render the HTML response like a browser"
+                                        ToolTipProperties.Text="Render the HTML response like a browser">
                                     <Button.Triggers>
                                         <DataTrigger TargetType="Button" Binding="{Binding ShowRenderedResponse}" Value="True">
                                             <Setter Property="BackgroundColor" Value="{DynamicResource ThemeSelectionSoftColor}" />

@@ -40,6 +40,30 @@ public sealed class ResponseExtractionServiceTests
     }
 
     [TestMethod]
+    public void Extract_returns_nothing_when_a_pattern_times_out_instead_of_hanging()
+    {
+        // A classic catastrophic-backtracking pattern against a non-matching input: without the
+        // match timeout this would effectively hang the extraction (and the run) for hours.
+        var response = new ResponseSnapshot
+        {
+            Body = new string('a', 40) + "!",
+        };
+
+        var result = responseExtractionService.Extract(
+            response,
+            [
+                new()
+                {
+                    Source = ExtractionSource.Body,
+                    Pattern = "^(a+)+$",
+                    TargetVariableName = "value",
+                },
+            ]);
+
+        Assert.IsEmpty(result);
+    }
+
+    [TestMethod]
     public void Extract_flags_the_variable_secret_when_the_extraction_is_secret()
     {
         var response = new ResponseSnapshot

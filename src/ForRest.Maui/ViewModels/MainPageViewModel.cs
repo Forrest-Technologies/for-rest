@@ -3605,8 +3605,11 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		{
 			await _requestWorkbenchStateStore.SaveAsync(BuildWorkbenchState());
 		}
-		catch
+		catch (Exception exception)
 		{
+			// Background persistence must never interrupt the user, but a silent failure would
+			// mean the workbench quietly stops saving — leave a diagnostic trail.
+			AppLaunchGuard.RecordException("Workbench state persistence failed.", exception);
 		}
 	}
 
@@ -4293,7 +4296,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		SelectedMethod = compilation.Payload.Request.Method.ToString().ToUpperInvariant();
 		RequestTarget = compilation.Payload.Request.UrlTemplate;
 		RequestSummary = string.IsNullOrWhiteSpace(RequestSummary) ? $"{SelectedMethod} request" : RequestSummary;
-		ExecutionStatus = "Request document ready";
+		ExecutionStatus = "Request document ready.";
 		UpdateCurrentDocumentMetadata();
 	}
 

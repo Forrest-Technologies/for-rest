@@ -38,16 +38,15 @@ public sealed class RequestCompiler(VariableResolver variableResolver)
         }
 
         var queryParameters = RenderEntries(request.QueryParameters, preview.Variables);
-        var uriBuilder = new UriBuilder(uri)
-        {
-            Query = BuildQueryString(uri.Query, queryParameters),
-        };
-
         var headers = RenderEntries(request.Headers, preview.Variables);
         var auth = RenderAuth(request.Auth, preview.Variables);
         ApplyAuth(auth, headers, queryParameters, preview.Variables);
 
-        uriBuilder.Query = BuildQueryString(uri.Query, queryParameters);
+        // Build the query once, after ApplyAuth has had its chance to add auth query parameters.
+        var uriBuilder = new UriBuilder(uri)
+        {
+            Query = BuildQueryString(uri.Query, queryParameters),
+        };
         var body = RenderBody(request.Body, preview.Variables);
         ApplyUserAgent(request.UserAgent, request.CustomUserAgent, headers, preview.Variables);
 

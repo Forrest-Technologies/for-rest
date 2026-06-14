@@ -565,7 +565,7 @@ public sealed class ForRestMcpTools
                 source,
                 string.IsNullOrWhiteSpace(request_name) ? null : request_name,
                 CancellationToken.None);
-            return Serialize(MapExecution(result));
+            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
         });
     }
 
@@ -577,7 +577,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(async host =>
         {
             ForRestMcpExecutionResult result = await host.ExecuteStoredScript(workspace_id, location, CancellationToken.None);
-            return Serialize(MapExecution(result));
+            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
         });
     }
 
@@ -594,7 +594,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(async host => Serialize((await host.ListRuns(workspace_id, limit, CancellationToken.None)).Select(MapRunSummary)));
     }
 
-    [Description("Returns the full detail of a single execution run: response (status, headers, cookies, body), all responses for multi-send flows, tests, debug logs, stash, and the raw request.")]
+    [Description("Returns the full detail of a single execution run: response (status, headers, cookies, body), all responses for multi-send flows, tests, debug logs, stash, and the raw request. Secret values and credential-bearing headers are redacted.")]
     public Task<string> get_run(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Run id (GUID) from list_runs.")] string run_id)
@@ -607,7 +607,7 @@ public sealed class ForRestMcpTools
                 return $"No run found with id '{run_id}' in workspace '{workspace_id}'.";
             }
 
-            return Serialize(new
+            string payload = Serialize(new
             {
                 summary = MapRunSummary(run.Summary),
                 response = MapResponse(run.Response),
@@ -615,8 +615,9 @@ public sealed class ForRestMcpTools
                 tests = run.Tests.Select(MapTest),
                 logs = run.Logs.Select(MapLog),
                 stash = MapStash(run.Stash),
-                rawRequest = run.RawRequest,
+                rawRequest = McpRawRequestRedactor.Redact(run.RawRequest),
             });
+            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
         });
     }
 
@@ -639,7 +640,7 @@ public sealed class ForRestMcpTools
                 return "This run produced no response.";
             }
 
-            return Serialize(MapResponse(run.Response, max_body_chars)!);
+            return McpSecretValueScrubber.Scrub(Serialize(MapResponse(run.Response, max_body_chars)!), run.SecretValues);
         });
     }
 
@@ -676,7 +677,8 @@ public sealed class ForRestMcpTools
                 ? (string.IsNullOrEmpty(run.Response.RawResponse) ? run.Response.Body : run.Response.RawResponse)
                 : run.Response.Body;
 
-            return GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines));
+            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines));
+            return McpSecretValueScrubber.Scrub(grepResult, run.SecretValues);
         });
     }
 
@@ -694,7 +696,7 @@ public sealed class ForRestMcpTools
             }
 
             object? stash = MapStash(run.Stash);
-            return stash is null ? "This run captured no stash rows." : Serialize(stash);
+            return stash is null ? "This run captured no stash rows." : McpSecretValueScrubber.Scrub(Serialize(stash), run.SecretValues);
         });
     }
 
@@ -711,13 +713,14 @@ public sealed class ForRestMcpTools
                 return $"No run found with id '{run_id}' in workspace '{workspace_id}'.";
             }
 
-            return Serialize(new
+            string payload = Serialize(new
             {
                 state = run.Summary.State,
                 errorMessage = run.Summary.ErrorMessage,
                 tests = run.Tests.Select(MapTest),
                 logs = run.Logs.Select(MapLog),
             });
+            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
         });
     }
 

@@ -29,9 +29,9 @@ public sealed class ForRestRuntimeVariableSeedEvaluator
         {
             ForRestRuntimeSeedKind.Literal => seed.LiteralValue,
             ForRestRuntimeSeedKind.Guid => Guid.NewGuid().ToString(),
-            ForRestRuntimeSeedKind.Now => DateTimeOffset.Now.ToString("O"),
-            ForRestRuntimeSeedKind.UtcNow => DateTimeOffset.UtcNow.ToString("O"),
-            ForRestRuntimeSeedKind.RandomNumber => Random.Shared.Next(seed.MinimumInclusive ?? 0, seed.MaximumExclusive ?? int.MaxValue).ToString(),
+            ForRestRuntimeSeedKind.Now => DateTimeOffset.Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            ForRestRuntimeSeedKind.UtcNow => DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            ForRestRuntimeSeedKind.RandomNumber => Random.Shared.Next(seed.MinimumInclusive ?? 0, seed.MaximumExclusive ?? int.MaxValue).ToString(System.Globalization.CultureInfo.InvariantCulture),
             _ => seed.LiteralValue,
         };
     }
