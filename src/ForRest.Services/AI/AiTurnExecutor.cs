@@ -113,16 +113,19 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
                 initialDocument is not null &&
                 latestDocument is not null &&
                 HasActiveDocumentChanged(initialDocument.SourceText, latestDocument.SourceText);
+            bool workspaceMutated = (request.ActiveDocumentHost?.GetWorkspaceMutationCount() ?? 0) > 0;
             bool editCompleted = !ShouldAttemptAutonomousEditRecovery(
                 request,
                 initialDocument,
                 latestDocument);
-            // A length-truncated response after the document was already updated
-            // still represents a successful edit from the user's point of view.
+            // A length-truncated response after the document was already updated — or after the
+            // turn created/updated another workspace script — still represents a successful edit
+            // from the user's point of view, even though the active document may be untouched.
             bool succeeded = (turnOutcome.Response.Completed && editCompleted) ||
-                             (editCompleted && documentChangedDuringTurn);
+                             (editCompleted && documentChangedDuringTurn) ||
+                             workspaceMutated;
             runtime.DebugTrace.AddLine(
-                $"Turn success evaluation: responseCompleted={turnOutcome.Response.Completed} editCompleted={editCompleted} documentChangedDuringTurn={documentChangedDuringTurn} succeeded={succeeded}");
+                $"Turn success evaluation: responseCompleted={turnOutcome.Response.Completed} editCompleted={editCompleted} documentChangedDuringTurn={documentChangedDuringTurn} workspaceMutated={workspaceMutated} succeeded={succeeded}");
             FlushGrokOutboundBody(runtime, captureGrokBody);
             return new(
                 Succeeded: succeeded,
@@ -563,6 +566,7 @@ public sealed class AgentFrameworkAiTurnExecutor : IAiTurnExecutor
                initialDocument is not null &&
                latestDocument is not null &&
                IsLikelyEditPrompt(request.Prompt) &&
+               request.ActiveDocumentHost.GetWorkspaceMutationCount() == 0 &&
                !HasActiveDocumentChanged(initialDocument.SourceText, latestDocument.SourceText);
     }
 

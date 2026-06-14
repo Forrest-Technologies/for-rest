@@ -7270,6 +7270,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	{
 		private readonly MainPageViewModel _owner;
 		private string _sourceText;
+		private int _workspaceMutationCount;
 		private DiagnosticsCacheEntry? _diagnosticsCache;
 
 		private sealed record DiagnosticsCacheEntry(
@@ -7420,7 +7421,17 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		{
 			AiActiveDocumentUpdateResult result = AiActiveDocumentUpdateResult.Failure("Workbench is not ready yet.");
 			MainPageViewModel.InvokeOnViewModelThreadAsync(() => result = _owner.CreateScriptInActiveWorkspace(name, sourceText)).GetAwaiter().GetResult();
+			if (result.Succeeded)
+			{
+				_workspaceMutationCount++;
+			}
+
 			return result;
+		}
+
+		public int GetWorkspaceMutationCount()
+		{
+			return _workspaceMutationCount;
 		}
 
 		private static void WriteUpdateDebug(string title, string detail)
