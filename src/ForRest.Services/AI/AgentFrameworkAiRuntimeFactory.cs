@@ -693,6 +693,7 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
             tools.Add(AIFunctionFactory.Create((Func<string>)ReadActiveDocument));
             tools.Add(AIFunctionFactory.Create((Func<string, string>)PatchActiveDocument));
             tools.Add(AIFunctionFactory.Create((Func<string, string>)ReplaceActiveDocument));
+            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)CreateWorkspaceScript));
         }
         else if (settings.Tools.EnableDocumentPatch)
         {

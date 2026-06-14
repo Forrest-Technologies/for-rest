@@ -4698,6 +4698,62 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	}
 
 	/// <summary>
+	/// Adds a new request script to the active workspace for the file-level AI assistant's
+	/// create_workspace_script tool. Unlike <see cref="McpCreateScript"/> it never changes the
+	/// active document or selection, so creating a script mid-turn cannot navigate away from the
+	/// request the inline conversation is editing. The new script is still revealed immediately
+	/// in the explorer.
+	/// </summary>
+	private AiActiveDocumentUpdateResult CreateScriptInActiveWorkspace(string name, string sourceText)
+	{
+		if (string.IsNullOrWhiteSpace(name))
+		{
+			return AiActiveDocumentUpdateResult.Failure("Script name is required.");
+		}
+
+		if (string.IsNullOrWhiteSpace(sourceText))
+		{
+			return AiActiveDocumentUpdateResult.Failure("Script source text is required.");
+		}
+
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return AiActiveDocumentUpdateResult.Failure("No workspace is selected.");
+		}
+
+		string location = McpBuildScriptLocation(workspace, name);
+		(string method, string summary) = McpDeriveScriptMetadata(workspace.Id, sourceText, name);
+		RequestWorkbenchDocumentState document = new()
+		{
+			Title = name.Trim(),
+			Method = method,
+			Summary = summary,
+			Location = location,
+			RequestSource = sourceText,
+		};
+
+		RequestWorkbenchWorkspaceState updated = workspace with
+		{
+			Documents = [.. workspace.Documents, document],
+		};
+		_workspaceStates[updated.Id] = updated;
+
+		// Refresh the explorer collections so the new script is visible right away, then restore
+		// the current request's selection highlight (RebuildWorkspaceCollections clears it).
+		RebuildWorkspaceCollections(updated);
+		string activeLocation = RequestLocation;
+		foreach (RequestDocumentViewModel item in OpenDocuments)
+		{
+			item.IsSelected = string.Equals(item.Location, activeLocation, StringComparison.OrdinalIgnoreCase);
+		}
+
+		SelectExplorerItemByContext(activeLocation);
+		_ = PersistWorkbenchStateInBackground();
+		return AiActiveDocumentUpdateResult.Success(location);
+	}
+
+	/// <summary>
 	/// Opens (creating it on first use) the pinned workspace-assistant conversation document
 	/// for the active workspace and brings it into focus. This is the workspace-level prompt
 	/// entry point shared by desktop and mobile.
@@ -7362,7 +7418,9 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 		public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText)
 		{
-			return AiActiveDocumentUpdateResult.Success();
+			AiActiveDocumentUpdateResult result = AiActiveDocumentUpdateResult.Failure("Workbench is not ready yet.");
+			MainPageViewModel.InvokeOnViewModelThreadAsync(() => result = _owner.CreateScriptInActiveWorkspace(name, sourceText)).GetAwaiter().GetResult();
+			return result;
 		}
 
 		private static void WriteUpdateDebug(string title, string detail)
