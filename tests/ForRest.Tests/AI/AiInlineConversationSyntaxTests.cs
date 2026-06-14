@@ -164,6 +164,75 @@ public sealed class AiInlineConversationSyntaxTests
     }
 
     [TestMethod]
+    public void ResolveActionablePrompt_resolves_pending_prompt_when_cursor_is_on_request_flow_below_blank_gap()
+    {
+        // Mobile repro: a `## question` typed mid-document with blank lines beneath it and
+        // existing request flow further down. Tapping send with the caret resting on the
+        // flow lines below the gap must still route to the AI for the unanswered prompt.
+        string source = string.Join(
+            "\n",
+            [
+                "name \"Post Echo\"",
+                "## make this a browser automation test script",
+                "",
+                "",
+                "",
+                "header \"Accept\" = \"application/json\"",
+                "header \"X-Workspace\" = \"{{workspace_name}}\"",
+            ]);
+
+        AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 6);
+
+        Assert.IsNotNull(prompt);
+        Assert.AreEqual("make this a browser automation test script", prompt.PromptText);
+        Assert.AreEqual(2, prompt.LineNumber);
+    }
+
+    [TestMethod]
+    public void ResolveActionablePrompt_resolves_pending_prompt_when_cursor_is_on_unprefixed_continuation_text()
+    {
+        // Mobile repro: the Sora editor does not auto-continue the `## ` marker on Enter, so
+        // a user often keeps typing the rest of the prompt on plain (un-prefixed) lines. The
+        // unanswered prompt above must still be the actionable target when send is tapped.
+        string source = string.Join(
+            "\n",
+            [
+                "name \"demo\"",
+                "## make this a browser automation test script",
+                "that opens the login page",
+                "and verifies the title",
+                "",
+            ]);
+
+        AiInlineConversationPrompt? promptOnText = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 3);
+        AiInlineConversationPrompt? promptOnTrailingBlank = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 5);
+
+        Assert.IsNotNull(promptOnText);
+        Assert.AreEqual(2, promptOnText.LineNumber);
+        Assert.IsNotNull(promptOnTrailingBlank);
+        Assert.AreEqual(2, promptOnTrailingBlank.LineNumber);
+    }
+
+    [TestMethod]
+    public void ResolveActionablePrompt_ignores_continuation_text_when_prompt_is_already_answered()
+    {
+        // The un-prefixed walk-up must still stop at a response line so an answered exchange
+        // never hijacks a normal send, even with plain text between the caret and the prompt.
+        string source = string.Join(
+            "\n",
+            [
+                "## do you work??",
+                "#> yes, I do",
+                "extra context line",
+                "",
+            ]);
+
+        AiInlineConversationPrompt? prompt = AiInlineConversationPromptResolver.ResolveActionablePrompt(source, 4);
+
+        Assert.IsNull(prompt);
+    }
+
+    [TestMethod]
     public void RenderResponseBlock_preserves_multiline_structure()
     {
         string rendered = AiInlineConversationFormatter.RenderResponseBlock("first\n\nthird", "\n");

@@ -94,6 +94,34 @@ public sealed class AgentFrameworkAiTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ExecuteAsync_treats_a_created_workspace_script_as_a_successful_turn_without_retrying()
+    {
+        MutableActiveDocumentHost host = new("name \"Example\"\nmethod GET");
+        StubAgent agent = new(
+            (_, _) =>
+            {
+                // Simulate the model invoking create_workspace_script: a real workspace mutation
+                // that intentionally leaves the active document untouched.
+                host.CreateScript("Get Users", "name \"Get Users\"\nmethod GET");
+                return CreateResponse("Created the Get Users request.", ChatFinishReason.Stop);
+            });
+        IAiTurnExecutor executor = new AgentFrameworkAiTurnExecutor(new StubRuntimeFactory(agent));
+
+        AiTurnExecutionResult result = await executor.ExecuteAsync(
+            new(
+                ConversationId: "doc-ws",
+                Objective: "Create a request.",
+                Prompt: "Create a new request that gets the users endpoint.",
+                Settings: new AiSettings { Enabled = true },
+                ActiveDocumentHost: host));
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.AreEqual(0, result.AutonomousEditRecoveryAttempts);
+        Assert.AreEqual(1, agent.Calls.Count, "a successful workspace mutation must not trigger a recovery turn.");
+        Assert.AreEqual("name \"Example\"\nmethod GET", host.SourceText, "the active document must be left untouched.");
+    }
+
+    [TestMethod]
     public async Task ExecuteAsync_treats_enumerate_and_stash_prompt_as_an_in_place_edit_request()
     {
         MutableActiveDocumentHost host = new("name \"Get Todo\"\nmethod GET\nurl \"https://jsonplaceholder.typicode.com/todos/1\"");
@@ -263,7 +291,8 @@ public sealed class AgentFrameworkAiTurnExecutorTests
             AiSettings settings,
             string objective,
             IAiActiveDocumentHost? activeDocumentHost = null,
-            string? prompt = null)
+            string? prompt = null,
+            IAiWorkspaceHost? workspaceHost = null)
         {
             return new(new(string.Empty, [], []), [], agent, new AiDebugTraceBuffer());
         }
@@ -323,6 +352,8 @@ public sealed class AgentFrameworkAiTurnExecutorTests
 
     private sealed class MutableActiveDocumentHost(string sourceText) : IAiActiveDocumentHost
     {
+        private int _workspaceMutationCount;
+
         public string SourceText { get; set; } = sourceText;
 
         public AiActiveDocumentSnapshot? GetActiveDocument()
@@ -343,7 +374,13 @@ public sealed class AgentFrameworkAiTurnExecutorTests
 
         public AiWorkspaceContext? GetWorkspaceContext() => null;
 
-        public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
+        public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText)
+        {
+            _workspaceMutationCount++;
+            return AiActiveDocumentUpdateResult.Success();
+        }
+
+        public int GetWorkspaceMutationCount() => _workspaceMutationCount;
     }
 
     private sealed record CallInfo(IEnumerable<string> MessageTexts, bool HasContinuationToken)

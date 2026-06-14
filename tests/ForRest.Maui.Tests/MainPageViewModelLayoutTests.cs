@@ -814,6 +814,24 @@ public sealed class MainPageViewModelLayoutTests
 	}
 
 	[TestMethod]
+	public async Task WorkspaceAssistant_is_hidden_and_unavailable_when_ai_is_disabled()
+	{
+		using TestHarness harness = new();
+		MainPageViewModel viewModel = harness.CreateViewModel();
+		await viewModel.InitializeAsync();
+
+		Assert.IsFalse(viewModel.IsAiEnabled, "AI is off by default in a fresh configuration.");
+
+		int documentsBefore = viewModel.OpenDocuments.Count;
+		viewModel.OpenWorkspaceAssistant();
+
+		Assert.AreEqual(documentsBefore, viewModel.OpenDocuments.Count, "the assistant must not be materialized while AI is off.");
+		Assert.IsFalse(
+			viewModel.OpenDocuments.Any(item => item.Title.Contains("Workspace Assistant", StringComparison.Ordinal)),
+			"the pinned assistant document must not appear in the explorer while AI is off.");
+	}
+
+	[TestMethod]
 	public void ActiveEditorPresentationText_masks_secret_values_when_editor_is_unfocused()
 	{
 		using TestHarness harness = new();
@@ -2229,7 +2247,8 @@ public sealed class MainPageViewModelLayoutTests
 				new ForRestScriptDocumentTextService(),
 				appActivationService ?? new FakeAppActivationService(),
 				aiSettingsProvider,
-				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)));
+				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)),
+				new FakeAiWorkspaceConversationService());
 		}
 
 		public void Dispose()
@@ -2447,6 +2466,14 @@ public sealed class MainPageViewModelLayoutTests
 				? request.SourceText
 				: _result.UpdatedText;
 			return Task.FromResult(_result with { UpdatedText = updatedText });
+		}
+	}
+
+	private sealed class FakeAiWorkspaceConversationService : IAiWorkspaceConversationService
+	{
+		public Task<AiWorkspaceConversationResult> TryHandleAsync(AiWorkspaceConversationRequest request, CancellationToken cancellationToken = default)
+		{
+			return Task.FromResult(AiWorkspaceConversationResult.NotHandled(request.SourceText));
 		}
 	}
 

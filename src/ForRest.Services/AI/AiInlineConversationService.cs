@@ -347,7 +347,8 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         for (int attempt = 0; attempt < MaxAutonomousRepairAttempts; attempt++)
         {
             string latestSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
-            if (!ShouldAttemptAutonomousRepair(preparedPrompt.RawPrompt, request.SourceText, latestSource, turn))
+            bool workspaceMutated = request.ActiveDocumentHost.GetWorkspaceMutationCount() > 0;
+            if (!ShouldAttemptAutonomousRepair(preparedPrompt.RawPrompt, request.SourceText, latestSource, turn, workspaceMutated))
             {
                 return turn with { SessionReset = sessionReset };
             }
@@ -361,7 +362,8 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         }
 
         string finalSource = request.ActiveDocumentHost.GetActiveDocument()?.SourceText ?? request.SourceText;
-        if (ShouldAttemptAutonomousRepair(preparedPrompt.RawPrompt, request.SourceText, finalSource, turn))
+        bool finalWorkspaceMutated = request.ActiveDocumentHost.GetWorkspaceMutationCount() > 0;
+        if (ShouldAttemptAutonomousRepair(preparedPrompt.RawPrompt, request.SourceText, finalSource, turn, finalWorkspaceMutated))
         {
             return turn with
             {
@@ -867,8 +869,17 @@ public sealed class AiInlineConversationService : IAiInlineConversationService
         string promptText,
         string originalSource,
         string latestSource,
-        AiTurnExecutionResult turn)
+        AiTurnExecutionResult turn,
+        bool workspaceMutated)
     {
+        // A successful workspace mutation (e.g. a script created via create_workspace_script)
+        // is real work even when the active document is untouched. Treat the turn as done rather
+        // than burning a repair turn nudging the model to edit the active request.
+        if (workspaceMutated)
+        {
+            return false;
+        }
+
         bool likelyEditPrompt = AiPromptIntentClassifier.IsLikelyEditPrompt(promptText);
         bool documentChanged = HasDocumentChanged(originalSource, latestSource);
         if (turn.ResponseText.StartsWith("AI request failed:", StringComparison.OrdinalIgnoreCase))

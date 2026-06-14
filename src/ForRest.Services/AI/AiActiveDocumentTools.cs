@@ -67,6 +67,14 @@ public interface IAiActiveDocumentHost
     AiWorkspaceContext? GetWorkspaceContext();
 
     AiActiveDocumentUpdateResult CreateScript(string name, string sourceText);
+
+    /// <summary>
+    /// Number of successful workspace-level mutations (e.g. scripts created) this host has
+    /// performed during the current turn. A host is created per turn, so a non-zero value means
+    /// the turn already accomplished real work even when the active document itself was not
+    /// touched — letting the executor skip needless autonomous-edit recovery.
+    /// </summary>
+    int GetWorkspaceMutationCount() => 0;
 }
 
 public interface IAiActiveDocumentToolCatalog
