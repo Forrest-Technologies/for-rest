@@ -684,28 +684,28 @@ public sealed class AgentFrameworkAiRuntimeFactory : IAiRuntimeFactory
         List<AITool> tools = [];
         if (settings.Tools.EnableDocsSearch)
         {
-            tools.Add(AIFunctionFactory.Create((Func<string, int, string>)SearchDocs));
-            tools.Add(AIFunctionFactory.Create((Func<string>)ReadAllDocs));
+            tools.Add(AIFunctionFactory.Create((Func<string, int, string>)SearchDocs, "search_docs"));
+            tools.Add(AIFunctionFactory.Create((Func<string>)ReadAllDocs, "read_all_docs"));
         }
 
         if (settings.Tools.EnableDocumentPatch && activeDocumentHost is not null)
         {
-            tools.Add(AIFunctionFactory.Create((Func<string>)ReadActiveDocument));
-            tools.Add(AIFunctionFactory.Create((Func<string, string>)PatchActiveDocument));
-            tools.Add(AIFunctionFactory.Create((Func<string, string>)ReplaceActiveDocument));
-            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)CreateWorkspaceScript));
+            tools.Add(AIFunctionFactory.Create((Func<string>)ReadActiveDocument, "read_active_document"));
+            tools.Add(AIFunctionFactory.Create((Func<string, string>)PatchActiveDocument, "patch_active_document"));
+            tools.Add(AIFunctionFactory.Create((Func<string, string>)ReplaceActiveDocument, "replace_active_document"));
+            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)CreateWorkspaceScript, "create_workspace_script"));
         }
         else if (settings.Tools.EnableDocumentPatch)
         {
-            tools.Add(AIFunctionFactory.Create((Func<string, string, string, string>)PatchDocument));
+            tools.Add(AIFunctionFactory.Create((Func<string, string, string, string>)PatchDocument, "patch_document"));
         }
 
         if (settings.Tools.EnableDocumentPatch && workspaceHost is not null)
         {
-            tools.Add(AIFunctionFactory.Create((Func<string>)ListWorkspaceScripts));
-            tools.Add(AIFunctionFactory.Create((Func<string, string>)ReadWorkspaceScript));
-            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)CreateWorkspaceScriptInWorkspace));
-            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)UpdateWorkspaceScript));
+            tools.Add(AIFunctionFactory.Create((Func<string>)ListWorkspaceScripts, "list_workspace_scripts"));
+            tools.Add(AIFunctionFactory.Create((Func<string, string>)ReadWorkspaceScript, "read_workspace_script"));
+            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)CreateWorkspaceScriptInWorkspace, "create_workspace_script"));
+            tools.Add(AIFunctionFactory.Create((Func<string, string, string>)UpdateWorkspaceScript, "update_workspace_script"));
         }
 
         return [.. tools];
