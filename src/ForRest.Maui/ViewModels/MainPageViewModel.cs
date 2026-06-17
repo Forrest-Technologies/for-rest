@@ -4083,6 +4083,14 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			return;
 		}
 
+		if (IsWorkspaceAssistantActive)
+		{
+			// The assistant transcript is a conversation surface, not a runnable request, so
+			// never compile it or surface request diagnostics for it.
+			ApplyWorkspaceAssistantMetadata();
+			return;
+		}
+
 		if (!ShouldDebounceRequestMetadataRefresh())
 		{
 			CancelPendingRequestMetadataRefresh();
@@ -4242,6 +4250,12 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 
 	private void UpdateRequestMetadataFromSource()
 	{
+		if (IsWorkspaceAssistantActive)
+		{
+			ApplyWorkspaceAssistantMetadata();
+			return;
+		}
+
 		CancelPendingRequestMetadataRefresh();
 		Interlocked.Increment(ref _requestMetadataRefreshVersion);
 
@@ -4310,6 +4324,20 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		EditorDebugAccentColor = _dangerColor;
 		DebugOutputText = exception.ToString();
 		AppLaunchGuard.RecordException("Request metadata update failed.", exception);
+	}
+
+	private void ApplyWorkspaceAssistantMetadata()
+	{
+		CancelPendingRequestMetadataRefresh();
+		Interlocked.Increment(ref _requestMetadataRefreshVersion);
+		_requestEditorDiagnosticsJson = "[]";
+		ActiveEditorDiagnosticsJson = "[]";
+		RequestTarget = string.Empty;
+		ExecutionStatus = "Workspace assistant";
+		EditorDebugStateText = "Assistant";
+		EditorDebugSummaryText = "Workspace assistant";
+		EditorDebugDetailText = "Ask across this workspace - type a request after ## and press Send.";
+		EditorDebugAccentColor = _methodNeutral;
 	}
 
 	private void MarkCurrentDocumentDirty()
