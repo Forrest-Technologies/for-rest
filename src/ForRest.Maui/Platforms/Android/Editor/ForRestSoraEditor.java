@@ -12,6 +12,8 @@ import org.json.JSONObject;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import io.github.rosemoe.sora.event.ContentChangeEvent;
 import io.github.rosemoe.sora.event.EditorFocusChangeEvent;
@@ -276,8 +278,117 @@ public final class ForRestSoraEditor extends FrameLayout {
                 || (code == KeyEvent.KEYCODE_Z && event.isShiftPressed()))) {
             listener.onRedoRequested();
             event.intercept();
+        } else if (code == KeyEvent.KEYCODE_ENTER && !ctrl && !event.isShiftPressed()) {
+            // Mirror the desktop Monaco behaviour: pressing Enter on an inline-AI `##`
+            // prompt line continues the `## ` prefix, and pressing Enter on an empty
+            // trailing prompt line submits the prompt. Shift+Enter still inserts a plain
+            // newline. Only intercept when we actually handle a prompt line so ordinary
+            // editing is untouched.
+            if (handleInlineAiEnter()) {
+                event.intercept();
+            }
         }
     }
+
+    // region Inline AI prompt Enter handling
+
+    private static final Pattern INLINE_AI_PROMPT = Pattern.compile("^([ \\t]*)##(?!#)(.*)$");
+
+    private static boolean isInlineAiPromptLine(String lineText) {
+        if (lineText == null) {
+            return false;
+        }
+        int index = 0;
+        while (index < lineText.length() && (lineText.charAt(index) == ' ' || lineText.charAt(index) == '\t')) {
+            index++;
+        }
+        return lineText.length() - index >= 2
+                && lineText.charAt(index) == '#'
+                && lineText.charAt(index + 1) == '#'
+                && (lineText.length() - index == 2 || lineText.charAt(index + 2) != '#');
+    }
+
+    private static boolean inlineAiPromptHasContent(String lineText) {
+        Matcher matcher = INLINE_AI_PROMPT.matcher(lineText == null ? "" : lineText);
+        return matcher.matches() && matcher.group(2).trim().length() > 0;
+    }
+
+    /**
+     * Handles a plain Enter on an inline-AI prompt line. Returns true when the key was consumed
+     * (continuation inserted, prompt submitted, or an empty prompt swallowed) so the caller can
+     * intercept the event; returns false for non-prompt lines so the editor inserts a normal
+     * newline.
+     */
+    private boolean handleInlineAiEnter() {
+        try {
+            Cursor cursor = editor.getCursor();
+            if (cursor.isSelected()) {
+                return false;
+            }
+
+            int line = cursor.getLeftLine();
+            int column = cursor.getLeftColumn();
+            // Read whole-document text and split on '\n' (Sora's internal line separator) instead
+            // of per-line accessors so this stays on the small, already-used Content API surface.
+            String[] lines = getEditorText().split("\n", -1);
+            if (line < 0 || line >= lines.length) {
+                return false;
+            }
+
+            Matcher matcher = INLINE_AI_PROMPT.matcher(lines[line]);
+            if (!matcher.matches()) {
+                return false;
+            }
+
+            String leadingWhitespace = matcher.group(1);
+            boolean currentHasContent = matcher.group(2).trim().length() > 0;
+
+            int blockStart = line;
+            while (blockStart > 0 && isInlineAiPromptLine(lines[blockStart - 1])) {
+                blockStart--;
+            }
+            int blockEnd = line;
+            while (blockEnd < lines.length - 1 && isInlineAiPromptLine(lines[blockEnd + 1])) {
+                blockEnd++;
+            }
+
+            boolean hasPriorContent = false;
+            for (int current = blockStart; current < line; current++) {
+                if (inlineAiPromptHasContent(lines[current])) {
+                    hasPriorContent = true;
+                    break;
+                }
+            }
+            boolean hasFollowingContent = false;
+            for (int current = line + 1; current <= blockEnd; current++) {
+                if (inlineAiPromptHasContent(lines[current])) {
+                    hasFollowingContent = true;
+                    break;
+                }
+            }
+
+            if (currentHasContent || hasFollowingContent || hasPriorContent) {
+                if (!currentHasContent && hasPriorContent && !hasFollowingContent) {
+                    if (listener != null) {
+                        listener.onSendRequested();
+                    }
+                    return true;
+                }
+
+                String continuationPrefix = leadingWhitespace + "## ";
+                editor.getText().insert(line, column, "\n" + continuationPrefix);
+                editor.setSelection(line + 1, continuationPrefix.length());
+                return true;
+            }
+
+            // Empty prompt with nothing else in the block: swallow Enter, matching Monaco.
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    // endregion
 
     // endregion
 
