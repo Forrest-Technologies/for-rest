@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
 
 namespace ForRest.Maui.Controls;
@@ -100,8 +102,11 @@ public sealed class SoraEditorSurface : ContentView, ICodeEditorSurface
 
     #region Private Fields
 
+    private static readonly Regex InlineAiPromptLine = new(@"^([ \t]*)##(?!#)(.*)$", RegexOptions.Compiled);
+
     private readonly SoraCodeEditorView editorView;
     private bool isSyncingTextFromEditor;
+    private int lastCursorLine = 1;
 
     #endregion
 
@@ -257,7 +262,7 @@ public sealed class SoraEditorSurface : ContentView, ICodeEditorSurface
             return false;
         }
 
-        editorView.PasteText(clipboardText);
+        editorView.PasteText(NormalizeInlineAiPromptPaste(clipboardText));
         return true;
     }
 
@@ -355,8 +360,11 @@ public sealed class SoraEditorSurface : ContentView, ICodeEditorSurface
         RedoRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnEditorCursorChanged(object? sender, EditorCursorPositionChangedEventArgs e) =>
+    private void OnEditorCursorChanged(object? sender, EditorCursorPositionChangedEventArgs e)
+    {
+        lastCursorLine = Math.Max(1, e.LineNumber);
         CursorPositionChanged?.Invoke(this, e);
+    }
 
     private void OnEditorFocusChanged(object? sender, EditorFocusChangedEventArgs e) =>
         EditorFocusChanged?.Invoke(this, e);
@@ -379,6 +387,67 @@ public sealed class SoraEditorSurface : ContentView, ICodeEditorSurface
         {
             isSyncingTextFromEditor = false;
         }
+    }
+
+    /// <summary>
+    /// When pasting multi-line text while the caret is on an inline-AI <c>##</c> prompt line,
+    /// prefix the continuation lines with <c>## </c> so the whole paste stays part of the prompt -
+    /// matching desktop Monaco's <c>buildInlineAiPromptPasteText</c>. The first pasted line merges
+    /// into the current prompt line and is left as-is.
+    /// </summary>
+    private string NormalizeInlineAiPromptPaste(string clipboardText)
+    {
+        string normalized = clipboardText.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        if (!normalized.Contains('\n'))
+        {
+            return clipboardText;
+        }
+
+        string[] documentLines = (Text ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+        int caretIndex = lastCursorLine - 1;
+        if (caretIndex < 0 || caretIndex >= documentLines.Length)
+        {
+            return clipboardText;
+        }
+
+        Match caretLine = InlineAiPromptLine.Match(documentLines[caretIndex]);
+        if (!caretLine.Success)
+        {
+            return clipboardText;
+        }
+
+        string leadingWhitespace = caretLine.Groups[1].Value;
+        string[] pasteLines = normalized.Split('\n');
+        StringBuilder builder = new();
+        for (int index = 0; index < pasteLines.Length; index++)
+        {
+            string line = pasteLines[index];
+            if (index == 0 || IsInlineAiPromptLine(line))
+            {
+                builder.Append(line);
+            }
+            else
+            {
+                builder.Append(line.Trim().Length == 0
+                    ? $"{leadingWhitespace}## "
+                    : $"{leadingWhitespace}## {line}");
+            }
+
+            if (index < pasteLines.Length - 1)
+            {
+                builder.Append('\n');
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool IsInlineAiPromptLine(string lineText)
+    {
+        return InlineAiPromptLine.IsMatch(lineText ?? string.Empty);
     }
 
     #endregion
