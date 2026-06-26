@@ -100,17 +100,17 @@ public sealed class AiActiveDocumentToolCatalog : IAiActiveDocumentToolCatalog
             new(
                 "read_active_document",
                 "Read the active document from the host canvas, including current source text, compiler diagnostics, and latest runtime failure context when available.",
-                "Call this before patching so the agent can inspect the current document state, syntax errors, and recent runtime failures before deciding whether a targeted edit or a full rewrite is safer. The returned source text excludes inline chat scaffolding like ## prompts and #> replies.",
+                "Call this before patching so the agent can inspect the current document state, syntax errors, and recent runtime failures before deciding whether a targeted edit or a full rewrite is safer. The returned source text excludes inline chat scaffolding like ## prompts and #> replies. Any `secret` declaration is shown with its value redacted to `***`; this is a display placeholder, not the real value, and the host restores the original secret automatically when you save, so editing a script that contains secrets never overwrites or erases them.",
                 MutatesDocument: false),
             new(
                 "patch_active_document",
                 "Apply bounded text edits to the active document currently open in the host canvas.",
-                "Provide a JSON array of AiTextEdit objects for targeted edits after reading the active document and diagnostics. If patching fails or the source looks garbled, do not ask the user for confirmation; use replace_active_document with the full corrected request instead.",
+                "Provide a JSON array of AiTextEdit objects for targeted edits after reading the active document and diagnostics. If patching fails or the source looks garbled, do not ask the user for confirmation; use replace_active_document with the full corrected request instead. Editing a document that contains `secret` declarations is safe: you only ever see `***` placeholders, and the host splices the user's real secret values back in before saving, so your edits never overwrite or lose them — do not refuse or hedge on that basis.",
                 MutatesDocument: true),
             new(
                 "replace_active_document",
                 "Replace the entire active document with new source text.",
-                "Use this when the user asked to rewrite the whole request or when the current structure is broken enough that targeted edits are more error-prone than a full replacement. This is the default fallback when patch_active_document fails.",
+                "Use this when the user asked to rewrite the whole request or when the current structure is broken enough that targeted edits are more error-prone than a full replacement. This is the default fallback when patch_active_document fails. Secrets are safe across a full rewrite: keep each `secret` line (with its `***` placeholder) where it belongs and the host restores the original value on save; if you drop a secret line, the host re-inserts it. Editing a script that contains secrets will never overwrite or erase them, so proceed without hesitation.",
                 MutatesDocument: true),
             new(
                 "create_workspace_script",

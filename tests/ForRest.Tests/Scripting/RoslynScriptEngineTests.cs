@@ -328,6 +328,71 @@ public sealed class RoslynScriptEngineTests
     }
 
     [TestMethod]
+    public async Task Run_exposes_text_and_isjson_for_json_response_bodies()
+    {
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                tests.Assert(response.isJson, "valid JSON body reports isJson");
+                tests.Equal("{\"ok\":true}", response.text, "text returns the raw body");
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    StatusCode = 200,
+                    Body = """{"ok":true}""",
+                    ContentType = "application/json",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
+    }
+
+    [TestMethod]
+    public async Task Run_supports_text_fallback_when_error_body_is_not_json()
+    {
+        // Mirrors an endpoint that returns JSON on success but a plain-text error
+        // body on failure: isJson is false and the script can still read the message
+        // verbatim through response.text instead of losing it to a null JSON member.
+        var result = await scriptEngine.Run(
+            new()
+            {
+                Script =
+                """
+                tests.Assert(response.isJson == false, "plain-text body reports isJson false");
+                tests.Equal("Service unavailable", response.text, "text returns the raw error body");
+                """,
+                PreparedRequest = new()
+                {
+                    Uri = new("https://api.example.test"),
+                },
+                Response = new()
+                {
+                    StatusCode = 503,
+                    Body = "Service unavailable",
+                    ContentType = "text/plain",
+                },
+                Workspace = new()
+                {
+                    Name = "Demo",
+                },
+            });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.IsTrue(result.Tests.All(static item => item.State == TestOutcomeState.Passed));
+    }
+
+    [TestMethod]
     public async Task Run_normalizes_response_aliases_and_supports_security_utilities()
     {
         var result = await scriptEngine.Run(

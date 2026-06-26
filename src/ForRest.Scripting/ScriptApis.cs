@@ -388,6 +388,20 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
 
     public string Body => response?.Body ?? string.Empty;
 
+    /// <summary>
+    /// The raw response body as text. Identical to <see cref="Body"/>, exposed under
+    /// a name that reads naturally on the branch where an endpoint returns plain text
+    /// (for example an error message) instead of JSON.
+    /// </summary>
+    public string Text => Body;
+
+    /// <summary>
+    /// True when the response body successfully parses as JSON. Lets a script handle
+    /// endpoints that return JSON on one path and text on the other:
+    /// <c>if response.isJson { ... } else { log response.text }</c>.
+    /// </summary>
+    public bool IsJson => Json() is not null;
+
     public string ContentType => response?.ContentType ?? string.Empty;
 
     public Dictionary<string, string> Headers => BuildHeaders(response);
@@ -439,7 +453,11 @@ public sealed class ScriptResponseApi(ResponseSnapshot? initialResponse) : Dynam
                 result = Status;
                 return true;
             case "body":
+            case "text":
                 result = Body;
+                return true;
+            case "isjson":
+                result = IsJson;
                 return true;
             case "contenttype":
                 result = ContentType;
