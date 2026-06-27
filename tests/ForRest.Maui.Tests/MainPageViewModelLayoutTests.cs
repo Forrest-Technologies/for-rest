@@ -844,7 +844,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		viewModel.SetActiveEditorFocus(false);
 
-		StringAssert.Contains(viewModel.ActiveEditorPresentationText, "secret api_key = \"***\"");
+		StringAssert.Contains(viewModel.ActiveEditorPresentationText, "secret api_key = \"******\"");
 		Assert.IsFalse(viewModel.ActiveEditorPresentationText.Contains("super-secret-token", StringComparison.Ordinal));
 		StringAssert.Contains(viewModel.ActiveEditorPresentationText, "method GET");
 		// The underlying source must remain untouched so the user can run
@@ -864,7 +864,7 @@ public sealed class MainPageViewModelLayoutTests
 		viewModel.SetActiveEditorFocus(true);
 
 		StringAssert.Contains(viewModel.ActiveEditorPresentationText, "super-secret-token");
-		Assert.IsFalse(viewModel.ActiveEditorPresentationText.Contains("\"***\"", StringComparison.Ordinal));
+		Assert.IsFalse(viewModel.ActiveEditorPresentationText.Contains("\"******\"", StringComparison.Ordinal));
 	}
 
 	[TestMethod]
@@ -877,8 +877,8 @@ public sealed class MainPageViewModelLayoutTests
 
 		// Simulating what would happen if a binding feedback loop tried to
 		// write the masked text back into the view model — we must drop it
-		// on the floor so the real secret value isn't replaced by `"***"`.
-		viewModel.ActiveEditorPresentationText = "secret api_key = \"***\"\nmethod GET";
+		// on the floor so the real secret value isn't replaced by `"******"`.
+		viewModel.ActiveEditorPresentationText = "secret api_key = \"******\"\nmethod GET";
 
 		StringAssert.Contains(viewModel.ActiveEditorText, "super-secret-token");
 	}

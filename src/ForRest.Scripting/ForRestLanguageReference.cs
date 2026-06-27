@@ -178,9 +178,9 @@ internal static class ForRestLanguageReference
             "header",
             "Request",
             "Add a request header declaration.",
-            "Use `header` for declarative headers and `request.headers[...]` when you want to mutate headers from code.",
-            "header \"Accept\" = \"application/json\"",
-            ["headers", "request header"],
+            "Use `header` for declarative headers and `request.headers[...]` when you want to mutate headers from code. A header name may repeat — write the directive more than once, or list several comma-separated values on one line (`header \"Accept\" = \"application/json\", \"text/xml\"`) to send the same header multiple times. A comma inside quotes stays part of a single value (`header \"Accept\" = \"text/html, text/plain\"`).",
+            "header \"Accept\" = \"application/json\", \"text/xml\"",
+            ["headers", "request header", "multiple values", "duplicate header"],
             ["header"],
             "Keyword",
             "header \"${1:Header-Name}\" = ${2:\"value\"}",
@@ -376,7 +376,7 @@ internal static class ForRestLanguageReference
             "secret",
             "Flow",
             "Declare a secret variable that is encrypted at rest and hidden from AI.",
-            "Use `secret` in the vars section or flow code to store sensitive values like tokens and API keys. Secrets are encrypted with DPAPI, marked `IsSecret` on the variable, and redacted from AI context. In flow code, `secret name = expression` compiles like `runtime` but with secret protection.",
+            "Use `secret` in the vars section or flow code to store sensitive values like tokens and API keys. Secrets are encrypted with DPAPI, marked `IsSecret` on the variable, and redacted from AI context (shown as `***`). The redaction is display-only — the host restores the real value when an edit is saved, so AI edits and rewrites never overwrite or lose a secret. In flow code, `secret name = expression` compiles like `runtime` but with secret protection.",
             """
             secret api_key = "bearer sk-abc123"
             secret token = response.json().access_token
@@ -557,6 +557,42 @@ internal static class ForRestLanguageReference
             ["response.json"],
             "Method",
             "response.json()",
+            false),
+        new(
+            "response-text",
+            "response.text",
+            "Response",
+            "Read the raw response body as text.",
+            "`response.text` (alias of `response.body`) always returns the raw body string. Use it on the branch where an endpoint returns plain text — such as an error message — instead of JSON, so the value is not lost.",
+            """
+            let sent = request.send()
+            if sent.status >= 400 {
+              log sent.text
+            }
+            """,
+            ["text", "plain text", "raw body", "error body", "response.body"],
+            ["response.text"],
+            "Property",
+            "response.text",
+            false),
+        new(
+            "response-isjson",
+            "response.isJson",
+            "Response",
+            "Test whether the response body parses as JSON.",
+            "`response.isJson` is true when the body is valid JSON. Branch on it to support endpoints that return JSON on one path (for example success) and plain text on the other (for example a failure message): read JSON members when `isJson`, otherwise fall back to `response.text`.",
+            """
+            let sent = request.send()
+            if sent.isJson {
+              let token = extract json "$.access_token" from sent
+            } else {
+              log sent.text
+            }
+            """,
+            ["json or text", "is json", "content type", "mixed response", "fallback"],
+            ["response.isJson"],
+            "Property",
+            "response.isJson",
             false),
         new(
             "response-array",
@@ -1433,7 +1469,7 @@ internal static class ForRestLanguageReference
         builder.AppendLine();
         builder.AppendLine("- Prefer declarative directives (`auth`, `header`, `expect`, `extract`) over imperative code; drop into flow (`let`, `if`, `foreach`, `request.send()`) only when you genuinely need logic.");
         builder.AppendLine("- Let values flow through the precedence chain (System → Global → Workspace → Environment → Request-local → Runtime) and `{{interpolation}}` instead of hard-coding them.");
-        builder.AppendLine("- Treat `secret` values as opaque: they are encrypted at rest and redacted before any AI or MCP client sees them, so never echo them into logs or bodies.");
+        builder.AppendLine("- Treat `secret` values as opaque: they are encrypted at rest and redacted before any AI or MCP client sees them, so never echo them into logs or bodies. The `***` you see in a secret declaration is a placeholder, not the real value — the host restores the user's actual secret when the edit is saved, so editing or rewriting a script that contains secrets is always safe and never overwrites or erases them.");
         builder.AppendLine("- Verify with `expect`, capture evidence with `stash`, and carry values forward with `extract`; every run is snapshotted to history.");
         builder.AppendLine("- `payloads`/`fuzz` and `browser` are for authorized testing only.");
         builder.AppendLine();
@@ -1484,7 +1520,7 @@ internal static class ForRestLanguageReference
         builder.AppendLine("ForRest language reference.");
         builder.AppendLine("Use the exact syntax from the canonical catalog below.");
         builder.AppendLine();
-        builder.AppendLine("`.frs` is a small DSL for the HTTP loop (send -> inspect -> extract -> assert) and is the shared artifact a human reads, you edit, and the runtime replays deterministically. Prefer its declarative sugar (auth / header / expect / extract / stash) over imperative flow; only reach for let / if / foreach / request.send() when you need real logic. Resolve values through the variable precedence chain and {{interpolation}}; treat secret values as opaque (they are redacted, so never echo them). payloads / fuzz / browser are for authorized testing only.");
+        builder.AppendLine("`.frs` is a small DSL for the HTTP loop (send -> inspect -> extract -> assert) and is the shared artifact a human reads, you edit, and the runtime replays deterministically. Prefer its declarative sugar (auth / header / expect / extract / stash) over imperative flow; only reach for let / if / foreach / request.send() when you need real logic. Resolve values through the variable precedence chain and {{interpolation}}; treat secret values as opaque (they are redacted to `***`, so never echo them) — that placeholder is not the real value and the host restores the user's secret on save, so editing a script that contains secrets is safe and never overwrites them. payloads / fuzz / browser are for authorized testing only.");
         builder.AppendLine();
         AppendPromptSection(builder, "Request surface", Entries.Where(entry => entry.Category == "Request"));
         builder.AppendLine();

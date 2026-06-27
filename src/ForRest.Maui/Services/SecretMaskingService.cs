@@ -8,9 +8,9 @@ namespace ForRest.Maui.Services;
 /// presentation layer to hide secret values when the request editor is
 /// not actively being edited.
 ///
-/// The mask matches the redaction the AI tool path uses
-/// (<see cref="ForRest.Services.AI.AiActiveDocumentToolService"/>) so the
-/// user sees the same opaque marker the model sees.
+/// The mask is a fixed-length marker so the number of characters shown
+/// never reveals the secret's actual length, regardless of how long the
+/// stored value is.
 /// </summary>
 public static class SecretMaskingService
 {
@@ -20,7 +20,9 @@ public static class SecretMaskingService
         @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
-    private const string MaskedValue = "\"***\"";
+    // A fixed six-asterisk marker. The count is deliberately constant so it
+    // cannot hint at the length of the underlying secret.
+    private const string MaskedValue = "\"******\"";
 
     #endregion
 

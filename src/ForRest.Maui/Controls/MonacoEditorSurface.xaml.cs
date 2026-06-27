@@ -67,24 +67,27 @@ public partial class MonacoEditorSurface : ContentView, ICodeEditorSurface
 
     /*
      * Hides the literal characters of every secret value while keeping
-     * the underlying model text intact. The before-pseudo prints a
-     * fixed-width row of bullets in the same place. Removing the
-     * decoration on focus reveals the real value without needing to
-     * setValue the editor (which would reset the cursor).
+     * the underlying model text intact. The real glyphs are collapsed to
+     * zero width (font-size: 0) so the masked region's width can never
+     * reveal the secret's length, and the before-pseudo prints a fixed
+     * row of asterisks in their place. Removing the decoration on focus
+     * reveals the real value without needing to setValue the editor
+     * (which would reset the cursor).
      */
     .secret-masked-value {
+      font-size: 0 !important;
       color: transparent !important;
       caret-color: transparent !important;
-      position: relative;
     }
     .secret-masked-value::before {
-      content: "***";
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      padding: 0 2px;
+      /* Always the same number of asterisks regardless of the secret's
+       * length. The size tracks the editor font via a CSS variable set in
+       * refreshSecretDecorations so the marker lines up with the text. */
+      content: "******";
       font-family: inherit;
+      font-size: var(--forrest-secret-mask-size, 13px);
+      letter-spacing: 1px;
+      padding: 0 3px;
       color: var(--vscode-editor-foreground, #555);
       background: rgba(160, 160, 160, 0.18);
       border-radius: 2px;
@@ -1869,6 +1872,14 @@ public partial class MonacoEditorSurface : ContentView, ICodeEditorSurface
               this.secretDecorations = this.editor.deltaDecorations(this.secretDecorations, []);
             }
             return;
+          }
+
+          // Size the fixed asterisk marker to the current editor font so it
+          // sits inline with the surrounding text even though the real value
+          // glyphs are collapsed to zero width.
+          const maskFontSize = this.editor.getOption(monaco.editor.EditorOption.fontSize);
+          if (typeof maskFontSize === "number" && maskFontSize > 0) {
+            document.documentElement.style.setProperty("--forrest-secret-mask-size", maskFontSize + "px");
           }
 
           const newDecorations = [];
