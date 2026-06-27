@@ -15,7 +15,7 @@ public sealed class SecretMaskingServiceTests
 
 		string masked = SecretMaskingService.MaskSecrets(source);
 
-		StringAssert.Contains(masked, "secret api_key = \"***\"");
+		StringAssert.Contains(masked, "secret api_key = \"******\"");
 		Assert.IsFalse(masked.Contains("super-secret-token", StringComparison.Ordinal));
 		StringAssert.Contains(masked, "method GET");
 	}
@@ -30,10 +30,23 @@ public sealed class SecretMaskingServiceTests
 
 		string masked = SecretMaskingService.MaskSecrets(source);
 
-		StringAssert.Contains(masked, "secret token = \"***\"");
-		StringAssert.Contains(masked, "secret fallback = \"***\"");
+		StringAssert.Contains(masked, "secret token = \"******\"");
+		StringAssert.Contains(masked, "secret fallback = \"******\"");
 		Assert.IsFalse(masked.Contains("lookup_token", StringComparison.Ordinal));
 		Assert.IsFalse(masked.Contains("otherVar", StringComparison.Ordinal));
+	}
+
+	[TestMethod]
+	public void MaskSecrets_uses_the_same_marker_regardless_of_secret_length()
+	{
+		// The masked marker must be a constant width so it cannot betray how
+		// long the underlying secret is.
+		string shortSecret = SecretMaskingService.MaskSecrets("secret a = \"x\"");
+		string longSecret = SecretMaskingService.MaskSecrets("secret a = \"this-is-a-much-longer-secret-value-0123456789\"");
+
+		StringAssert.Contains(shortSecret, "secret a = \"******\"");
+		StringAssert.Contains(longSecret, "secret a = \"******\"");
+		Assert.AreEqual(shortSecret, longSecret);
 	}
 
 	[TestMethod]
@@ -43,7 +56,7 @@ public sealed class SecretMaskingServiceTests
 
 		string masked = SecretMaskingService.MaskSecrets(source);
 
-		StringAssert.Contains(masked, "  secret api_key = \"***\"");
+		StringAssert.Contains(masked, "  secret api_key = \"******\"");
 		StringAssert.Contains(masked, "url \"https://api.example.test/\"");
 	}
 

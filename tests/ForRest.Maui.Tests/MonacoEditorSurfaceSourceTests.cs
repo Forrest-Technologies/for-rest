@@ -152,6 +152,13 @@ public sealed class MonacoEditorSurfaceSourceTests
 		StringAssert.Contains(source, ".secret-masked-value {");
 		StringAssert.Contains(source, "color: transparent !important;");
 
+		// The real glyphs are collapsed to zero width and replaced by a
+		// fixed run of asterisks, so the masked region can never reveal the
+		// secret's length.
+		StringAssert.Contains(source, "font-size: 0 !important;");
+		StringAssert.Contains(source, "content: \"******\";");
+		StringAssert.Contains(source, "--forrest-secret-mask-size");
+
 		// C#-side: a "focus" forrest:// command is routed to the
 		// EditorFocusChanged event so the workbench host can drive the
 		// view model's IsActiveEditorFocused state.
