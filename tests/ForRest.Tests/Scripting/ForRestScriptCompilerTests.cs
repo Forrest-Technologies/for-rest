@@ -110,6 +110,45 @@ public sealed class ForRestScriptCompilerTests
     }
 
     [TestMethod]
+    public void Compile_expands_a_comma_separated_header_directive_into_multiple_headers()
+    {
+        var compiler = new ForRestScriptCompiler(new ForRestScriptParser());
+        var source =
+            """
+            name "Multi Header"
+            method GET
+            url "https://api.example.test/echo"
+
+            header "Accept" = "application/json", "text/xml"
+            header "X-Single" = "only"
+            header "X-Quoted" = "text/html, text/plain"
+            """;
+
+        var result = compiler.Compile(
+            source,
+            new()
+            {
+                WorkspaceId = Guid.NewGuid(),
+            });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static item => item.Message)));
+        Assert.IsNotNull(result.Payload);
+        var headers = result.Payload.Request.Headers;
+
+        // The comma-separated Accept directive expands into two distinct header entries.
+        var accept = headers.Where(static item => item.Key == "Accept").ToList();
+        Assert.AreEqual(2, accept.Count);
+        Assert.AreEqual("application/json", accept[0].Value);
+        Assert.AreEqual("text/xml", accept[1].Value);
+
+        // A plain single value is unchanged.
+        Assert.AreEqual("only", headers.Single(static item => item.Key == "X-Single").Value);
+
+        // A comma inside quotes is part of one value, not a separator.
+        Assert.AreEqual("text/html, text/plain", headers.Single(static item => item.Key == "X-Quoted").Value);
+    }
+
+    [TestMethod]
     public void Compile_translates_top_level_code_into_pre_request_script()
     {
         var compiler = new ForRestScriptCompiler(new ForRestScriptParser());

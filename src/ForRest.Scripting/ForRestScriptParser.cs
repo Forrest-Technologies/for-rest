@@ -133,7 +133,7 @@ public sealed class ForRestScriptParser
                 || TryParseTopLevelRequest(trimmed, index + 1, line, request, diagnostics)
                 || TryParseTopLevelVariable(trimmed, index + 1, line, variables, diagnostics)
                 || TryParseTopLevelKeyValue(trimmed, index + 1, line, "auth", auth, diagnostics)
-                || TryParseTopLevelNamedValue(trimmed, index + 1, line, "header", headers, diagnostics)
+                || TryParseTopLevelMultiValue(trimmed, index + 1, line, "header", headers, diagnostics)
                 || TryParseTopLevelNamedValue(trimmed, index + 1, line, "query", query, diagnostics)
                 || TryParseTopLevelNamedValue(trimmed, index + 1, line, "form", formValues, diagnostics)
                 || TryParseTopLevelNamedValue(trimmed, index + 1, line, "multipart", multipartValues, diagnostics)
@@ -368,7 +368,7 @@ public sealed class ForRestScriptParser
                 continue;
             }
 
-            if (TryParseTopLevelNamedValue(lineTrimmed, index + 1, line, "header", scenarioHeaders, diagnostics))
+            if (TryParseTopLevelMultiValue(lineTrimmed, index + 1, line, "header", scenarioHeaders, diagnostics))
             {
                 index++;
                 continue;
@@ -534,6 +534,89 @@ public sealed class ForRestScriptParser
         }
 
         target.Add(value);
+        return true;
+    }
+
+    private static bool TryParseTopLevelMultiValue(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        string keyword,
+        List<ForRestScriptNamedValue> target,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        if (!TryParseMultiValueDirective(trimmed, keyword, out var values, out var errorMessage))
+        {
+            return false;
+        }
+
+        if (values is null)
+        {
+            diagnostics.Add(CreateDiagnostic(errorMessage ?? $"Invalid '{keyword}' directive.", lineNumber, sourceLine));
+            return true;
+        }
+
+        target.AddRange(values);
+        return true;
+    }
+
+    // Parses a directive whose right-hand side may list several comma-separated
+    // values (e.g. `header "Accept" = "application/json", "text/xml"`), emitting one
+    // named value per entry so a single directive can produce multiple headers with
+    // the same name. Commas inside quotes or parentheses are preserved, so
+    // `header "Accept" = "text/html, text/plain"` stays a single value.
+    private static bool TryParseMultiValueDirective(
+        string trimmed,
+        string keyword,
+        out List<ForRestScriptNamedValue>? namedValues,
+        out string? errorMessage)
+    {
+        namedValues = null;
+        errorMessage = null;
+
+        string remainder = trimmed;
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            if (!trimmed.StartsWith(keyword + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            remainder = trimmed[(keyword.Length + 1)..].Trim();
+        }
+
+        int separatorIndex = remainder.IndexOf('=');
+        if (separatorIndex < 0)
+        {
+            errorMessage = $"Entries in '{keyword}' must use '<name> = <value>'.";
+            return true;
+        }
+
+        string rawKey = remainder[..separatorIndex].Trim();
+        string rawValue = TrimOptionalTerminator(remainder[(separatorIndex + 1)..]);
+        string key = TryParseQuotedString(rawKey, out var stringKey)
+            ? stringKey!
+            : rawKey;
+
+        var values = new List<ForRestScriptNamedValue>();
+        foreach (var rawPart in SplitArguments(rawValue))
+        {
+            if (!TryParseExpression(rawPart, out var expression))
+            {
+                errorMessage = $"Could not parse the value '{rawPart}' for '{key}'.";
+                return true;
+            }
+
+            values.Add(new(key, expression!));
+        }
+
+        if (values.Count == 0)
+        {
+            errorMessage = $"Could not parse the value '{rawValue}' for '{key}'.";
+            return true;
+        }
+
+        namedValues = values;
         return true;
     }
 
