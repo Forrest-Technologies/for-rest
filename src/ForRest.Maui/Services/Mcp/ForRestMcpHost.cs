@@ -561,8 +561,8 @@ public sealed class ForRestMcpHost(
 
     public string GetSettingsText()
     {
-        // The raw file holds the AI api_key, MCP auth_token, license key, and
-        // custom headers that may embed credentials. Never hand those to a
+        // The raw file holds the AI api_key, MCP auth_token, and custom
+        // headers that may embed credentials. Never hand those to a
         // (possibly remote) MCP client verbatim.
         return McpSettingsRedactor.Redact(themeConfigStore.ReadAllText());
     }

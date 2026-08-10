@@ -508,7 +508,6 @@ public sealed class ForRestMcpToolsTests
     public void Settings_redactor_hides_known_secret_values()
     {
         string toml =
-            "license = \"LIC-123\"\n" +
             "[ai]\n" +
             "enabled = true\n" +
             "provider = \"openai\"\n" +
@@ -523,7 +522,6 @@ public sealed class ForRestMcpToolsTests
 
         Assert.IsFalse(redacted.Contains("sk-super-secret", System.StringComparison.Ordinal));
         Assert.IsFalse(redacted.Contains("tok-secret", System.StringComparison.Ordinal));
-        Assert.IsFalse(redacted.Contains("LIC-123", System.StringComparison.Ordinal));
         Assert.IsFalse(redacted.Contains("X-Api-Key: shh", System.StringComparison.Ordinal));
         // Non-secret values are preserved, including the provider family 'api'.
         StringAssert.Contains(redacted, "provider = \"openai\"");

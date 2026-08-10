@@ -14,8 +14,6 @@ public sealed class WorkbenchOAuthSettingsProviderTests
 
         ThemeConfigDocument document = parser.Parse(
             """
-            license = ""
-
             [appearance.theme]
             light = true
             azure = false
@@ -95,8 +93,6 @@ public sealed class WorkbenchOAuthSettingsProviderTests
 
         ThemeConfigDocument document = parser.Parse(
             """
-            license = ""
-
             [appearance.theme]
             light = true
             azure = false
@@ -128,8 +124,6 @@ public sealed class WorkbenchOAuthSettingsProviderTests
         File.WriteAllText(
             scope.ConfigFilePath,
             """
-            license = ""
-
             [appearance.theme]
             light = true
             azure = false

@@ -2,39 +2,12 @@ using System;
 using System.IO;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
-using ForRest.Licensing;
 
 namespace ForRest.Maui.Tests;
 
 [TestClass]
 public sealed class SettingsTomlDocumentServiceTests
 {
-	[TestMethod]
-	public void LoadOrCreate_masks_existing_license_value()
-	{
-		using TestConfigScope scope = new();
-		SettingsTomlDocumentService service = CreateService();
-		File.WriteAllText(
-			scope.ConfigFilePath,
-			"""
-			license = "super-secret-license"
-
-			[appearance.theme]
-			light = false
-			azure = true
-			dark = false
-			black = false
-			amber = false
-			""");
-
-		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
-
-		Assert.IsFalse(editorText.Contains("super-secret-license", StringComparison.Ordinal));
-		StringAssert.Contains(editorText, $"license = \"{SettingsTomlTemplate.MaskedLicenseValue}\"");
-		StringAssert.Contains(editorText, "[license.info]");
-		StringAssert.Contains(editorText, "build_grace_ends_utc = ");
-	}
-
 	[TestMethod]
 	public void LoadOrCreate_masks_existing_ai_api_key_value()
 	{
@@ -43,8 +16,6 @@ public sealed class SettingsTomlDocumentServiceTests
 		File.WriteAllText(
 			scope.ConfigFilePath,
 			"""
-			license = "super-secret-license"
-
 			[appearance.theme]
 			light = false
 			azure = true
@@ -66,7 +37,7 @@ public sealed class SettingsTomlDocumentServiceTests
 		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
 
 		Assert.IsFalse(editorText.Contains("secret-api-key", StringComparison.Ordinal));
-		StringAssert.Contains(editorText, $"api_key = \"{SettingsTomlTemplate.MaskedLicenseValue}\"");
+		StringAssert.Contains(editorText, $"api_key = \"{SettingsTomlTemplate.MaskedSecretValue}\"");
 		StringAssert.Contains(editorText, "enabled = true");
 	}
 
@@ -78,8 +49,6 @@ public sealed class SettingsTomlDocumentServiceTests
 		File.WriteAllText(
 			scope.ConfigFilePath,
 			"""
-			license = "super-secret-license"
-
 			[appearance.theme]
 			light = false
 			azure = true
@@ -119,8 +88,6 @@ public sealed class SettingsTomlDocumentServiceTests
 		SettingsTomlTemplate template = new();
 		string text =
 			"""
-			license = ""
-
 			[appearance.theme]
 			light = false
 			azure = true
@@ -158,8 +125,6 @@ public sealed class SettingsTomlDocumentServiceTests
 		File.WriteAllText(
 			scope.ConfigFilePath,
 			"""
-			license = ""
-
 			[appearance.theme]
 			light = true
 			azure = false
@@ -187,8 +152,6 @@ public sealed class SettingsTomlDocumentServiceTests
 		File.WriteAllText(
 			scope.ConfigFilePath,
 			"""
-			license = ""
-
 			[appearance.theme]
 			light = false
 			azure = true
@@ -213,15 +176,13 @@ public sealed class SettingsTomlDocumentServiceTests
 	}
 
 	[TestMethod]
-	public void SaveRawText_preserves_hidden_license_when_mask_is_unchanged()
+	public void SaveRawText_preserves_hidden_ai_api_key_when_mask_is_unchanged()
 	{
 		using TestConfigScope scope = new();
 		SettingsTomlDocumentService service = CreateService();
 		File.WriteAllText(
 			scope.ConfigFilePath,
 			"""
-			license = "super-secret-license"
-
 			[appearance.theme]
 			light = false
 			azure = true
@@ -248,46 +209,9 @@ public sealed class SettingsTomlDocumentServiceTests
 		service.SaveRawText(edited);
 
 		string rawText = File.ReadAllText(scope.ConfigFilePath);
-		StringAssert.Contains(rawText, "license = \"super-secret-license\"");
 		StringAssert.Contains(rawText, "api_key = \"secret-api-key\"");
 		StringAssert.Contains(rawText, "light = true");
 		StringAssert.Contains(rawText, "model = \"gpt-4.1-mini\"");
-	}
-
-	[TestMethod]
-	public void SaveRawText_replaces_license_when_user_edits_value()
-	{
-		using TestConfigScope scope = new();
-		SettingsTomlDocumentService service = CreateService();
-		File.WriteAllText(
-			scope.ConfigFilePath,
-			"""
-			license = "super-secret-license"
-
-			[appearance.theme]
-			light = false
-			azure = true
-			dark = false
-			black = false
-			amber = false
-
-			[ai]
-			enabled = true
-			provider = "openai"
-			api = "responses"
-			endpoint = "https://api.example.test"
-			model = "gpt-4o-mini"
-			deployment_name = "gpt-4o-mini"
-			api_key = "secret-api-key"
-			system_prompt = "Be brief."
-			""");
-
-		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
-		service.SaveRawText(editorText.Replace(SettingsTomlTemplate.MaskedLicenseValue, "replacement-license", StringComparison.Ordinal));
-
-		string rawText = File.ReadAllText(scope.ConfigFilePath);
-		StringAssert.Contains(rawText, "license = \"replacement-license\"");
-		Assert.IsFalse(rawText.Contains(SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal));
 	}
 
 	[TestMethod]
@@ -298,8 +222,6 @@ public sealed class SettingsTomlDocumentServiceTests
 		File.WriteAllText(
 			scope.ConfigFilePath,
 			"""
-			license = ""
-
 			[appearance.theme]
 			light = false
 			azure = true
@@ -319,41 +241,11 @@ public sealed class SettingsTomlDocumentServiceTests
 			""");
 
 		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
-		service.SaveRawText(editorText.Replace(SettingsTomlTemplate.MaskedLicenseValue, "replacement-api-key", StringComparison.Ordinal));
+		service.SaveRawText(editorText.Replace(SettingsTomlTemplate.MaskedSecretValue, "replacement-api-key", StringComparison.Ordinal));
 
 		string rawText = File.ReadAllText(scope.ConfigFilePath);
 		StringAssert.Contains(rawText, "api_key = \"replacement-api-key\"");
-		Assert.IsFalse(rawText.Contains(SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal));
-	}
-
-	[TestMethod]
-	public void SaveRawText_ignores_edits_to_generated_license_info_block()
-	{
-		using TestConfigScope scope = new();
-		SettingsTomlDocumentService service = CreateService();
-		File.WriteAllText(
-			scope.ConfigFilePath,
-			"""
-			license = ""
-
-			[appearance.theme]
-			light = false
-			azure = true
-			dark = false
-			black = false
-			amber = false
-			""");
-
-		string editorText = service.LoadOrCreate(new ForRestSettings(ShellThemeName.Azure));
-		string edited = editorText
-			.Replace("summary = ", "summary = \"hacked\" # ", StringComparison.Ordinal)
-			.Replace("lease_expires_utc = ", "lease_expires_utc = \"2099-01-01T00:00:00Z\" # ", StringComparison.Ordinal);
-		service.SaveRawText(edited);
-
-		string rawText = File.ReadAllText(scope.ConfigFilePath);
-		Assert.IsFalse(rawText.Contains("[license.info]", StringComparison.Ordinal));
-		Assert.IsFalse(rawText.Contains("hacked", StringComparison.Ordinal));
-		Assert.IsFalse(rawText.Contains("999", StringComparison.Ordinal));
+		Assert.IsFalse(rawText.Contains(SettingsTomlTemplate.MaskedSecretValue, StringComparison.Ordinal));
 	}
 
 	private static SettingsTomlDocumentService CreateService()

@@ -4,8 +4,8 @@ namespace ForRest.Mcp;
 /// Redacts secret-bearing values from the raw <c>settings.toml</c> before it is
 /// handed to an MCP client, and restores them when the client writes the file
 /// back. The settings file contains the AI provider API key, the MCP auth
-/// token, the license key, and custom headers that may embed credentials, so
-/// the raw text must never leave the machine verbatim.
+/// token, and custom headers that may embed credentials, so the raw text must
+/// never leave the machine verbatim.
 ///
 /// A key is treated as secret when its name is one of the known secret keys or
 /// ends in <c>_key</c> / contains <c>secret</c>, <c>password</c>, or
@@ -107,7 +107,7 @@ public static class McpSettingsRedactor
     public static bool IsSecretKey(string key)
     {
         string normalized = key.Trim().ToLowerInvariant();
-        return normalized is "license" or "custom_headers" or "api_key" or "auth_token"
+        return normalized is "custom_headers" or "api_key" or "auth_token"
                 or "password" or "secret" or "token" or "client_secret"
             || normalized.EndsWith("_key", StringComparison.Ordinal)
             || normalized.Contains("secret", StringComparison.Ordinal)

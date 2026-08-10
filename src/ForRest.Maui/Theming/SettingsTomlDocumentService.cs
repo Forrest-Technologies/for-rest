@@ -1,5 +1,3 @@
-using ForRest.Licensing;
-
 namespace ForRest.Maui.Theming;
 
 public sealed class SettingsTomlDocumentService
@@ -25,17 +23,6 @@ public sealed class SettingsTomlDocumentService
 
 	public string LoadOrCreate(ForRestSettings settings)
 	{
-		return LoadOrCreate(
-			settings,
-			new ActivationSnapshot(
-				LicenseAccessStatus.Pending,
-				"Activation pending",
-				"License state has not been evaluated yet.",
-				true));
-	}
-
-	public string LoadOrCreate(ForRestSettings settings, ActivationSnapshot activation)
-	{
 		string renderedTemplate = _settingsTomlTemplate.Build(settings);
 		_themeConfigStore.EnsureConfigFile(renderedTemplate);
 		string rawText = _themeConfigStore.ReadAllText();
@@ -49,7 +36,7 @@ public sealed class SettingsTomlDocumentService
 			_themeConfigStore.WriteAllText(normalized.NormalizedText);
 		}
 
-		return BuildEditorProjection(parsedDocument, normalized.Settings, activation);
+		return BuildEditorProjection(parsedDocument, normalized.Settings);
 	}
 
 	public IReadOnlyList<EditorEditableRange> GetEditableRanges(string text)
@@ -64,7 +51,6 @@ public sealed class SettingsTomlDocumentService
 
 	public void SaveRawText(string text)
 	{
-		string sanitizedText = _settingsTomlTemplate.RemoveGeneratedLicenseInfoBlock(text);
 		string currentRawText = _themeConfigStore.ReadAllText();
 		ThemeConfigDocument currentDocument = _themeConfigParser.Parse(currentRawText);
 		ThemeNormalizationResult currentNormalized = _themeConfigNormalizer.Normalize(currentDocument);
@@ -74,25 +60,19 @@ public sealed class SettingsTomlDocumentService
 		// normalizer must keep the newly enabled one; without the current theme it would fall back to
 		// the first flag in the document (light) and silently revert the edit.
 		ThemeNormalizationResult editorNormalized = _themeConfigNormalizer.Normalize(
-			_themeConfigParser.Parse(sanitizedText),
+			_themeConfigParser.Parse(text),
 			currentNormalized.Settings.Theme);
-
-		string editedLicense = editorNormalized.Settings.LicenseKey;
-		string resolvedLicense = string.Equals(editedLicense, SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal)
-			? currentNormalized.Settings.LicenseKey
-			: editedLicense;
 
 		ForRestAiSettings editedAi = editorNormalized.Settings.Ai;
 		ForRestAiSettings resolvedAi = editedAi with
 		{
-			ApiKey = string.Equals(editedAi.ApiKey, SettingsTomlTemplate.MaskedLicenseValue, StringComparison.Ordinal)
+			ApiKey = string.Equals(editedAi.ApiKey, SettingsTomlTemplate.MaskedSecretValue, StringComparison.Ordinal)
 				? currentNormalized.Settings.Ai.ApiKey
 				: editedAi.ApiKey
 		};
 
 		ForRestSettings nextSettings = editorNormalized.Settings with
 		{
-			LicenseKey = resolvedLicense,
 			Ai = resolvedAi
 		};
 
@@ -100,24 +80,16 @@ public sealed class SettingsTomlDocumentService
 		_themeConfigStore.WriteAllText(nextRawText);
 	}
 
-	private string BuildEditorProjection(ThemeConfigDocument document, ForRestSettings settings, ActivationSnapshot activation)
+	private string BuildEditorProjection(ThemeConfigDocument document, ForRestSettings settings)
 	{
 		ForRestSettings projectedSettings = settings with
 		{
-			LicenseKey = string.IsNullOrWhiteSpace(settings.LicenseKey) ? string.Empty : SettingsTomlTemplate.MaskedLicenseValue,
 			Ai = settings.Ai with
 			{
-				ApiKey = string.IsNullOrWhiteSpace(settings.Ai.ApiKey) ? string.Empty : SettingsTomlTemplate.MaskedLicenseValue
+				ApiKey = string.IsNullOrWhiteSpace(settings.Ai.ApiKey) ? string.Empty : SettingsTomlTemplate.MaskedSecretValue
 			}
 		};
 
-		string editorText = _themeConfigNormalizer.Render(document, projectedSettings);
-		return string.Join(
-			Environment.NewLine,
-			[
-				editorText,
-				string.Empty,
-				_settingsTomlTemplate.BuildLicenseInfoBlock(activation)
-			]);
+		return _themeConfigNormalizer.Render(document, projectedSettings);
 	}
 }

@@ -1,5 +1,4 @@
 using Microsoft.Maui.Graphics;
-using ForRest.Licensing;
 
 namespace ForRest.Maui.Theming;
 
@@ -90,8 +89,7 @@ public sealed record ForRestStyleSettings(
 }
 
 public sealed record ForRestSettings(
-	ShellThemeName Theme,
-	string LicenseKey = "")
+	ShellThemeName Theme)
 {
 	public ForRestStyleSettings Style { get; init; } = new();
 
@@ -122,7 +120,6 @@ public sealed record ThemeConfigEntry(
 public sealed record ThemeConfigDocument(
 	IReadOnlyList<SettingsTomlLine> Lines,
 	IReadOnlyList<ThemeConfigEntry> Entries,
-	string LicenseKey,
 	ForRestStyleSettings Style,
 	ForRestAiSettings Ai,
 	ForRestMcpSettings Mcp,
@@ -133,19 +130,6 @@ public sealed record ThemeNormalizationResult(
 	ForRestSettings Settings,
 	string NormalizedText,
 	IReadOnlyList<string> Messages);
-
-public sealed record ActivationSnapshot(
-	LicenseAccessStatus State,
-	string StatusText,
-	string DetailText,
-	bool CanExecuteRequests,
-	string? RegisteredTo = null,
-	string? RegisteredEmail = null,
-	DateTimeOffset? ServerValidatedUtc = null,
-	DateTimeOffset? LeaseRefreshAfterUtc = null,
-	DateTimeOffset? LeaseExpiresUtc = null,
-	DateTimeOffset? LicenseExpiresUtc = null,
-	DateTimeOffset? BuildGraceExpiresUtc = null);
 
 public sealed record EditorEditableRange(
 	int StartLineNumber,

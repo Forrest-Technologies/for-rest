@@ -14,6 +14,7 @@ No account, no cloud, no telemetry tax — your requests are real source files a
 ![macOS](https://img.shields.io/badge/macOS-Mac%20Catalyst-000000?logo=apple&logoColor=white)
 ![Local-first](https://img.shields.io/badge/storage-local--first%20SQLite-44883e)
 ![MCP](https://img.shields.io/badge/MCP-server%20built--in-FF6B35)
+![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
 
 </div>
 
@@ -377,6 +378,10 @@ dotnet build   src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-android
 dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-android -c Release
 ```
 
+On a macOS host the app project defaults to the Mac Catalyst head, so add
+`-p:TargetFrameworks=net10.0-android` to the commands above (and install the
+Android SDK) to build the Android head from a Mac.
+
 **Build for macOS** (unsigned — no Apple Developer license required)
 ```bash
 dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true
@@ -432,7 +437,6 @@ src/
   ForRest.Mcp/                    MCP server and tool catalog
   ForRest.Plugins.Abstractions/   Versionable extension contracts
   ForRest.Plugins.Host/           Plugin discovery & loading
-  ForRest.Licensing*/             Offline-first licensing (lease tokens, grace periods)
   ForRest.Shared/                 Shared result helpers
 
 tests/
@@ -462,6 +466,12 @@ For-Rest is built to grow into a serious, commercial-ready developer platform �
 - [`docs/architecture/mvp-progress.md`](docs/architecture/mvp-progress.md) — status & milestones
 - [`docs/dependencies/dependency-ledger.md`](docs/dependencies/dependency-ledger.md) — dependency review
 - [`CODEX.md`](CODEX.md) · [`CLAUDE.md`](CLAUDE.md) — contributor conventions
+
+---
+
+## License
+
+For-Rest is free and open source under the [MIT License](LICENSE).
 
 ---
 

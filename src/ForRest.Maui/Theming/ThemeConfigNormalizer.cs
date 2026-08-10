@@ -59,7 +59,7 @@ public sealed class ThemeConfigNormalizer
 			messages.Add("settings normalized");
 		}
 
-		ForRestSettings settings = new(selectedTheme, document.LicenseKey)
+		ForRestSettings settings = new(selectedTheme)
 		{
 			Style = normalizedStyle,
 			Ai = document.Ai,
@@ -91,13 +91,11 @@ public sealed class ThemeConfigNormalizer
 		bool insertedAiSection = false;
 		bool insertedMcpSection = false;
 		bool insertedOAuthSection = false;
-		bool insertedLicense = false;
 		bool skippingThemeSection = false;
 		bool skippingStyleSection = false;
 		bool skippingAiSection = false;
 		bool skippingMcpSection = false;
 		bool skippingOAuthSection = false;
-		int licenseInsertIndex = GetLicenseInsertionIndex(document.Lines);
 
 		foreach (SettingsTomlLine line in document.Lines)
 		{
@@ -230,31 +228,7 @@ public sealed class ThemeConfigNormalizer
 				continue;
 			}
 
-			if (line.IsKeyValue &&
-			    string.IsNullOrWhiteSpace(line.SectionName) &&
-			    string.Equals(line.Key, SettingsTomlTemplate.LicenseKeyName, StringComparison.OrdinalIgnoreCase))
-			{
-				if (!insertedLicense)
-				{
-					output.Add(SettingsTomlTemplate.BuildLicenseLine(settings.LicenseKey));
-					insertedLicense = true;
-				}
-
-				continue;
-			}
-
 			output.Add(line.RawText);
-		}
-
-		if (!insertedLicense)
-		{
-			licenseInsertIndex = Math.Clamp(licenseInsertIndex, 0, output.Count);
-			output.Insert(licenseInsertIndex, SettingsTomlTemplate.BuildLicenseLine(settings.LicenseKey));
-			if (licenseInsertIndex + 1 < output.Count &&
-			    !string.IsNullOrWhiteSpace(output[licenseInsertIndex + 1]))
-			{
-				output.Insert(licenseInsertIndex + 1, string.Empty);
-			}
 		}
 
 		if (!insertedThemeSection)
@@ -308,23 +282,6 @@ public sealed class ThemeConfigNormalizer
 		}
 
 		return string.Join(Environment.NewLine, TrimTrailingBlankLines(output));
-	}
-
-	private static int GetLicenseInsertionIndex(IReadOnlyList<SettingsTomlLine> lines)
-	{
-		int index = 0;
-		foreach (SettingsTomlLine line in lines)
-		{
-			if (line.IsBlank || line.IsComment)
-			{
-				index++;
-				continue;
-			}
-
-			break;
-		}
-
-		return index;
 	}
 
 	private static void AppendThemeSection(List<string> output, ShellThemeName selectedTheme)

@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using ForRest.Licensing;
 using ForRest.Domain;
 using ForRest.Maui.Services;
 using ForRest.Maui.Theming;
@@ -63,7 +62,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private readonly IScriptEngine _scriptEngine;
 	private readonly IExecutionHistoryRepository _executionHistoryRepository;
 	private readonly ForRestScriptDocumentTextService _documentTextService;
-	private readonly IAppActivationService _appActivationService;
 	private readonly IWorkbenchAiSettingsProvider _aiSettingsProvider;
 	private readonly IAiInlineConversationService _aiInlineConversationService;
 	private readonly IAiWorkspaceConversationService _aiWorkspaceConversationService;
@@ -117,9 +115,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private bool _isSynchronizingInspectorSnapshotSelection;
 	private string _debugOutputText;
 	private string _executionStatus;
-	private string _activationStatus;
-	private string _activationDetail;
-	private bool _canExecuteRequests = true;
 	private bool _isStatusBannerVisible;
 	private string _statusBannerTitle = string.Empty;
 	private string _statusBannerDetail = string.Empty;
@@ -185,7 +180,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private int _activeEditorRequestedCursorLineNumber;
 	private int _activeEditorRequestedCursorColumn;
 	private int _activeEditorRequestedCursorVersion;
-	private ActivationSnapshot _latestActivationSnapshot = CreatePendingActivationSnapshot();
 
 	public MainPageViewModel(
 		IThemeService themeService,
@@ -195,7 +189,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		IScriptEngine scriptEngine,
 		IExecutionHistoryRepository executionHistoryRepository,
 		ForRestScriptDocumentTextService documentTextService,
-		IAppActivationService appActivationService,
 		IWorkbenchAiSettingsProvider aiSettingsProvider,
 		IAiInlineConversationService aiInlineConversationService,
 		IAiWorkspaceConversationService aiWorkspaceConversationService)
@@ -207,7 +200,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		_scriptEngine = scriptEngine;
 		_executionHistoryRepository = executionHistoryRepository;
 		_documentTextService = documentTextService;
-		_appActivationService = appActivationService;
 		_aiSettingsProvider = aiSettingsProvider;
 		_aiInlineConversationService = aiInlineConversationService;
 		_aiWorkspaceConversationService = aiWorkspaceConversationService;
@@ -249,13 +241,11 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		_responseSizeStatus = "--";
 		_debugOutputText = "Debug output, compile diagnostics, console entries, and exceptions appear here.";
 		_executionStatus = themeService.CurrentStatusMessage;
-		_activationStatus = "Activation pending";
-		_activationDetail = "License state has not been evaluated yet.";
 		_currentThemeName = themeService.CurrentTheme.Name;
 		_editorThemeKey = themeService.CurrentTheme.MonacoThemeKey;
 		_activeEditorFontSize = themeService.CurrentSettings.Style.EditorFontSize;
 		_resultPaneTabFontSize = themeService.CurrentSettings.Style.ResultPaneTabFontSize;
-		_themeConfigText = ReadSettingsText(_currentThemeName, _latestActivationSnapshot);
+		_themeConfigText = ReadSettingsText(_currentThemeName);
 		_activeEditorText = _requestEditorText;
 		_activeEditorLanguage = "forrest";
 		_activeDocumentKind = RequestDocumentKind;
@@ -1220,18 +1210,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		set => SetProperty(ref _executionStatus, value);
 	}
 
-	public string ActivationStatus
-	{
-		get => _activationStatus;
-		set => SetProperty(ref _activationStatus, value);
-	}
-
-	public string ActivationDetail
-	{
-		get => _activationDetail;
-		set => SetProperty(ref _activationDetail, value);
-	}
-
 	public bool IsStatusBannerVisible
 	{
 		get => _isStatusBannerVisible;
@@ -1292,7 +1270,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	}
 
 	// Stays enabled while sending so the floating button can act as a Stop control for the running action.
-	public bool CanSend => IsActiveRequestEditor && _canExecuteRequests;
+	public bool CanSend => IsActiveRequestEditor;
 
 	public bool CanUndo => !IsSending && TryGetActiveDocumentHistory(out _, out DocumentTextHistory? history) && history is not null && history.CanUndo;
 
@@ -1658,7 +1636,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		_isAiEnabled = ReadAiEnabledSafe(fallback: false);
 		ApplyWorkspaceSelection(selectedWorkspaceId);
 		await ReloadHistoryAsync();
-		await RefreshActivationStatusAsync();
 		_isInitialized = true;
 		OnPropertyChanged(nameof(IsAiEnabled));
 	}
@@ -1706,13 +1683,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	{
 		if (!IsActiveRequestEditor || IsSending)
 		{
-			return;
-		}
-
-		await RefreshActivationStatusAsync();
-		if (!_canExecuteRequests)
-		{
-			ApplyActivationBlock();
 			return;
 		}
 
@@ -3714,10 +3684,8 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		ApplyThemePalette(e.Theme);
 		if (!e.IsPreview)
 		{
-			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
+			RequestSettingsProjectionRefresh(_currentThemeName);
 		}
-
-		_ = RefreshActivationStatusAsync();
 	}
 
 	private void ApplyStyleSettings(ForRestStyleSettings style)
@@ -3749,67 +3717,6 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 
 		IsStatusBannerVisible = true;
-	}
-
-	private async Task RefreshActivationStatusAsync()
-	{
-		try
-		{
-			ActivationSnapshot snapshot = await _appActivationService.EvaluateNowAsync();
-			_latestActivationSnapshot = snapshot;
-			ActivationStatus = snapshot.StatusText;
-			ActivationDetail = snapshot.DetailText;
-			_canExecuteRequests = snapshot.CanExecuteRequests;
-			if (!snapshot.CanExecuteRequests ||
-				snapshot.State is LicenseAccessStatus.ActivationRequired or LicenseAccessStatus.LeaseExpired or LicenseAccessStatus.Revoked or LicenseAccessStatus.Invalid or LicenseAccessStatus.ClockTampering)
-			{
-				ShowStatusBanner(snapshot.StatusText, snapshot.DetailText, isWarning: false);
-			}
-			RequestSettingsProjectionRefresh(_currentThemeName, snapshot);
-		}
-		catch (Exception exception)
-		{
-			ActivationStatus = "Activation unavailable";
-			ActivationDetail = exception.Message;
-			_canExecuteRequests = true;
-			_latestActivationSnapshot = CreateUnavailableActivationSnapshot(exception.Message);
-			ShowStatusBanner("Activation unavailable", exception.Message, isWarning: false);
-			AppLaunchGuard.RecordException("Activation status refresh failed.", exception);
-			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
-		}
-
-		OnPropertyChanged(nameof(CanSend));
-	}
-
-	private void ApplyActivationBlock()
-	{
-		ResponseState = "Blocked";
-		ExecutionStatus = ActivationStatus;
-		ShowStatusBanner(ActivationStatus, ActivationDetail, isWarning: false);
-		DebugOutputText = string.Join(
-			Environment.NewLine,
-			[
-				"Execution was blocked by activation policy.",
-				$"Status: {ActivationStatus}",
-				$"Detail: {ActivationDetail}"
-			]);
-		_responseTimeStatus = "--";
-		_responseSizeStatus = "--";
-		_latestResponseSnapshot = null;
-		ApplyRequestSnapshotEntries([]);
-		ApplyResponseSnapshotEntries([]);
-		ClearStashTable();
-		OutputMetrics.Clear();
-		OutputMetrics.Add(new OutputMetricViewModel("Status", "Blocked", _dangerColor));
-		OutputMetrics.Add(new OutputMetricViewModel("Time", "--", _methodNeutral));
-		OutputMetrics.Add(new OutputMetricViewModel("Size", "--", _methodNeutral));
-		OutputMetrics.Add(new OutputMetricViewModel("Type", "n/a", _methodNeutral));
-		TraceEntries.Clear();
-		TraceEntries.Add(new TraceEntryViewModel("license", ActivationStatus, DateTime.Now.ToString("T"), _dangerColor));
-		OnPropertyChanged(nameof(CanCopyTrace));
-		OnPropertyChanged(nameof(ResponseTimeStatus));
-		OnPropertyChanged(nameof(ResponseSizeStatus));
-		FocusRightPaneTab("debug");
 	}
 
 	private void ApplyThemePalette(ShellThemeDefinition theme, bool updateCollections = true)
@@ -4014,7 +3921,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private void ActivateSettingsEditor(NavigationItemViewModel item)
 	{
 		_activeDocumentKind = SettingsDocumentKind;
-		_themeConfigText = ReadSettingsText(_currentThemeName, _latestActivationSnapshot);
+		_themeConfigText = ReadSettingsText(_currentThemeName);
 		ActiveDocumentKindLabel = item.Kind;
 		ActiveDocumentKindColor = item.AccentColor;
 		ActiveDocumentLabel = item.Title;
@@ -5881,7 +5788,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			}
 
 			RefreshAiEnabledState();
-			RequestSettingsProjectionRefresh(_currentThemeName, _latestActivationSnapshot);
+			RequestSettingsProjectionRefresh(_currentThemeName);
 		}
 
 		try
@@ -5901,7 +5808,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 	}
 
-	private void RequestSettingsProjectionRefresh(ShellThemeName currentTheme, ActivationSnapshot activation)
+	private void RequestSettingsProjectionRefresh(ShellThemeName currentTheme)
 	{
 		if (_isShuttingDown)
 		{
@@ -5911,7 +5818,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		if (!IsActiveSettingsEditor)
 		{
 			CancelPendingSettingsProjectionRefresh();
-			UpdateSettingsTextFromDisk(currentTheme, activation);
+			UpdateSettingsTextFromDisk(currentTheme);
 			return;
 		}
 
@@ -5919,7 +5826,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		if (_lastSettingsEditUtc == DateTimeOffset.MinValue || elapsedSinceEdit >= SettingsEditorProjectionRefreshQuietPeriod)
 		{
 			CancelPendingSettingsProjectionRefresh();
-			UpdateSettingsTextFromDisk(currentTheme, activation);
+			UpdateSettingsTextFromDisk(currentTheme);
 			return;
 		}
 
@@ -5943,7 +5850,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 								return;
 							}
 
-							UpdateSettingsTextFromDisk(currentTheme, activation);
+							UpdateSettingsTextFromDisk(currentTheme);
 						});
 				}
 				catch (OperationCanceledException)
@@ -5961,9 +5868,9 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 			});
 	}
 
-	private void UpdateSettingsTextFromDisk(ShellThemeName currentTheme, ActivationSnapshot activation)
+	private void UpdateSettingsTextFromDisk(ShellThemeName currentTheme)
 	{
-		string latestText = ReadSettingsText(currentTheme, activation);
+		string latestText = ReadSettingsText(currentTheme);
 		_themeConfigText = latestText;
 
 		if (!IsActiveSettingsEditor)
@@ -5986,35 +5893,17 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		}
 	}
 
-	private string ReadSettingsText(ShellThemeName currentTheme, ActivationSnapshot activation)
+	private string ReadSettingsText(ShellThemeName currentTheme)
 	{
 		try
 		{
-			return NormalizeLineEndings(_settingsTomlDocumentService.LoadOrCreate(_themeService.CurrentSettings with { Theme = currentTheme }, activation));
+			return NormalizeLineEndings(_settingsTomlDocumentService.LoadOrCreate(_themeService.CurrentSettings with { Theme = currentTheme }));
 		}
 		catch (Exception exception)
 		{
 			AppLaunchGuard.RecordException("Settings text load failed.", exception);
 			return string.Empty;
 		}
-	}
-
-	private static ActivationSnapshot CreatePendingActivationSnapshot()
-	{
-		return new(
-			LicenseAccessStatus.Pending,
-			"Activation pending",
-			"License state has not been evaluated yet.",
-			true);
-	}
-
-	private static ActivationSnapshot CreateUnavailableActivationSnapshot(string detail)
-	{
-		return new(
-			LicenseAccessStatus.Pending,
-			"Activation unavailable",
-			detail,
-			true);
 	}
 
 	private string BuildEditableRangesJson(string text)

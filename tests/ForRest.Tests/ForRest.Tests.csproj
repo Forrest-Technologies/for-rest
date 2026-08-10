@@ -16,8 +16,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\ForRest.Licensing.Functions\ForRest.Licensing.Functions.csproj" />
-    <ProjectReference Include="..\..\src\ForRest.Licensing\ForRest.Licensing.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Shared\ForRest.Shared.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Browser\ForRest.Browser.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Models\ForRest.Models.csproj" />

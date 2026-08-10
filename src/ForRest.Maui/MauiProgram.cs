@@ -52,15 +52,6 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
-		builder.Services.AddSingleton<ILicenseLeaseCacheStore, FileLicenseLeaseCacheStore>();
-		builder.Services.AddSingleton<ILicenseInstallationService, SecureStorageInstallationService>();
-		builder.Services.AddHttpClient<ILicenseApiClient, LicenseApiClient>(
-			static client =>
-			{
-				client.BaseAddress = new Uri(ForRestLicenseProfile.ServiceBaseUrl, UriKind.Absolute);
-				client.Timeout = TimeSpan.FromSeconds(5);
-			});
-		builder.Services.AddSingleton<IAppActivationService, AppActivationService>();
 		builder.Services.AddSingleton<RequestWorkbenchStateStore>();
 		builder.Services.AddSingleton<BrowserAutomationProvider>();
 		builder.Services.AddSingleton<IBrowserAutomationProvider>(serviceProvider => serviceProvider.GetRequiredService<BrowserAutomationProvider>());

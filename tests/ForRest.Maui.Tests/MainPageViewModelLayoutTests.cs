@@ -5,7 +5,6 @@ using ForRest.Maui.ViewModels;
 using ForRest.Models;
 using ForRest.Services;
 using ForRest.Services.AI;
-using ForRest.Licensing;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Maui.Graphics;
@@ -38,20 +37,6 @@ public sealed class MainPageViewModelLayoutTests
 
 		Assert.AreEqual(420d, viewModel.RightPaneWidth.Value, 0.001d);
 		Assert.IsTrue(viewModel.RightPaneWidth.Value > 316d);
-	}
-
-	[TestMethod]
-	public async Task InitializeAsync_shows_dismissible_status_banner_for_blocking_activation()
-	{
-		using TestHarness harness = new();
-		MainPageViewModel viewModel = harness.CreateViewModel(appActivationService: new BlockingAppActivationService());
-
-		await viewModel.InitializeAsync();
-
-		Assert.IsTrue(viewModel.IsStatusBannerVisible);
-		Assert.AreEqual("License required", viewModel.StatusBannerTitle);
-		viewModel.DismissStatusBanner();
-		Assert.IsFalse(viewModel.IsStatusBannerVisible);
 	}
 
 	[TestMethod]
@@ -1592,8 +1577,6 @@ public sealed class MainPageViewModelLayoutTests
 		File.WriteAllText(
 			harness.ConfigFilePath,
 			"""
-			license = ""
-
 			[appearance.theme]
 			light = true
 			azure = false
@@ -2224,7 +2207,7 @@ public sealed class MainPageViewModelLayoutTests
 
 		public string StateFilePath { get; }
 
-		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null, IAiInlineConversationService? aiInlineConversationService = null, IScriptEngine? scriptEngine = null, IAppActivationService? appActivationService = null)
+		public MainPageViewModel CreateViewModel(IForRestScriptExecutionService? executionService = null, IAiInlineConversationService? aiInlineConversationService = null, IScriptEngine? scriptEngine = null)
 		{
 			ThemeConfigStore themeConfigStore = new();
 			SettingsTomlTemplate template = new();
@@ -2245,7 +2228,6 @@ public sealed class MainPageViewModelLayoutTests
 				scriptEngine ?? new FakeScriptEngine(),
 				new InMemoryExecutionHistoryRepository(),
 				new ForRestScriptDocumentTextService(),
-				appActivationService ?? new FakeAppActivationService(),
 				aiSettingsProvider,
 				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)),
 				new FakeAiWorkspaceConversationService());
@@ -2294,36 +2276,6 @@ public sealed class MainPageViewModelLayoutTests
 			ShellThemeDefinition theme = _themeCatalog.GetTheme(normalized.Settings.Theme);
 			_themeChanged?.Invoke(this, new ThemeChangedEventArgs(theme, normalized.Settings, $"theme {theme.Name.ToConfigName()}", configNormalized: false, isPreview: true));
 		}
-	}
-
-	private sealed class FakeAppActivationService : IAppActivationService
-	{
-		public ActivationSnapshot EvaluateNow() => CreateSnapshot();
-
-		public ActivationSnapshot EvaluateNow(string? activationCodeOverride) => CreateSnapshot();
-
-		public ActivationSnapshot EvaluateProjection(string? activationCodeOverride) => CreateSnapshot();
-
-		public Task<ActivationSnapshot> EvaluateNowAsync(CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
-
-		public Task<ActivationSnapshot> EvaluateNowAsync(string? activationCodeOverride, CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
-
-		private static ActivationSnapshot CreateSnapshot() => new(LicenseAccessStatus.Licensed, "Activated", "Tests", true);
-	}
-
-	private sealed class BlockingAppActivationService : IAppActivationService
-	{
-		public ActivationSnapshot EvaluateNow() => CreateSnapshot();
-
-		public ActivationSnapshot EvaluateNow(string? activationCodeOverride) => CreateSnapshot();
-
-		public ActivationSnapshot EvaluateProjection(string? activationCodeOverride) => CreateSnapshot();
-
-		public Task<ActivationSnapshot> EvaluateNowAsync(CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
-
-		public Task<ActivationSnapshot> EvaluateNowAsync(string? activationCodeOverride, CancellationToken cancellationToken = default) => Task.FromResult(CreateSnapshot());
-
-		private static ActivationSnapshot CreateSnapshot() => new(LicenseAccessStatus.ActivationRequired, "License required", "Activation is required before requests can run.", false);
 	}
 
 	private sealed class FakeExecutionService : IForRestScriptExecutionService

@@ -14,8 +14,6 @@ public sealed class WorkbenchMcpSettingsProviderTests
 
         ThemeConfigDocument document = parser.Parse(
             """
-            license = ""
-
             [appearance.theme]
             light = true
             azure = false
@@ -90,8 +88,6 @@ public sealed class WorkbenchMcpSettingsProviderTests
         File.WriteAllText(
             scope.ConfigFilePath,
             """
-            license = ""
-
             [appearance.theme]
             light = true
             azure = false

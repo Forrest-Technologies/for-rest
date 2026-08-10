@@ -215,8 +215,6 @@ public sealed class WorkbenchAiSettingsProviderTests
 		File.WriteAllText(
 			scope.ConfigFilePath,
 			"""
-			license = ""
-
 			[appearance.theme]
 			light = true
 			azure = false

@@ -81,14 +81,6 @@ jobs:
         shell: bash
         run: dotnet test tests/ForRest.Tests/ForRest.Tests.csproj -c Debug
 
-      - name: Build licensing function
-        shell: bash
-        run: dotnet build src/ForRest.Licensing.Functions/ForRest.Licensing.Functions.csproj -c "${{ needs.prepare.outputs.build_configuration }}"
-
-      - name: Publish licensing admin tool
-        shell: bash
-        run: dotnet publish src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj -c "${{ needs.prepare.outputs.build_configuration }}" -o artifacts/licensing-tool
-
       - name: Build macOS (Mac Catalyst) app
         shell: bash
         run: |
@@ -108,15 +100,6 @@ jobs:
             -p:FileVersion=${{ needs.prepare.outputs.file_version }} \
             -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} \
             -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} \
-            -p:ForRestLicenseServiceBaseUrl="${{ vars.FORREST_LICENSE_SERVICE_BASE_URL }}" \
-            -p:ForRestLicenseIssuer="${{ vars.FORREST_LICENSE_ISSUER }}" \
-            -p:ForRestLicenseAudience="${{ vars.FORREST_LICENSE_AUDIENCE }}" \
-            -p:ForRestLicenseSigningPublicKeyPem="${{ vars.FORREST_LICENSE_SIGNING_PUBLIC_KEY_PEM }}" \
-            -p:ForRestLicenseBuildGraceDays="${{ vars.FORREST_LICENSE_BUILD_GRACE_DAYS }}" \
-            -p:ForRestLicenseOfflineLeaseDays="${{ vars.FORREST_LICENSE_OFFLINE_LEASE_DAYS }}" \
-            -p:ForRestLicenseRefreshIntervalDays="${{ vars.FORREST_LICENSE_REFRESH_INTERVAL_DAYS }}" \
-            -p:ForRestLicenseClockSkewMinutes="${{ vars.FORREST_LICENSE_CLOCK_SKEW_MINUTES }}" \
-            -p:ForRestLicenseMaxActivations="${{ vars.FORREST_LICENSE_MAX_ACTIVATIONS }}" \
             -o "${OUTPUT_DIRECTORY}"
 
       - name: Restore local tools
@@ -170,13 +153,5 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst-obfuscation-map
           path: artifacts/obfuscation-maps/maccatalyst/*
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Upload licensing admin tool
-        uses: actions/upload-artifact@v4
-        with:
-          name: for-rest-${{ needs.prepare.outputs.version_label }}-licensing-tool
-          path: artifacts/licensing-tool/*
           if-no-files-found: error
           retention-days: 3

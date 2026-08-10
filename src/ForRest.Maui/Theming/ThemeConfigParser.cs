@@ -21,7 +21,6 @@ public sealed class ThemeConfigParser
 		List<string> messages = [];
 		string[] rawLines = text.Replace("\r\n", "\n").Split('\n');
 		string? currentSection = null;
-		string licenseKey = string.Empty;
 		ForRestStyleSettings style = new();
 		ForRestAiSettings ai = new();
 		ForRestMcpSettings mcp = new();
@@ -136,14 +135,9 @@ public sealed class ThemeConfigParser
 				}
 			}
 
-			if (string.IsNullOrWhiteSpace(currentSection) &&
-			    string.Equals(key, SettingsTomlTemplate.LicenseKeyName, StringComparison.OrdinalIgnoreCase))
-			{
-				licenseKey = ParseScalarValue(value);
-			}
 		}
 
-		return new ThemeConfigDocument(lines, entries, licenseKey, style, ai, mcp, oauth, messages);
+		return new ThemeConfigDocument(lines, entries, style, ai, mcp, oauth, messages);
 	}
 
 	private static bool TryParseEntry(string line, out string? key, out string? value, out string? message)

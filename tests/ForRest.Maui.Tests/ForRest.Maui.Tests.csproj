@@ -19,7 +19,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\ForRest.Licensing\ForRest.Licensing.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Scripting\ForRest.Scripting.csproj" />
     <ProjectReference Include="..\..\src\ForRest.Services\ForRest.Services.csproj" />
   </ItemGroup>
@@ -54,10 +53,6 @@
     <Compile Include="..\..\src\ForRest.Maui\Services\WorkbenchOAuthSettingsProvider.cs" Link="Services\WorkbenchOAuthSettingsProvider.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\McpLiveWorkbench.cs" Link="Services\McpLiveWorkbench.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\BuildMetadataProvider.cs" Link="Services\BuildMetadataProvider.cs" />
-    <Compile Include="..\..\src\ForRest.Maui\Services\LicenseRuntimeModels.cs" Link="Services\LicenseRuntimeModels.cs" />
-    <Compile Include="..\..\src\ForRest.Maui\Services\LicenseRuntimeServices.cs" Link="Services\LicenseRuntimeServices.cs" />
-    <Compile Include="..\..\src\ForRest.Maui\Services\AppActivationService.cs" Link="Services\AppActivationService.cs" />
-    <Compile Include="..\..\src\ForRest.Maui\Services\ForRestLicenseProfile.cs" Link="Services\ForRestLicenseProfile.cs" />
     <Compile Include="..\..\src\ForRest.Maui\Services\ResponseFileExtensionMapper.cs" Link="Services\ResponseFileExtensionMapper.cs" />
   </ItemGroup>
 

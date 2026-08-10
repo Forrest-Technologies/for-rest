@@ -5,9 +5,6 @@
     <Project Path="src/ForRest.Browser/ForRest.Browser.csproj" />
     <Project Path="src/ForRest.Domain/ForRest.Domain.csproj" />
     <Project Path="src/ForRest.Infrastructure.Sqlite/ForRest.Infrastructure.Sqlite.csproj" />
-    <Project Path="src/ForRest.Licensing.Tool/ForRest.Licensing.Tool.csproj" />
-    <Project Path="src/ForRest.Licensing/ForRest.Licensing.csproj" />
-    <Project Path="src/ForRest.Licensing.Functions/ForRest.Licensing.Functions.csproj" />
     <Project Path="src/ForRest.Models/ForRest.Models.csproj" />
     <Project Path="src/ForRest.Plugins.Abstractions/ForRest.Plugins.Abstractions.csproj" />
     <Project Path="src/ForRest.Plugins.Host/ForRest.Plugins.Host.csproj" />
@@ -16,9 +13,6 @@
     <Project Path="src/ForRest.Scripting/ForRest.Scripting.csproj" />
     <Project Path="src/ForRest.Services/ForRest.Services.csproj" />
     <Project Path="src/ForRest.Shared/ForRest.Shared.csproj" />
-  <Folder Name="/src/">
-    <Project Path="src/ForRest.Licensing.Keygen/ForRest.Licensing.Keygen.csproj" />
-  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj" />
     <Project Path="tests/ForRest.Tests/ForRest.Tests.csproj" />

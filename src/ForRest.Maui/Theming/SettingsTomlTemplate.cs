@@ -5,9 +5,7 @@ namespace ForRest.Maui.Theming;
 
 public sealed class SettingsTomlTemplate
 {
-	public const string LicenseKeyName = "license";
-	public const string MaskedLicenseValue = "********";
-	public const string GeneratedLicenseInfoSectionHeader = "[license.info]";
+	public const string MaskedSecretValue = "********";
 	private const string ThemeSectionHeader = "[appearance.theme]";
 	private const string StyleSectionHeader = "[appearance.style]";
 	private const string AiSectionHeader = "[ai]";
@@ -43,8 +41,6 @@ public sealed class SettingsTomlTemplate
 				"# For-Rest settings are generated from the current settings model.",
 				"# Edit only value fields. Structure is enforced and normalized automatically.",
 				string.Empty,
-				BuildLicenseLine(settings.LicenseKey),
-				string.Empty,
 				ThemeSectionHeader,
 				.. ThemeSupport.OrderedThemes.Select(theme => $"{theme.ToConfigName()} = {(theme == settings.Theme ? "true" : "false")}"),
 				string.Empty,
@@ -63,107 +59,11 @@ public sealed class SettingsTomlTemplate
 			]);
 	}
 
-	public static string BuildLicenseLine(string licenseKey)
-	{
-		return $"{LicenseKeyName} = \"{EscapeTomlString(licenseKey)}\"";
-	}
-
 	public static string EscapeTomlString(string? value)
 	{
 		return (value ?? string.Empty)
 			.Replace("\\", "\\\\", StringComparison.Ordinal)
 			.Replace("\"", "\\\"", StringComparison.Ordinal);
-	}
-
-	public string BuildLicenseInfoBlock(ActivationSnapshot activation)
-	{
-		return string.Join(
-			Environment.NewLine,
-			[
-				"# Read-only activation details. Changes here are ignored.",
-				GeneratedLicenseInfoSectionHeader,
-				$"state = \"{EscapeTomlString(activation.State.ToString())}\"",
-				$"summary = \"{EscapeTomlString(activation.StatusText)}\"",
-				$"detail = \"{EscapeTomlString(activation.DetailText)}\"",
-				$"registered_to = \"{EscapeTomlString(activation.RegisteredTo)}\"",
-				$"registered_email = \"{EscapeTomlString(activation.RegisteredEmail)}\"",
-				$"server_validated_utc = \"{EscapeTomlString(FormatDate(activation.ServerValidatedUtc))}\"",
-				$"lease_refresh_utc = \"{EscapeTomlString(FormatDate(activation.LeaseRefreshAfterUtc))}\"",
-				$"lease_expires_utc = \"{EscapeTomlString(FormatDate(activation.LeaseExpiresUtc))}\"",
-				$"license_expires_utc = \"{EscapeTomlString(FormatDate(activation.LicenseExpiresUtc))}\"",
-				$"build_grace_ends_utc = \"{EscapeTomlString(FormatDate(activation.BuildGraceExpiresUtc))}\"",
-				$"can_execute_requests = {(activation.CanExecuteRequests ? "true" : "false")}"
-			]);
-	}
-
-	public string RemoveGeneratedLicenseInfoBlock(string text)
-	{
-		string[] lines = text.Replace("\r\n", "\n").Split('\n');
-		List<string> output = [];
-		bool skippingSection = false;
-		bool skipNextBlankLine = false;
-
-		for (int index = 0; index < lines.Length; index++)
-		{
-			string line = lines[index];
-			string trimmed = line.Trim();
-			if (string.Equals(trimmed, "# Read-only activation details. Changes here are ignored.", StringComparison.Ordinal))
-			{
-				int lookahead = index + 1;
-				while (lookahead < lines.Length && string.IsNullOrWhiteSpace(lines[lookahead]))
-				{
-					lookahead++;
-				}
-
-				if (lookahead < lines.Length &&
-				    string.Equals(lines[lookahead].Trim(), GeneratedLicenseInfoSectionHeader, StringComparison.OrdinalIgnoreCase))
-				{
-					skipNextBlankLine = true;
-					continue;
-				}
-			}
-
-			if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
-			{
-				if (string.Equals(trimmed, GeneratedLicenseInfoSectionHeader, StringComparison.OrdinalIgnoreCase))
-				{
-					skippingSection = true;
-					continue;
-				}
-
-				skippingSection = false;
-			}
-
-			if (skippingSection)
-			{
-				continue;
-			}
-
-			if (skipNextBlankLine && string.IsNullOrWhiteSpace(trimmed))
-			{
-				continue;
-			}
-
-			skipNextBlankLine = false;
-			output.Add(line);
-		}
-
-		while (output.Count > 0 && string.IsNullOrWhiteSpace(output[^1]))
-		{
-			output.RemoveAt(output.Count - 1);
-		}
-
-		return string.Join(Environment.NewLine, output);
-	}
-
-	private static string FormatDate(DateTimeOffset? value)
-	{
-		return value?.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ") ?? string.Empty;
-	}
-
-	private static string FormatDate(DateTimeOffset value)
-	{
-		return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
 	}
 
 	private static string BuildAiComment(ForRestAiSettings ai)
@@ -225,16 +125,6 @@ public sealed class SettingsTomlTemplate
 
 			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection && !inOAuthSection)
 			{
-				Match topLevelMatch = ThemeLinePattern.Match(line);
-				if (topLevelMatch.Success &&
-				    string.Equals(topLevelMatch.Groups["key"].Value, LicenseKeyName, StringComparison.OrdinalIgnoreCase))
-				{
-					Group licenseValueGroup = topLevelMatch.Groups["value"];
-					int licenseStartColumn = licenseValueGroup.Index + 1;
-					int licenseEndColumn = Math.Max(licenseStartColumn + licenseValueGroup.Length, licenseStartColumn + 1);
-					ranges.Add(new EditorEditableRange(index + 1, licenseStartColumn, index + 1, licenseEndColumn));
-				}
-
 				continue;
 			}
 
@@ -322,18 +212,6 @@ public sealed class SettingsTomlTemplate
 
 			if (!inThemeSection && !inStyleSection && !inAiSection && !inMcpSection && !inOAuthSection)
 			{
-				Match topLevelMatch = ThemeLinePattern.Match(line);
-				if (topLevelMatch.Success &&
-				    string.Equals(topLevelMatch.Groups["key"].Value, LicenseKeyName, StringComparison.OrdinalIgnoreCase))
-				{
-					if (!IsValidStringScalarForAutosave(topLevelMatch.Groups["value"].Value.Trim()))
-					{
-						return false;
-					}
-
-					continue;
-				}
-
 				continue;
 			}
 

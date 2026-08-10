@@ -12,8 +12,6 @@ public sealed class ThemeConfigParserTests
 
 		ThemeConfigDocument document = parser.Parse(
 			"""
-			license = "super-secret-license"
-
 			[appearance.theme]
 			light = false
 			azure = true
@@ -37,7 +35,6 @@ public sealed class ThemeConfigParserTests
 			system_prompt = "Be brief."
 			""");
 
-		Assert.AreEqual("super-secret-license", document.LicenseKey);
 		Assert.AreEqual(15.5d, document.Style.EditorFontSize, 0.001d);
 		Assert.AreEqual(12.25d, document.Style.ResultPaneTabFontSize, 0.001d);
 		Assert.IsTrue(document.Ai.Enabled);
@@ -60,8 +57,6 @@ public sealed class ThemeConfigParserTests
 
 		ThemeConfigDocument document = parser.Parse(
 			"""
-			license = "super-secret-license"
-
 			[appearance.theme]
 			light = false
 			azure = true

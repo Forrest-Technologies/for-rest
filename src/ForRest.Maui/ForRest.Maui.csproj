@@ -8,9 +8,24 @@
 		<ForRestMacCatalystRuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</ForRestMacCatalystRuntimeIdentifiers>
 		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and '$(ForRestWindowsOnly)' == 'true'">$(WindowsOnlyTargetFrameworks)</TargetFrameworks>
 		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and '$(ForRestMacOnly)' == 'true'">$(MacCatalystOnlyTargetFrameworks)</TargetFrameworks>
+		<!-- A macOS host cannot build either default head: the Windows head needs the WinUI XAML
+		     compiler (a Windows-only executable) and the Android head needs a separately installed
+		     Android SDK. Default a plain `dotnet build` there to the Mac Catalyst head, matching the
+		     macOS CI job. Override with -p:TargetFrameworks=net10.0-android to build the Android head
+		     from a Mac that does have the Android SDK. -->
+		<ForRestMacHostDefault Condition="'$(TargetFrameworks)' == '' and '$(ForRestWindowsOnly)' != 'true' and '$(ForRestMacOnly)' != 'true' and $([MSBuild]::IsOSPlatform('OSX'))">true</ForRestMacHostDefault>
+		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and '$(ForRestMacHostDefault)' == 'true'">$(MacCatalystOnlyTargetFrameworks)</TargetFrameworks>
 		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and '$(ForRestWindowsOnly)' != 'true' and '$(ForRestMacOnly)' != 'true'">$(DefaultTargetFrameworks)</TargetFrameworks>
 		<RuntimeIdentifiers Condition="'$(ForRestWindowsOnly)' == 'true' and '$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == ''">$(ForRestWindowsRuntimeIdentifiers)</RuntimeIdentifiers>
 		<RuntimeIdentifiers Condition="'$(ForRestMacOnly)' == 'true' and '$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == ''">$(ForRestMacCatalystRuntimeIdentifiers)</RuntimeIdentifiers>
+		<!-- A plain local `dotnet build` wants one runnable .app, not a universal binary. Building
+		     both arches also emits per-arch bundles that carry no app icon — the asset catalog is
+		     only applied when the slices are merged — so the obvious-looking
+		     bin/<cfg>/net10.0-maccatalyst/<rid>/For-Rest.app launches without a logo. Building the
+		     host arch alone produces a single, correctly iconed bundle in half the time. Release
+		     and CI still pass -p:ForRestMacOnly=true above for the universal build. -->
+		<RuntimeIdentifier Condition="'$(ForRestMacHostDefault)' == 'true' and '$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == '' and $(NETCoreSdkPortableRuntimeIdentifier.EndsWith('arm64'))">maccatalyst-arm64</RuntimeIdentifier>
+		<RuntimeIdentifier Condition="'$(ForRestMacHostDefault)' == 'true' and '$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == ''">maccatalyst-x64</RuntimeIdentifier>
 		<OutputType>Exe</OutputType>
 		<RootNamespace>ForRest.Maui</RootNamespace>
 		<UseMaui>true</UseMaui>
@@ -47,61 +62,12 @@
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
 		<ForRestBuildDateUtc Condition="'$(ForRestBuildDateUtc)' == ''">$([System.DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"))</ForRestBuildDateUtc>
-		<!-- Release/store builds must point at the production licensing service. Only local Debug
-		     builds fall back to the Azure Functions dev host; on Android "localhost" resolves to the
-		     device itself, so a localhost fallback baked into a shipped APK breaks activation. -->
-		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == '' and '$(Configuration)' == 'Debug'">https://localhost:7071/api/</ForRestLicenseServiceBaseUrl>
-		<ForRestLicenseServiceBaseUrl Condition="'$(ForRestLicenseServiceBaseUrl)' == ''">https://func-license-l7syvegxetqco.azurewebsites.net/api/</ForRestLicenseServiceBaseUrl>
-		<ForRestLicenseIssuer Condition="'$(ForRestLicenseIssuer)' == ''">forrest-license</ForRestLicenseIssuer>
-		<ForRestLicenseAudience Condition="'$(ForRestLicenseAudience)' == ''">forrest-client</ForRestLicenseAudience>
-		<ForRestLicenseSigningPublicKeyPem Condition="'$(ForRestLicenseSigningPublicKeyPem)' == ''"></ForRestLicenseSigningPublicKeyPem>
-		<ForRestLicenseBuildGraceDays Condition="'$(ForRestLicenseBuildGraceDays)' == ''">30</ForRestLicenseBuildGraceDays>
-		<ForRestLicenseOfflineLeaseDays Condition="'$(ForRestLicenseOfflineLeaseDays)' == ''">14</ForRestLicenseOfflineLeaseDays>
-		<ForRestLicenseRefreshIntervalDays Condition="'$(ForRestLicenseRefreshIntervalDays)' == ''">3</ForRestLicenseRefreshIntervalDays>
-		<ForRestLicenseClockSkewMinutes Condition="'$(ForRestLicenseClockSkewMinutes)' == ''">10</ForRestLicenseClockSkewMinutes>
-		<ForRestLicenseMaxActivations Condition="'$(ForRestLicenseMaxActivations)' == ''">3</ForRestLicenseMaxActivations>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
 			<_Parameter1>ForRestBuildDateUtc</_Parameter1>
 			<_Parameter2>$(ForRestBuildDateUtc)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseServiceBaseUrl</_Parameter1>
-			<_Parameter2>$(ForRestLicenseServiceBaseUrl)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseIssuer</_Parameter1>
-			<_Parameter2>$(ForRestLicenseIssuer)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseAudience</_Parameter1>
-			<_Parameter2>$(ForRestLicenseAudience)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseSigningPublicKeyPem</_Parameter1>
-			<_Parameter2>$(ForRestLicenseSigningPublicKeyPem)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseBuildGraceDays</_Parameter1>
-			<_Parameter2>$(ForRestLicenseBuildGraceDays)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseOfflineLeaseDays</_Parameter1>
-			<_Parameter2>$(ForRestLicenseOfflineLeaseDays)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseRefreshIntervalDays</_Parameter1>
-			<_Parameter2>$(ForRestLicenseRefreshIntervalDays)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseClockSkewMinutes</_Parameter1>
-			<_Parameter2>$(ForRestLicenseClockSkewMinutes)</_Parameter2>
-		</AssemblyAttribute>
-		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-			<_Parameter1>ForRestLicenseMaxActivations</_Parameter1>
-			<_Parameter2>$(ForRestLicenseMaxActivations)</_Parameter2>
 		</AssemblyAttribute>
 	</ItemGroup>
 
@@ -120,11 +86,17 @@
 		<AndroidNoCompress Include=".js" />
 		<AndroidNoCompress Include=".css" />
 		<AndroidNoCompress Include=".json" />
+	</ItemGroup>
 
+	<!-- Android is the only head that stages Roslyn reference assemblies as packaged assets;
+	     RoslynRuntimeDirectoryBootstrapper unpacks them under #if ANDROID and every other head
+	     resolves references from its own app directory. Packaging them elsewhere is dead weight,
+	     and the Apple SDK fails the build outright because $(IntermediateOutputPath) does not hold
+	     the app assembly at bundle-resource validation time. -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
 		<!-- Package generic runtime dependencies from the checked-in cache, but never package app assemblies from snapshots. -->
 		<MauiAsset Include="roslyn-runtime\*.dll" Exclude="roslyn-runtime\ForRest.*.dll" LogicalName="roslyn-runtime/%(Filename)%(Extension)" />
 		<MauiAsset Include="..\ForRest.Domain\bin\$(Configuration)\net10.0\ForRest.Domain.dll" LogicalName="roslyn-runtime/ForRest.Domain.dll" />
-		<MauiAsset Include="..\ForRest.Licensing\bin\$(Configuration)\net10.0\ForRest.Licensing.dll" LogicalName="roslyn-runtime/ForRest.Licensing.dll" />
 		<MauiAsset Include="..\ForRest.Models\bin\$(Configuration)\net10.0\ForRest.Models.dll" LogicalName="roslyn-runtime/ForRest.Models.dll" />
 		<MauiAsset Include="..\ForRest.Plugins.Abstractions\bin\$(Configuration)\net10.0\ForRest.Plugins.Abstractions.dll" LogicalName="roslyn-runtime/ForRest.Plugins.Abstractions.dll" />
 		<MauiAsset Include="..\ForRest.Repositories\bin\$(Configuration)\net10.0\ForRest.Repositories.dll" LogicalName="roslyn-runtime/ForRest.Repositories.dll" />
@@ -221,7 +193,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\ForRest.Licensing\ForRest.Licensing.csproj" />
 		<ProjectReference Include="..\ForRest.Models\ForRest.Models.csproj" />
 		<ProjectReference Include="..\ForRest.Repositories\ForRest.Repositories.csproj" />
 		<ProjectReference Include="..\ForRest.Scripting\ForRest.Scripting.csproj" />

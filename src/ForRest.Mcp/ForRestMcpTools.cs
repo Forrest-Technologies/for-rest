@@ -825,7 +825,7 @@ public sealed class ForRestMcpTools
         });
     }
 
-    [Description("Returns the settings.toml content for the For-Rest app so an agent can inspect theme, AI, and MCP configuration before proposing changes. Secret values (api keys, the MCP auth token, the license key, and custom headers) are redacted to \"***\".")]
+    [Description("Returns the settings.toml content for the For-Rest app so an agent can inspect theme, AI, and MCP configuration before proposing changes. Secret values (api keys, the MCP auth token, and custom headers) are redacted to \"***\".")]
     public string get_settings_text()
     {
         return WithHost(host =>

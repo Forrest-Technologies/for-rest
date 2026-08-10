@@ -145,9 +145,6 @@
                       ColumnSpacing="10">
                     <Label Text="{Binding ExecutionStatus}"
                            Style="{StaticResource StatusBarTextStyle}" />
-                    <Label Grid.Column="1"
-                           Text="{Binding ActivationStatus}"
-                           Style="{StaticResource StatusBarTextStyle}" />
                     <Label Grid.Column="2"
                            Text="{Binding ResponseState}"
                            Style="{StaticResource StatusBarTextStyle}" />
