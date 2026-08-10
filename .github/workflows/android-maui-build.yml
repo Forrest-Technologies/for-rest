@@ -115,65 +115,15 @@ jobs:
             -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} `
             -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} `
 
-      - name: Restore local tools
-        shell: pwsh
-        run: dotnet tool restore
-
-      - name: Obfuscate release assemblies
-        shell: pwsh
-        run: |
-          $buildDirectory = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE "src\ForRest.Maui\bin\${{ needs.prepare.outputs.build_configuration }}") -Directory -Filter "net10.0-android*" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $buildDirectory) {
-            throw "Android build output directory was not found."
-          }
-
-          # Resolve NuGet package lib directories so Obfuscar can find
-          # transitive dependencies (e.g. System.ClientModel from Azure SDK)
-          # that are not copied to the Android build output.
-          $nugetBase = ((dotnet nuget locals global-packages -l) -replace 'global-packages:\s*', '').Trim()
-          $extraPaths = @(Get-ChildItem -Path $nugetBase -Recurse -Directory |
-            Where-Object { $_.Name -match '^net(10\.0|9\.0|8\.0|standard2\.[01])$' -and $_.Parent.Name -eq 'lib' } |
-            Select-Object -ExpandProperty FullName)
-
-          $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\android\ForRest.Obfuscar.Mapping.xml"
-          & scripts\Invoke-ForRestObfuscation.ps1 `
-            -InputDirectory $buildDirectory `
-            -OutputDirectory $buildDirectory `
-            -KeepPublicApi `
-            -MappingOutputPath $mappingPath `
-            -ExtraSearchPaths $extraPaths
-
-          # Copy obfuscated assemblies back to each library project's bin
-          # and obj directories so dotnet publish considers them up-to-date
-          # and does not recompile from source.
-          $config = "${{ needs.prepare.outputs.build_configuration }}"
-          foreach ($name in @('ForRest.Domain', 'ForRest.Services')) {
-            $dll = "$name.dll"
-            $source = Join-Path $buildDirectory $dll
-            if (-not (Test-Path $source)) { continue }
-            foreach ($root in @('bin', 'obj')) {
-              $target = Join-Path $env:GITHUB_WORKSPACE "src\$name\$root\$config\net10.0\$dll"
-              if (Test-Path $target) {
-                Copy-Item $source $target -Force
-              }
-            }
-          }
-
       - name: Prepare Android signing
         id: signing
         shell: pwsh
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          $repoKeystorePath = Join-Path $env:GITHUB_WORKSPACE 'build\android\for-rest-dev.keystore'
           if ([string]::IsNullOrWhiteSpace($env:ANDROID_KEYSTORE_BASE64)) {
-            if (Test-Path $repoKeystorePath) {
-              "has_keystore=true" >> $env:GITHUB_OUTPUT
-              "keystore_path=$repoKeystorePath" >> $env:GITHUB_OUTPUT
-            }
-            else {
-              "has_keystore=false" >> $env:GITHUB_OUTPUT
-            }
+            Write-Host 'ANDROID_KEYSTORE_BASE64 secret is not configured; the Android packages will be produced UNSIGNED.'
+            "has_keystore=false" >> $env:GITHUB_OUTPUT
             exit 0
           }
 
@@ -189,9 +139,16 @@ jobs:
           ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          $signingKeyAlias = if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_KEY_ALIAS)) { 'for-rest-dev' } else { $env:ANDROID_SIGNING_KEY_ALIAS }
-          $signingKeyPassword = if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_KEY_PASSWORD)) { 'for-rest-dev' } else { $env:ANDROID_SIGNING_KEY_PASSWORD }
-          $signingStorePassword = if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_STORE_PASSWORD)) { 'for-rest-dev' } else { $env:ANDROID_SIGNING_STORE_PASSWORD }
+          if ('${{ steps.signing.outputs.has_keystore }}' -eq 'true') {
+            $missing = @()
+            if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_KEY_ALIAS)) { $missing += 'ANDROID_KEY_ALIAS' }
+            if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_KEY_PASSWORD)) { $missing += 'ANDROID_KEY_PASSWORD' }
+            if ([string]::IsNullOrWhiteSpace($env:ANDROID_SIGNING_STORE_PASSWORD)) { $missing += 'ANDROID_KEYSTORE_PASSWORD' }
+            if ($missing.Count -gt 0) {
+              throw "Android signing keystore is configured but the following secrets are missing: $($missing -join ', '). Configure them or remove ANDROID_KEYSTORE_BASE64 to produce an unsigned build."
+            }
+          }
+
           $publishArgs = @(
             'publish',
             'src/ForRest.Maui/ForRest.Maui.csproj',
@@ -213,9 +170,9 @@ jobs:
             $publishArgs += @(
               '-p:AndroidKeyStore=true',
               '-p:AndroidSigningKeyStore=${{ steps.signing.outputs.keystore_path }}',
-              "-p:AndroidSigningKeyAlias=$signingKeyAlias",
-              "-p:AndroidSigningKeyPass=$signingKeyPassword",
-              "-p:AndroidSigningStorePass=$signingStorePassword"
+              "-p:AndroidSigningKeyAlias=$($env:ANDROID_SIGNING_KEY_ALIAS)",
+              "-p:AndroidSigningKeyPass=$($env:ANDROID_SIGNING_KEY_PASSWORD)",
+              "-p:AndroidSigningStorePass=$($env:ANDROID_SIGNING_STORE_PASSWORD)"
             )
           }
 
@@ -246,14 +203,6 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-android
           path: artifacts/release/android/*
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Upload obfuscation mapping
-        uses: actions/upload-artifact@v4
-        with:
-          name: for-rest-${{ needs.prepare.outputs.version_label }}-android-obfuscation-map
-          path: artifacts/obfuscation-maps/android/*
           if-no-files-found: error
           retention-days: 3
 

@@ -462,6 +462,8 @@ tests/
 
 For-Rest is built to grow into a serious, commercial-ready developer platform — not just a request sender. Shipping today: the `.frs` language, variables/environments, response extraction & assertions, run history, security payloads + fuzz engine, an embedded record/replay browser, inline AI across 9+ providers, and the MCP server. On the horizon:
 
+- **Workspace & script management** — basic workspace switching, create/rename/delete, and MCP-driven CRUD work today; richer organization (folders/collections, moving and duplicating requests across workspaces, bulk operations, a searchable script library) is not implemented yet.
+- **Import & export** — not implemented yet. Planned: import from Postman collections, OpenAPI specs, and curl commands (compiled into readable `.frs`), plus a portable plain-text workspace export/import format.
 - **Plugin ecosystem** — the contracts and loader (`IForRestPlugin`, `IAuthProviderPlugin`, `IResponseViewerPlugin`) are already in place; a discoverable marketplace and bundled plugins are next.
 - **Scheduling & repeatable workflows** — building on the guarded multi-send/retry engine.
 - **A `fuzz { }` flow-block grammar** and richer response viewers.

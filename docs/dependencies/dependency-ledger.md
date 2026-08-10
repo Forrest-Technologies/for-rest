@@ -1,6 +1,6 @@
 # Dependency Ledger
 
-Reviewed from `dotnet list ForRest.slnx package --include-transitive` on 2026-03-16.
+Reviewed from `dotnet list ForRest.slnx package --include-transitive` on 2026-03-16. Last updated 2026-08-10.
 
 ## Runtime and Build Dependencies
 
@@ -16,6 +16,14 @@ Reviewed from `dotnet list ForRest.slnx package --include-transitive` on 2026-03
 | `Microsoft.WindowsAppSDK` | WinUI 3 runtime and Windows desktop platform APIs | 1.7.250909003 | Microsoft Windows App SDK license terms | [github.com/microsoft/windowsappsdk](https://github.com/microsoft/windowsappsdk) | Acceptable for Windows-native commercial distribution, but not a permissive OSS license | High |
 | `Microsoft.Web.WebView2` | transitively available browser/runtime surface pulled by the Windows app stack | 1.0.2903.40 | BSD-style Microsoft license text in package | [aka.ms/webview](https://aka.ms/webview) | Approved | Medium |
 | `Microsoft.Windows.SDK.BuildTools` | Windows SDK packaging and build tooling | 10.0.22621.756 | Windows SDK license terms | [aka.ms/WinSDKProjectURL](https://aka.ms/WinSDKProjectURL) | Acceptable as a Windows build dependency, but not a permissive OSS license | High |
+| `Azure.AI.OpenAI` | Azure OpenAI client used by the AI assistant features | 2.8.0-beta.1 | MIT | [github.com/Azure/azure-sdk-for-net](https://github.com/Azure/azure-sdk-for-net) | Approved | Medium |
+| `OpenAI` | official OpenAI .NET SDK | 2.8.0 | MIT | [github.com/openai/openai-dotnet](https://github.com/openai/openai-dotnet) | Approved | Medium |
+| `Microsoft.Agents.AI.OpenAI` | agent framework bindings for OpenAI-compatible models | 1.0.0-rc4 | MIT | [github.com/microsoft/agent-framework](https://github.com/microsoft/agent-framework) | Approved | Medium |
+| `Microsoft.Extensions.AI` / `Microsoft.Extensions.AI.Abstractions` / `Microsoft.Extensions.AI.OpenAI` | AI abstraction layer over chat clients | 10.3.0 | MIT | [github.com/dotnet/extensions](https://github.com/dotnet/extensions) | Approved | Medium |
+| `ModelContextProtocol` | MCP server implementation for the ForRest.Mcp host | 1.2.0 | MIT | [github.com/modelcontextprotocol/csharp-sdk](https://github.com/modelcontextprotocol/csharp-sdk) | Approved | Medium |
+| `Microsoft.Identity.Client` | MSAL authentication for Entra-protected APIs | 4.83.1 | MIT | [github.com/AzureAD/microsoft-authentication-library-for-dotnet](https://github.com/AzureAD/microsoft-authentication-library-for-dotnet) | Approved | Low |
+| `Microsoft.Maui.Controls` and `Microsoft.Maui.Essentials` | MAUI application framework and device APIs | pinned via `$(MauiVersion)` | MIT | [github.com/dotnet/maui](https://github.com/dotnet/maui) | Approved | High because the app model depends on MAUI |
+| `Microsoft.Extensions.Http` and `Microsoft.Extensions.Hosting` | HttpClientFactory and generic host | 10.0.x | MIT | [github.com/dotnet/runtime](https://github.com/dotnet/runtime) | Approved | Low |
 
 ## Test-Only Dependencies
 

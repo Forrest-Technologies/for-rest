@@ -157,23 +157,6 @@ jobs:
             throw "Publish output is missing Microsoft.Extensions.AI*.dll under $outputDirectory. The MAUI Windows publish did not flow the AI package assemblies into the artifact."
           }
 
-      - name: Restore local tools
-        if: needs.prepare.outputs.build_configuration == 'Release'
-        shell: pwsh
-        run: dotnet tool restore
-
-      - name: Obfuscate release assemblies
-        if: needs.prepare.outputs.build_configuration == 'Release'
-        shell: pwsh
-        run: |
-          $inputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts\ci\${{ matrix.arch }}"
-          $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts\obfuscation-maps\${{ matrix.arch }}\ForRest.Obfuscar.Mapping.xml"
-          & scripts\Invoke-ForRestObfuscation.ps1 `
-            -InputDirectory $inputDirectory `
-            -OutputDirectory $inputDirectory `
-            -KeepPublicApi `
-            -MappingOutputPath $mappingPath
-
       - name: Verify publish output
         shell: pwsh
         run: |
@@ -197,15 +180,6 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}
           path: artifacts/ci/${{ matrix.arch }}
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Upload obfuscation mapping
-        if: needs.prepare.outputs.build_configuration == 'Release'
-        uses: actions/upload-artifact@v4
-        with:
-          name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}-obfuscation-map
-          path: artifacts/obfuscation-maps/${{ matrix.arch }}/*
           if-no-files-found: error
           retention-days: 3
 

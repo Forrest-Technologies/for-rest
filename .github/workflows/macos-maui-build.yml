@@ -102,23 +102,6 @@ jobs:
             -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} \
             -o "${OUTPUT_DIRECTORY}"
 
-      - name: Restore local tools
-        if: needs.prepare.outputs.build_configuration == 'Release'
-        shell: bash
-        run: dotnet tool restore
-
-      - name: Obfuscate release assemblies
-        if: needs.prepare.outputs.build_configuration == 'Release'
-        shell: pwsh
-        run: |
-          $inputDirectory = Join-Path $env:GITHUB_WORKSPACE "artifacts/ci/maccatalyst"
-          $mappingPath = Join-Path $env:GITHUB_WORKSPACE "artifacts/obfuscation-maps/maccatalyst/ForRest.Obfuscar.Mapping.xml"
-          & scripts/Invoke-ForRestObfuscation.ps1 `
-            -InputDirectory $inputDirectory `
-            -OutputDirectory $inputDirectory `
-            -KeepPublicApi `
-            -MappingOutputPath $mappingPath
-
       - name: Package macOS build output
         shell: bash
         run: |
@@ -144,14 +127,5 @@ jobs:
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst
           path: artifacts/release/maccatalyst/*
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Upload obfuscation mapping
-        if: needs.prepare.outputs.build_configuration == 'Release'
-        uses: actions/upload-artifact@v4
-        with:
-          name: for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst-obfuscation-map
-          path: artifacts/obfuscation-maps/maccatalyst/*
           if-no-files-found: error
           retention-days: 3

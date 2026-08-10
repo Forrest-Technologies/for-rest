@@ -1,6 +1,6 @@
 # For-Rest Script Language
 
-Date: 2026-03-28
+Date: 2026-08-10
 
 ## Canonical Source
 
@@ -220,6 +220,12 @@ Supported flow forms today:
 - `switch / case / default`
 - `range(start, end)`
 - inclusive range literals like `[0..9]`
+- `retry <count> { ... }` with optional `with backoff` (exponential) or `with delay <ms>`
+- `define name with param1, param2 { ... }` subroutines invoked via `call name with arg1, arg2`
+- `parallel { ... }` fan-out, including `let [a, b] = parallel { ... }` destructuring
+- `pipe { ... }` sequential request chains
+
+At the document level, `scenario "name" { ... }` sections declare named test scenarios that share the base request, and `import` / `use` directives pull in shared modules.
 
 **Block style.** The canonical form puts the opening brace on the header line, indents the
 body, and closes with `}` on its own line (every example below uses it). A block whose body
@@ -466,20 +472,28 @@ Included now:
 - JSON extraction
 - regex extraction and regex-backed expectations
 - structured response stash data
-- `while`, `foreach`, `range(start, end)`, and `if` flow forms
+- `while`, `foreach`, `range(start, end)`, `if`, and `switch / case / default` flow forms
+- `retry` blocks (`with backoff` / `with delay`), `on status` / `on error` handlers
+- `define` / `call` subroutines, `parallel` and `pipe` composition
+- `scenario` sections and `import` / `use` shared-module directives
 - `workspace.execute()` nested request execution
 - `ssl`, `history`, `timeout`, `redirects`, `content_type`, and `max_send_iterations` request settings
 - `payloads` corpora (with mutation) and the `fuzz` engine (bounded concurrency, baseline diffing, fingerprinting, host-scope governance)
 
 Not yet included:
 
-- browser-based authorization code + PKCE helpers
-- nested multi-request workflow graphs in a single document
-- user-defined functions
+- arbitrary multi-request workflow graphs beyond `pipe` / `parallel` / `workspace.execute()` composition
 - persistent writes back into global/workspace/environment variable stores
 - plugin-provided language extensions
 - cloud signing helpers such as AWS SigV4 or bespoke HMAC schemes
-- `switch` / `case` / `default` flow syntax
 - a dedicated `fuzz { }` flow-block grammar (the programmatic `fuzz` API covers this today)
 
 Those are future language/runtime expansions, not parser bugs.
+
+## Status & Roadmap
+
+The language and runtime surfaces above are implemented and test-covered today. The surrounding product surfaces below are **planned but not yet implemented** — contributors should not expect to find them in the codebase yet:
+
+- **Workspace management.** Basic workspace switching, create/rename/delete, and per-workspace document state exist in the shell (and over MCP). Richer management — folder/collection organization, moving and duplicating requests between workspaces, and bulk operations — still needs to be implemented.
+- **Script / collection management.** `.frs` documents live at simple locations (for example `/requests/get-users`) inside a workspace. A fuller script library — collections, tagging, search, and reusable shared-module management to back `import` / `use` at scale — is planned.
+- **Import / export.** There is no import or export today. The intended direction is import from Postman collections, OpenAPI specs, and curl commands (compiling each into readable `.frs`), plus a portable workspace export/import format so workspaces can be shared or checked into git as plain text.

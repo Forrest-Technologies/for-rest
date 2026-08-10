@@ -18,9 +18,10 @@
 /.local/
 /build/android/
 /config/settings.toml
-/config/license-admin.local.json
-/config/license-issued-history.local.json
 /docs/local/
+/.omx/
+/.vscode/
+/.claude/settings.local.json
 /.env
 /.env.*
 *.keystore

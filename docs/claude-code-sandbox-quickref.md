@@ -49,19 +49,23 @@ in `/etc/apt/apt.conf.d/01-vendor-ubuntu` do not conflict.
 ## Symptom: `dotnet build` fails with `EnableWindowsTargeting` or `maui-tizen`
 
 The solution targets `net10.0-windows10.0.19041.0` and expects MAUI workloads.
-On Linux, `dotnet build ForRest.slnx` fails because the Keygen project wants
-Windows targeting and because MAUI tests need workloads.
+The MAUI test project wants Windows targeting, which non-Windows hosts
+refuse unless it is opted into explicitly.
+
+`Directory.Build.props` now sets `EnableWindowsTargeting=true` automatically
+whenever the build host is not Windows, so the `-p:EnableWindowsTargeting=true`
+override below is no longer required — it is kept here because passing it
+anyway is harmless and older notes still reference it.
 
 - For the non-MAUI test project, build directly — it works as-is:
   ```bash
   dotnet build tests/ForRest.Tests/ForRest.Tests.csproj
   ```
-- For the MAUI test project, install the workload once per session and pass
-  the Windows-targeting override on every build and test command:
+- For the MAUI test project, install the workload once per session:
   ```bash
   dotnet workload restore tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj
-  dotnet build tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj -p:EnableWindowsTargeting=true
-  dotnet test  tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj -p:EnableWindowsTargeting=true --no-build
+  dotnet build tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj
+  dotnet test  tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj --no-build
   ```
 
 ## Symptom: `Test Run Aborted` at the end of `ForRest.Maui.Tests`

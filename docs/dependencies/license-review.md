@@ -8,7 +8,7 @@ The current dependency set is acceptable for the initial For-Rest foundation wit
 
 ## Approved Without Exception
 
-These families are permissive and acceptable for commercial distribution:
+These families are permissive and compatible with distributing For-Rest as MIT-licensed open source:
 
 - `CommunityToolkit.Mvvm` under MIT
 - `Microsoft.Extensions.*` under MIT
@@ -36,7 +36,7 @@ Decision:
 
 ### `Microsoft.Web.WebView2`
 
-- Current package license text is BSD-style and commercially acceptable.
+- Current package license text is BSD-style and compatible with open-source distribution.
 - The app does not currently depend on WebView-specific features directly.
 - Keep monitoring this transitively included package when Windows App SDK versions change.
 

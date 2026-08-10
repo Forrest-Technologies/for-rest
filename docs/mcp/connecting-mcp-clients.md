@@ -115,6 +115,6 @@ exposed tools.
 
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.
-- The raw `settings.toml` holds secrets (`auth_token`, the AI `api_key`, and the
-  license key). The MCP server redacts these values when it surfaces settings to
-  a client, but treat the file itself as sensitive.
+- The raw `settings.toml` holds secrets (`auth_token` and the AI `api_key`).
+  The MCP server redacts these values when it surfaces settings to a client,
+  but treat the file itself as sensitive.

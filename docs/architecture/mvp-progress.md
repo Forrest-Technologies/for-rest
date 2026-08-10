@@ -1,6 +1,6 @@
 # MVP Progress
 
-Last updated: 2026-03-18
+Last updated: 2026-08-10
 
 ## Status Summary
 
@@ -31,6 +31,8 @@ Last updated: 2026-03-18
 - Request tree and row-management behaviors are still simplified compared with the product brief.
 - Scheduling exists mostly as a service capability rather than a polished operator workflow.
 - Plugin support is architecture-only for now.
+- Workspace and script management beyond basic switch/create/rename/delete is not implemented yet — no folder/collection organization, no moving or duplicating requests between workspaces, and no bulk operations.
+- Import/export is not implemented yet. Import from Postman collections, OpenAPI specs, and curl commands, plus a portable workspace export format, are planned.
 - The current visual shell is much closer to the target power-user look, but the final editor/tooling experience still depends on the dedicated editor subsystem and richer explorer/history workflows.
 
 ## Next Slice Recommendation
