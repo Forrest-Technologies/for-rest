@@ -357,6 +357,16 @@ Secret values are redacted on read and restored by the host on write, so an agen
 
 ---
 
+## Install
+
+**macOS (Homebrew):**
+```bash
+brew install --cask --no-quarantine forrest-technologies/tap/for-rest
+```
+The app is currently unsigned, so `--no-quarantine` skips the Gatekeeper block; without it, right-click `For-Rest.app` → **Open** on first launch. Windows and Android builds are attached to each [GitHub release](https://github.com/Forrest-Technologies/for-rest/releases), or build from source below.
+
+---
+
 ## Quick start
 
 > **Baseline:** .NET `10.0.200-preview` (pinned in [`global.json`](global.json)). Solution format is `ForRest.slnx`.

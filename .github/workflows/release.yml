@@ -1,0 +1,132 @@
+name: Release
+
+# Publishes a GitHub Release with the unsigned macOS (Mac Catalyst) app.
+# The Homebrew cask (Forrest-Technologies/homebrew-tap) installs the
+# stable-named asset from the latest release:
+#   For-Rest-macos.zip
+#
+# Trigger by pushing a tag like v1.0.0, or run manually with a version input.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label (e.g. 1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      MACCATALYST_TFM: net10.0-maccatalyst
+      MAC_ONLY_BUILD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version metadata
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          APP_VERSION=$(TZ=America/New_York date +%Y%m%d)
+          BUILD_TIMESTAMP_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "version=${VERSION}"
+            echo "app_version=${APP_VERSION}"
+            echo "build_timestamp_utc=${BUILD_TIMESTAMP_UTC}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: preview
+          global-json-file: global.json
+
+      - name: Restore MAUI workloads
+        shell: bash
+        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:ForRestMacOnly=${MAC_ONLY_BUILD}
+
+      - name: Run core unit tests
+        shell: bash
+        run: dotnet test tests/ForRest.Tests/ForRest.Tests.csproj -c Debug
+
+      - name: Build macOS (Mac Catalyst) app
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTPUT_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-build/maccatalyst"
+          dotnet build src/ForRest.Maui/ForRest.Maui.csproj \
+            -c Release \
+            -f "${MACCATALYST_TFM}" \
+            -p:ForRestMacOnly=${MAC_ONLY_BUILD} \
+            -p:ForRestMacUnsigned=true \
+            -p:ContinuousIntegrationBuild=true \
+            -p:CreatePackage=false \
+            -p:EnableCodeSigning=false \
+            -p:ApplicationDisplayVersion=${{ steps.version.outputs.version }} \
+            -p:ApplicationVersion=${{ steps.version.outputs.app_version }} \
+            -p:Version="${{ steps.version.outputs.version }}" \
+            -p:InformationalVersion="${{ steps.version.outputs.version }}" \
+            -p:ForRestBuildDateUtc=${{ steps.version.outputs.build_timestamp_utc }} \
+            -o "${OUTPUT_DIRECTORY}"
+
+      - name: Package release assets
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-build/maccatalyst"
+          ASSET_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-assets"
+          mkdir -p "${ASSET_DIRECTORY}"
+
+          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 3 -type d -name '*.app' | head -n 1 || true)
+          if [[ -z "${APP_BUNDLE}" ]]; then
+            echo "No .app bundle was produced by the Mac Catalyst build." >&2
+            exit 1
+          fi
+
+          # Stable name consumed by the Homebrew cask, plus a versioned copy
+          # for direct downloads.
+          STABLE_ZIP="${ASSET_DIRECTORY}/For-Rest-macos.zip"
+          VERSIONED_ZIP="${ASSET_DIRECTORY}/For-Rest-${VERSION}-macos.zip"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${STABLE_ZIP}"
+          cp "${STABLE_ZIP}" "${VERSIONED_ZIP}"
+
+          SHA256=$(shasum -a 256 "${STABLE_ZIP}" | awk '{print $1}')
+          echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: For-Rest ${{ steps.version.outputs.version }}
+          files: artifacts/release-assets/*
+          body: |
+            ## Install
+
+            **Homebrew (macOS):**
+            ```
+            brew install --cask --no-quarantine forrest-technologies/tap/for-rest
+            ```
+
+            **Direct download:** grab `For-Rest-${{ steps.version.outputs.version }}-macos.zip` below, unzip, and move `For-Rest.app` to Applications. The app is unsigned — right-click → Open on first launch.
+
+            `For-Rest-macos.zip` SHA-256: `${{ steps.package.outputs.sha256 }}`
