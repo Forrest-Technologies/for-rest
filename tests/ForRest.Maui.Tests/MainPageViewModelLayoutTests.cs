@@ -2190,6 +2190,8 @@ public sealed class MainPageViewModelLayoutTests
 
 	private sealed class TestHarness : IDisposable
 	{
+		private const int DeleteAttempts = 5;
+
 		private readonly string _previousConfigFile;
 		private readonly string _rootPath;
 
@@ -2241,9 +2243,35 @@ public sealed class MainPageViewModelLayoutTests
 		public void Dispose()
 		{
 			Environment.SetEnvironmentVariable("FORREST_CONFIG_FILE", string.IsNullOrWhiteSpace(_previousConfigFile) ? null : _previousConfigFile);
-			if (Directory.Exists(_rootPath))
+			DeleteRootPath();
+		}
+
+		// Workbench state is persisted on a background task, so a save can still hold the
+		// temp file when the test finishes. Windows refuses to delete a directory with an
+		// open handle, so give the write a moment to drain rather than failing the run.
+		private void DeleteRootPath()
+		{
+			for (var attempt = 1; attempt <= DeleteAttempts; attempt++)
 			{
-				Directory.Delete(_rootPath, recursive: true);
+				if (!Directory.Exists(_rootPath))
+				{
+					return;
+				}
+
+				try
+				{
+					Directory.Delete(_rootPath, recursive: true);
+					return;
+				}
+				catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+				{
+					if (attempt == DeleteAttempts)
+					{
+						return;
+					}
+
+					Thread.Sleep(25 * attempt);
+				}
 			}
 		}
 	}

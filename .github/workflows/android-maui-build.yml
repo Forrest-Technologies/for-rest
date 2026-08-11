@@ -163,7 +163,7 @@ jobs:
             '-p:InformationalVersion=${{ needs.prepare.outputs.version_label }}',
             '-p:FileVersion=${{ needs.prepare.outputs.file_version }}',
             '-p:AssemblyVersion=${{ needs.prepare.outputs.file_version }}',
-            '-p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }}',
+            '-p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }}'
           )
 
           if ('${{ steps.signing.outputs.has_keystore }}' -eq 'true') {
