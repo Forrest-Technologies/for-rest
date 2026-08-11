@@ -62,6 +62,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 	private readonly IScriptEngine _scriptEngine;
 	private readonly IExecutionHistoryRepository _executionHistoryRepository;
 	private readonly ForRestScriptDocumentTextService _documentTextService;
+	private readonly IWorkspaceSharingService _workspaceSharingService;
 	private readonly IWorkbenchAiSettingsProvider _aiSettingsProvider;
 	private readonly IAiInlineConversationService _aiInlineConversationService;
 	private readonly IAiWorkspaceConversationService _aiWorkspaceConversationService;
@@ -189,6 +190,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		IScriptEngine scriptEngine,
 		IExecutionHistoryRepository executionHistoryRepository,
 		ForRestScriptDocumentTextService documentTextService,
+		IWorkspaceSharingService workspaceSharingService,
 		IWorkbenchAiSettingsProvider aiSettingsProvider,
 		IAiInlineConversationService aiInlineConversationService,
 		IAiWorkspaceConversationService aiWorkspaceConversationService)
@@ -200,6 +202,7 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 		_scriptEngine = scriptEngine;
 		_executionHistoryRepository = executionHistoryRepository;
 		_documentTextService = documentTextService;
+		_workspaceSharingService = workspaceSharingService;
 		_aiSettingsProvider = aiSettingsProvider;
 		_aiInlineConversationService = aiInlineConversationService;
 		_aiWorkspaceConversationService = aiWorkspaceConversationService;
@@ -2762,6 +2765,353 @@ public sealed class MainPageViewModel : ObservableObject, IMcpWorkbenchBridge
 				File = new ShareFile(filePath),
 			});
 		ExecutionStatus = $"Shared response headers: {fileName}";
+	}
+
+	public async Task ExportExplorerItemAsync(NavigationItemViewModel? item)
+	{
+		if (item is null || !string.Equals(item.DocumentKind, RequestDocumentKind, StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		RequestWorkbenchDocumentState? document = workspace?.Documents
+			.FirstOrDefault(candidate => string.Equals(candidate.Location, item.Context, StringComparison.OrdinalIgnoreCase));
+		if (document is null)
+		{
+			ExecutionStatus = "Nothing to export for that item.";
+			return;
+		}
+
+		try
+		{
+			string source = _workspaceSharingService.ExportDocumentSource(document);
+			string fileName = BuildRequestDocumentLabel(document.Title);
+			string filePath = Path.Combine(FileSystem.Current.CacheDirectory, fileName);
+			await File.WriteAllTextAsync(filePath, source);
+			await Share.Default.RequestAsync(
+				new ShareFileRequest
+				{
+					Title = $"Export {fileName}",
+					File = new ShareFile(filePath),
+				});
+			ExecutionStatus = $"Exported {fileName} (secrets redacted)";
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Request export failed.", exception);
+			ShowStatusBanner("Export failed", exception.Message, isWarning: true);
+		}
+	}
+
+	public async Task ExportActiveWorkspaceAsync()
+	{
+		CaptureActiveRequestIntoWorkspaceState();
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null || workspace.Documents.Count == 0)
+		{
+			ExecutionStatus = "The active workspace has nothing to export.";
+			return;
+		}
+
+		try
+		{
+			byte[] archiveBytes = _workspaceSharingService.ExportWorkspaceArchive(workspace);
+			string workspaceSlug = BuildRequestDocumentLabel(workspace.Name)
+				.Replace(".frs", string.Empty, StringComparison.Ordinal);
+			string fileName = $"{workspaceSlug}.forrest.zip";
+			string filePath = Path.Combine(FileSystem.Current.CacheDirectory, fileName);
+			await File.WriteAllBytesAsync(filePath, archiveBytes);
+			await Share.Default.RequestAsync(
+				new ShareFileRequest
+				{
+					Title = $"Export workspace '{workspace.Name}'",
+					File = new ShareFile(filePath),
+				});
+			ExecutionStatus = $"Exported {fileName} ({workspace.Documents.Count} scripts, secrets redacted)";
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Workspace export failed.", exception);
+			ShowStatusBanner("Export failed", exception.Message, isWarning: true);
+		}
+	}
+
+	public async Task ImportFilesAsync()
+	{
+		IEnumerable<FileResult>? picks;
+		try
+		{
+			picks = await FilePicker.Default.PickMultipleAsync(
+				new PickOptions { PickerTitle = "Import .frs scripts, workspace archives, Postman collections, or OpenAPI specs" });
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Import file picking failed.", exception);
+			ShowStatusBanner("Import failed", exception.Message, isWarning: true);
+			return;
+		}
+
+		List<FileResult> files = picks?.ToList() ?? [];
+		if (files.Count == 0)
+		{
+			return;
+		}
+
+		int importedDocuments = 0;
+		int importedWorkspaces = 0;
+		List<string> failures = [];
+		foreach (FileResult file in files)
+		{
+			try
+			{
+				await using Stream stream = await file.OpenReadAsync();
+				using MemoryStream buffer = new();
+				await stream.CopyToAsync(buffer);
+				ImportedDocumentBatch batch = _workspaceSharingService.ImportContent(file.FileName, buffer.ToArray());
+				ApplyImportedBatch(batch);
+				importedDocuments += batch.Documents.Count;
+				if (batch.WorkspaceName is not null)
+				{
+					importedWorkspaces++;
+				}
+			}
+			catch (Exception exception)
+			{
+				failures.Add($"{file.FileName}: {exception.Message}");
+			}
+		}
+
+		ReportImportOutcome(importedDocuments, importedWorkspaces, failures);
+	}
+
+	public async Task ImportCurlFromClipboardAsync()
+	{
+		string? clipboardText;
+		try
+		{
+			clipboardText = await Clipboard.Default.GetTextAsync();
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("Clipboard read for curl import failed.", exception);
+			ShowStatusBanner("Import failed", exception.Message, isWarning: true);
+			return;
+		}
+
+		if (!_workspaceSharingService.LooksLikeCurl(clipboardText))
+		{
+			ShowStatusBanner(
+				"Import curl",
+				"The clipboard does not contain a curl command. Copy a command that starts with 'curl' and try again.",
+				isWarning: true);
+			return;
+		}
+
+		try
+		{
+			ImportedDocumentBatch batch = _workspaceSharingService.ImportCurl(clipboardText!);
+			ApplyImportedBatch(batch);
+			ReportImportOutcome(batch.Documents.Count, importedWorkspaces: 0, failures: []);
+		}
+		catch (Exception exception)
+		{
+			AppLaunchGuard.RecordException("curl import failed.", exception);
+			ShowStatusBanner("Import failed", exception.Message, isWarning: true);
+		}
+	}
+
+	private void ReportImportOutcome(int importedDocuments, int importedWorkspaces, List<string> failures)
+	{
+		if (importedDocuments > 0)
+		{
+			string summary = importedWorkspaces > 0
+				? $"Imported {importedDocuments} {(importedDocuments == 1 ? "script" : "scripts")} across {importedWorkspaces} new {(importedWorkspaces == 1 ? "workspace" : "workspaces")}."
+				: $"Imported {importedDocuments} {(importedDocuments == 1 ? "script" : "scripts")} into '{SelectedWorkspace}'.";
+			ExecutionStatus = summary;
+			if (failures.Count > 0)
+			{
+				ShowStatusBanner("Import finished with errors", $"{summary} Failed: {string.Join("; ", failures)}", isWarning: true);
+			}
+		}
+		else if (failures.Count > 0)
+		{
+			ShowStatusBanner("Import failed", string.Join("; ", failures), isWarning: true);
+		}
+	}
+
+	internal void ApplyImportedBatch(ImportedDocumentBatch batch)
+	{
+		if (batch.Documents.Count == 0)
+		{
+			return;
+		}
+
+		CaptureActiveRequestIntoWorkspaceState();
+
+		if (batch.WorkspaceName is not null)
+		{
+			ImportBatchAsNewWorkspace(batch);
+			return;
+		}
+
+		RequestWorkbenchWorkspaceState? workspace = GetSelectedWorkspaceState();
+		if (workspace is null)
+		{
+			return;
+		}
+
+		List<RequestWorkbenchDocumentState> importedDocuments = BuildImportedDocuments(workspace, batch.Documents);
+		UpdateSelectedWorkspaceState(
+			currentWorkspace => currentWorkspace with
+			{
+				SelectedDocumentLocation = importedDocuments[^1].Location,
+				Documents =
+				[
+					.. currentWorkspace.Documents,
+					.. importedDocuments
+				]
+			});
+
+		ApplyWorkspaceSelection(workspace.Id);
+		SelectCenterTab(CenterTabs.FirstOrDefault(static tab => string.Equals(tab.Key, "request", StringComparison.Ordinal)));
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+		}
+	}
+
+	private void ImportBatchAsNewWorkspace(ImportedDocumentBatch batch)
+	{
+		string workspaceName = BuildUniqueWorkspaceName(batch.WorkspaceName!);
+		RequestWorkbenchWorkspaceState workspace = new()
+		{
+			Name = workspaceName,
+			SelectedEnvironment = string.IsNullOrWhiteSpace(batch.Environment) ? "Local" : batch.Environment,
+		};
+
+		List<RequestWorkbenchDocumentState> importedDocuments = BuildImportedDocuments(workspace, batch.Documents);
+		workspace = workspace with
+		{
+			SelectedDocumentLocation = importedDocuments[0].Location,
+			Documents = importedDocuments,
+		};
+
+		_workspaceStates[workspace.Id] = workspace;
+		Workspaces.Add(
+			new WorkspaceItemViewModel(
+				workspace.Id,
+				workspace.Name,
+				workspace.Documents.Count == 1 ? "1 request" : $"{workspace.Documents.Count} requests",
+				false));
+
+		ApplyWorkspaceSelection(workspace.Id);
+		SelectCenterTab(CenterTabs.FirstOrDefault(static tab => string.Equals(tab.Key, "request", StringComparison.Ordinal)));
+		if (_isInitialized)
+		{
+			_ = PersistWorkbenchStateInBackground();
+			_ = ReloadHistoryAsync();
+		}
+	}
+
+	private List<RequestWorkbenchDocumentState> BuildImportedDocuments(
+		RequestWorkbenchWorkspaceState workspace,
+		IReadOnlyList<ImportedDocument> documents)
+	{
+		HashSet<string> takenTitles = workspace.Documents
+			.Select(static document => document.Title)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		HashSet<string> takenLocations = workspace.Documents
+			.Select(static document => document.Location)
+			.Where(static location => !string.IsNullOrWhiteSpace(location))
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		List<RequestWorkbenchDocumentState> built = [];
+		foreach (ImportedDocument imported in documents)
+		{
+			string title = EnsureUniqueName(
+				string.IsNullOrWhiteSpace(imported.Name) ? "Imported request" : imported.Name.Trim(),
+				takenTitles);
+			takenTitles.Add(title);
+
+			string source = RequestWorkbenchDocumentNormalizer.NormalizeRequestDocumentSource(imported.Source, null, title);
+			(string method, string summary) = McpDeriveScriptMetadata(workspace.Id, source, title);
+			string location = ResolveImportedLocation(workspace, imported.PreferredLocation, title, takenLocations);
+			takenLocations.Add(location);
+
+			built.Add(
+				new RequestWorkbenchDocumentState
+				{
+					Title = title,
+					Method = method,
+					Summary = summary,
+					Location = location,
+					RequestSource = source,
+				});
+		}
+
+		return built;
+	}
+
+	private static string ResolveImportedLocation(
+		RequestWorkbenchWorkspaceState workspace,
+		string? preferredLocation,
+		string title,
+		HashSet<string> takenLocations)
+	{
+		if (!string.IsNullOrWhiteSpace(preferredLocation) &&
+		    preferredLocation.StartsWith('/') &&
+		    !takenLocations.Contains(preferredLocation))
+		{
+			return preferredLocation;
+		}
+
+		string workspaceSlug = BuildRequestDocumentLabel(workspace.Name).Replace(".frs", string.Empty, StringComparison.Ordinal);
+		string titleSlug = BuildRequestDocumentLabel(title).Replace(".frs", string.Empty, StringComparison.Ordinal);
+		string baseLocation = $"/requests/{workspaceSlug}/{titleSlug}";
+		if (!takenLocations.Contains(baseLocation))
+		{
+			return baseLocation;
+		}
+
+		int suffix = 2;
+		string candidate = $"{baseLocation}-{suffix}";
+		while (takenLocations.Contains(candidate))
+		{
+			suffix++;
+			candidate = $"{baseLocation}-{suffix}";
+		}
+
+		return candidate;
+	}
+
+	private string BuildUniqueWorkspaceName(string requestedName)
+	{
+		HashSet<string> existingNames = _workspaceStates.Values
+			.Select(static workspace => workspace.Name)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		string baseName = string.IsNullOrWhiteSpace(requestedName) ? "Imported workspace" : requestedName.Trim();
+		return EnsureUniqueName(baseName, existingNames);
+	}
+
+	private static string EnsureUniqueName(string baseName, HashSet<string> takenNames)
+	{
+		if (!takenNames.Contains(baseName))
+		{
+			return baseName;
+		}
+
+		int suffix = 2;
+		string candidate = $"{baseName} {suffix}";
+		while (takenNames.Contains(candidate))
+		{
+			suffix++;
+			candidate = $"{baseName} {suffix}";
+		}
+
+		return candidate;
 	}
 
 	public void SelectStashRow(StashRowViewModel? row)

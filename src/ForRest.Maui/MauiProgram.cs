@@ -8,6 +8,7 @@ using ForRest.Repositories;
 using ForRest.Services;
 using ForRest.Services.AI;
 using ForRest.Services.AI.OAuth;
+using ForRest.Services.Sharing;
 using ForRest.Scripting;
 using Microsoft.Extensions.Logging;
 #if WINDOWS || MACCATALYST
@@ -52,6 +53,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();
+		builder.Services.AddSingleton<IWorkspaceSharingService, WorkspaceSharingService>();
 		builder.Services.AddSingleton<RequestWorkbenchStateStore>();
 		builder.Services.AddSingleton<BrowserAutomationProvider>();
 		builder.Services.AddSingleton<IBrowserAutomationProvider>(serviceProvider => serviceProvider.GetRequiredService<BrowserAutomationProvider>());
@@ -68,6 +70,10 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ForRestRuntimeVariableSeedEvaluator>();
 		builder.Services.AddSingleton<IRepeatRunnerService, RepeatRunnerService>();
 		builder.Services.AddSingleton<IRequestAuthenticationService, RequestAuthenticationService>();
+		builder.Services.AddSingleton<IWorkspaceArchiveService, WorkspaceArchiveService>();
+		builder.Services.AddSingleton<ICurlImportService, CurlImportService>();
+		builder.Services.AddSingleton<IPostmanImportService, PostmanImportService>();
+		builder.Services.AddSingleton<IOpenApiScaffoldGenerator, OpenApiScaffoldGenerator>();
 		builder.Services.AddSingleton<IScriptEngine, RoslynScriptEngine>();
 		builder.Services.AddSingleton<IRequestExecutionService, RequestExecutionService>();
 		builder.Services.AddSingleton<IForRestScriptExecutionService, ForRestScriptExecutionService>();
