@@ -14,8 +14,8 @@ public static class PlatformExperience
 	public static bool UseWebCodeEditors(DevicePlatform platform)
 	{
 		// Android now hosts the native Sora code editor instead of the Monaco WebView, so the
-		// WebView-backed editors are limited to the desktop (WinUI) shell.
-		return platform == DevicePlatform.WinUI;
+		// WebView-backed editors are limited to the desktop shells (WinUI and Mac Catalyst).
+		return platform == DevicePlatform.WinUI || platform == DevicePlatform.MacCatalyst;
 	}
 
 	public static bool UseSoraEditor()
