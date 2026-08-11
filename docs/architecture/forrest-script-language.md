@@ -53,7 +53,7 @@ Supported top-level sections:
 
 Supported top-level directives:
 
-```frs
+```ruby
 name "Get Users"
 method GET
 url "https://api.example.test/users"
@@ -79,11 +79,11 @@ Markers:
 
 Examples:
 
-```frs
+```ruby
 ## Tighten this request and add a bearer auth example.
 ```
 
-```frs
+```ruby
 ## Why is this request failing?
 #> The URL is valid, but the request is missing an Authorization header.
 #> Add `auth.mode = bearer` and set `auth.token`.
@@ -177,7 +177,7 @@ Use `auth { ... }` or top-level `auth key = value` directives.
 
 The docs and catalog should keep the following auth shape explicit:
 
-```frs
+```ruby
 auth {
   mode = oauth_client_credentials
   token_url = "https://login.example.test/oauth2/v2.0/token"
@@ -193,7 +193,7 @@ localhost loopback (or accepts a registered `redirect_uri`), exchanges the code 
 `token_url`, caches the `refresh_token`, and auto-refreshes. The acquired bearer token
 is exposed to post-response scripts as the runtime variable `accessToken`.
 
-```frs
+```ruby
 auth {
   mode = oauth_authorization_code
   authorization_url = "https://login.example.test/authorize"
@@ -235,7 +235,7 @@ form is expanded to the multiline form before compilation.
 
 Examples:
 
-```frs
+```ruby
 while request.remaining_send_iterations > 0 {
   let sent = request.send()
   if sent.status == 200 {
@@ -244,13 +244,13 @@ while request.remaining_send_iterations > 0 {
 }
 ```
 
-```frs
+```ruby
 foreach index in range(0, 3) {
   log index
 }
 ```
 
-```frs
+```ruby
 switch response.status {
   case 200 {
     log "OK"
@@ -271,7 +271,7 @@ Two top-level handler blocks run around the main flow:
 - `on status <code> { ... }` runs after the main flow when the response status matches the code.
 - `on error { ... }` runs when the main flow throws an unhandled exception.
 
-```frs
+```ruby
 runtime trace_id = guid()
 
 on status 429 {
@@ -294,7 +294,7 @@ Handlers share the main flow's runtime variables and seeds. A value like `trace_
 - `payloads.Combine("xss", "ssti", "custom-literal")` to merge categories (and extra literals) with duplicates removed
 - `payloads.Categories()` to list every available category name
 
-```frs
+```ruby
 foreach p in payloads.sqli {
   request.url = $"https://api.example.test/search?q={p}"
   let sent = request.send()
@@ -316,7 +316,7 @@ Flow variables, response members, and extracted values are all dynamic. A few pr
 
 `request.send()` updates the global `response` and also returns the latest response snapshot so the caller can keep a local handle to each send.
 
-```frs
+```ruby
 let sent = request.send()
 if sent.status == 200 {
   runtime last_status = sent.status
@@ -335,7 +335,7 @@ Important behavior:
 - console entries, tests, and stash rows from the nested run are imported back into the outer execution context
 - standalone history entries are suppressed for helper runs
 
-```frs
+```ruby
 let auth = workspace.execute("/requests/auth/token")
 request.headers["Authorization"] = $"Bearer {auth.token}"
 ```

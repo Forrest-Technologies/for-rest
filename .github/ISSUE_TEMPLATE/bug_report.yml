@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in For-Rest doesn't work the way it should
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where did you hit this?
+      multiple: true
+      options:
+        - Windows
+        - Android
+        - macOS (Mac Catalyst)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+      description: Release version (Settings/About), or the commit SHA if you built from source.
+      placeholder: v0.4.1 or 51f10b0
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, and what went wrong?
+      placeholder: Steps to reproduce, plus the actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: frs-snippet
+    attributes:
+      label: .frs snippet (if relevant)
+      description: A minimal request script that reproduces the problem. Strip out real URLs and secrets first.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: Anything from the debug pane, run history, or a stack trace. Redact tokens and internal hostnames.
+      render: text

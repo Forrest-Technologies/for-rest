@@ -53,7 +53,7 @@ Postman solved a 2015 problem — *teams need to share collections* — by putti
 
 Open a request and you're not tabbing through dropdowns — you're editing a `.frs` script with full syntax highlighting, completions, and inline diagnostics. Headers, auth, variables, retries, branching, assertions, and response extraction all live as readable text:
 
-```frs
+```ruby
 # request.frs — create a user, retry on failure, and verify the result.
 method POST
 url "{{base_url}}/users"
@@ -154,7 +154,7 @@ Console.WriteLine($"new id: {id}");
 
 …and in `.frs`:
 
-```frs
+```ruby
 method POST
 url "{{base_url}}/users"
 auth { mode = bearer; token = "{{api_token}}" }
@@ -224,7 +224,7 @@ The `.frs` language is a first-class DSL compiled through a **Roslyn** host, not
 ### 🤖 AI-native — the model lives *inside* the editor
 Type a line that starts with `##` and you've started a conversation, right in the document:
 
-```frs
+```ruby
 ## add pagination query params and an If-None-Match header for caching
 ```
 
@@ -242,7 +242,7 @@ Flip one setting and For-Rest exposes a **Model Context Protocol** endpoint over
 Want to evaluate For-Rest properly? Here's a guided tour that exercises the things that actually set it apart. Paste each into a new request (the **CFG**/request editor) and hit run.
 
 **1 · Code-first basics — variables, interpolation, assertions**
-```frs
+```ruby
 method GET
 url "https://httpbin.org/get?trace={{trace_id}}"
 runtime trace_id = guid()
@@ -253,7 +253,7 @@ log $"echoed trace: {r.args.trace}"
 *What you're testing:* runtime variables, `{{interpolation}}`, dynamic response access, and assertions that report instead of throw.
 
 **2 · Resilience — retry with backoff + handlers**
-```frs
+```ruby
 method GET
 url "https://httpbin.org/status/503"
 on status 503 { warn "service flaky — backing off" }
@@ -265,7 +265,7 @@ retry 3 with backoff {
 *What you're testing:* `retry … with backoff`, `on status` handlers, and `break` — resilience as syntax.
 
 **3 · Chaining — extract a value and feed the next call**
-```frs
+```ruby
 method GET
 url "https://httpbin.org/uuid"
 let first = request.send()
@@ -277,7 +277,7 @@ expect json "$.args.id" == "{{token}}" "id threaded through"
 *What you're testing:* `extract` by JSON-path, mutating the request mid-flow, and chaining requests in one script.
 
 **4 · Tables — stash structured findings into run history**
-```frs
+```ruby
 method GET
 url "https://httpbin.org/get"
 let r = request.send()
@@ -288,7 +288,7 @@ stash.check = "type";    stash.value = r.headers["Content-Type"];   stash.Commit
 *What you're testing:* the `stash` table — every run is snapshotted to SQLite, so this grid is queryable later (and over MCP).
 
 **5 · Concurrency — fan out in parallel**
-```frs
+```ruby
 method GET
 url "https://httpbin.org/get"
 let [a, b, c] = parallel {
@@ -301,7 +301,7 @@ log $"uuid={a.uuid} ip={b.origin}"
 *What you're testing:* `parallel { }` — concurrent sends collected into one result.
 
 **6 · Security — payload corpora + fuzzing** *(authorized targets only)*
-```frs
+```ruby
 method GET
 url "https://httpbin.org/anything"
 foreach p in payloads.Category("xss") {
@@ -478,6 +478,12 @@ For-Rest is built to grow into a serious, commercial-ready developer platform �
 - [`docs/architecture/mvp-progress.md`](docs/architecture/mvp-progress.md) — status & milestones
 - [`docs/dependencies/dependency-ledger.md`](docs/dependencies/dependency-ledger.md) — dependency review
 - [`CODEX.md`](CODEX.md) · [`CLAUDE.md`](CLAUDE.md) — contributor conventions
+
+---
+
+## Contributing
+
+Contributions are welcome — from humans *and* AI agents. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for build/test setup and the PR process; coding agents should read [AGENTS.md](AGENTS.md) first. All contributors are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md), and security reports go through [SECURITY.md](SECURITY.md) — not public issues.
 
 ---
 
