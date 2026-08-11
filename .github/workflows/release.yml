@@ -124,9 +124,11 @@ jobs:
 
             **Homebrew (macOS):**
             ```
-            brew install --cask --no-quarantine forrest-technologies/tap/for-rest
+            brew install --cask forrest-technologies/tap/for-rest
             ```
 
-            **Direct download:** grab `For-Rest-${{ steps.version.outputs.version }}-macos.zip` below, unzip, and move `For-Rest.app` to Applications. The app is unsigned — right-click → Open on first launch.
+            **Direct download:** grab `For-Rest-${{ steps.version.outputs.version }}-macos.zip` below, unzip, and move `For-Rest.app` to Applications.
+
+            The app is unsigned, so approve it once: `xattr -dr com.apple.quarantine /Applications/For-Rest.app`, or right-click → Open on first launch.
 
             `For-Rest-macos.zip` SHA-256: `${{ steps.package.outputs.sha256 }}`

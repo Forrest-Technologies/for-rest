@@ -361,9 +361,9 @@ Secret values are redacted on read and restored by the host on write, so an agen
 
 **macOS (Homebrew):**
 ```bash
-brew install --cask --no-quarantine forrest-technologies/tap/for-rest
+brew install --cask forrest-technologies/tap/for-rest
 ```
-The app is currently unsigned, so `--no-quarantine` skips the Gatekeeper block; without it, right-click `For-Rest.app` → **Open** on first launch. Windows and Android builds are attached to each [GitHub release](https://github.com/Forrest-Technologies/for-rest/releases), or build from source below.
+The app is currently unsigned, so macOS Gatekeeper blocks the first launch. Approve it once with `xattr -dr com.apple.quarantine /Applications/For-Rest.app`, or right-click `For-Rest.app` → **Open**. Windows and Android builds are attached to each [GitHub release](https://github.com/Forrest-Technologies/for-rest/releases), or build from source below.
 
 ---
 
