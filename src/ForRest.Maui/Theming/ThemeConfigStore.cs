@@ -56,9 +56,16 @@ public sealed class ThemeConfigStore
 			TryFindWorkspaceRoot(AppContext.BaseDirectory) ??
 			TryFindWorkspaceRoot(Environment.CurrentDirectory);
 
+		// A sandboxed app (Mac Catalyst) can discover a workspace config it is not
+		// allowed to touch; without the probe the settings surface silently loads
+		// empty. Fall through to the app-data candidates in that case.
 		if (!string.IsNullOrWhiteSpace(workspaceRoot))
 		{
-			return Path.Combine(workspaceRoot, "config", FileName);
+			string workspaceConfigPath = Path.Combine(workspaceRoot, "config", FileName);
+			if (CanAccessConfigPath(workspaceConfigPath))
+			{
+				return workspaceConfigPath;
+			}
 		}
 
 		foreach (string candidateDirectory in GetFallbackConfigDirectories())
@@ -94,6 +101,34 @@ public sealed class ThemeConfigStore
 		}
 
 		yield return Path.Combine(Path.GetTempPath(), "ForRest");
+	}
+
+	private static bool CanAccessConfigPath(string configFilePath)
+	{
+		try
+		{
+			if (File.Exists(configFilePath))
+			{
+				using FileStream probe = File.Open(configFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+				return true;
+			}
+
+			string? directory = Path.GetDirectoryName(configFilePath);
+			if (string.IsNullOrWhiteSpace(directory))
+			{
+				return false;
+			}
+
+			Directory.CreateDirectory(directory);
+			string probePath = Path.Combine(directory, $".forrest-probe-{Guid.NewGuid():N}");
+			File.WriteAllText(probePath, string.Empty);
+			File.Delete(probePath);
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	private static string? TryFindWorkspaceRoot(string? startPath)

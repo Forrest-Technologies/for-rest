@@ -23,8 +23,7 @@ public partial class EditorSurface : ContentView
 		typeof(string),
 		typeof(EditorSurface),
 		string.Empty,
-		defaultBindingMode: BindingMode.TwoWay,
-		propertyChanged: OnTextChanged);
+		defaultBindingMode: BindingMode.TwoWay);
 
 	public static readonly BindableProperty IsReadOnlyProperty = BindableProperty.Create(
 		nameof(IsReadOnly),
@@ -59,7 +58,6 @@ public partial class EditorSurface : ContentView
 	public EditorSurface()
 	{
 		InitializeComponent();
-		UpdateLineNumbers(Text);
 		TextEditor.Focused += OnTextEditorFocused;
 		TextEditor.Unfocused += OnTextEditorUnfocused;
 	}
@@ -73,8 +71,6 @@ public partial class EditorSurface : ContentView
 	public event EventHandler<FocusEventArgs>? InnerEditorFocused;
 
 	public event EventHandler<FocusEventArgs>? InnerEditorUnfocused;
-
-	public ObservableCollection<string> LineNumbers { get; } = [];
 
 	public string Title
 	{
@@ -159,11 +155,6 @@ public partial class EditorSurface : ContentView
 		return true;
 	}
 
-	private static void OnTextChanged(BindableObject bindable, object? oldValue, object? newValue)
-	{
-		((EditorSurface)bindable).UpdateLineNumbers(newValue as string);
-	}
-
 	private void OnTextEditorFocused(object? sender, FocusEventArgs e)
 	{
 		InnerEditorFocused?.Invoke(this, e);
@@ -174,23 +165,4 @@ public partial class EditorSurface : ContentView
 		InnerEditorUnfocused?.Invoke(this, e);
 	}
 
-	private void UpdateLineNumbers(string? text)
-	{
-		int lineCount = 1;
-
-		if (!string.IsNullOrEmpty(text))
-		{
-			lineCount = text.Count(character => character == '\n') + 1;
-		}
-
-		while (LineNumbers.Count < lineCount)
-		{
-			LineNumbers.Add((LineNumbers.Count + 1).ToString());
-		}
-
-		while (LineNumbers.Count > lineCount)
-		{
-			LineNumbers.RemoveAt(LineNumbers.Count - 1);
-		}
-	}
 }

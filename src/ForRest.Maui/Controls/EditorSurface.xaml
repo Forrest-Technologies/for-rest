@@ -17,30 +17,12 @@
                        Style="{StaticResource MonoMetaStyle}" />
             </Grid>
 
+            <!-- No line-number gutter here on purpose: a stack of labels cannot track the
+                 native Editor's soft wrapping or scrolling, so the numbers drift and lie.
+                 Platforms with a real code editor (Monaco/Sora) get true gutters there. -->
             <Grid Grid.Row="1"
-                  ColumnDefinitions="42,*"
                   MinimumHeightRequest="340">
-                <Border StrokeThickness="0"
-                        BackgroundColor="{DynamicResource ThemeEditorGutterColor}">
-                    <ScrollView InputTransparent="True"
-                                VerticalScrollBarVisibility="Never">
-                        <VerticalStackLayout Padding="0,10"
-                                             Spacing="2"
-                                             BindableLayout.ItemsSource="{Binding LineNumbers, Source={x:Reference Root}}">
-                            <BindableLayout.ItemTemplate>
-                                <DataTemplate>
-                                    <Label Text="{Binding .}"
-                                           HorizontalTextAlignment="End"
-                                           Margin="0,0,8,0"
-                                           Style="{StaticResource MonoMetaStyle}" />
-                                </DataTemplate>
-                            </BindableLayout.ItemTemplate>
-                        </VerticalStackLayout>
-                    </ScrollView>
-                </Border>
-
                 <Editor x:Name="TextEditor"
-                        Grid.Column="1"
                         Text="{Binding Text, Source={x:Reference Root}, Mode=TwoWay}"
                         IsReadOnly="{Binding IsReadOnly, Source={x:Reference Root}}"
                         FontSize="{Binding EditorFontSize, Source={x:Reference Root}}"

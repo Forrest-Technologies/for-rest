@@ -10,6 +10,10 @@ public partial class ExplorerPane : ContentView
 	private const string DeleteAction = "Delete";
 	private const string OpenAction = "Open";
 	private const string CancelAction = "Cancel";
+	private const string ExportScriptAction = "Export .frs";
+	private const string ExportWorkspaceAction = "Export workspace (.zip)";
+	private const string ImportFilesAction = "Import files…";
+	private const string ImportCurlAction = "Import curl from clipboard";
 
 	#endregion
 
@@ -33,6 +37,27 @@ public partial class ExplorerPane : ContentView
 	private void OnHideClicked(object? sender, EventArgs e)
 	{
 		ViewModel.ToggleLeftPane();
+	}
+
+	private async void OnSharingClicked(object? sender, EventArgs e)
+	{
+		string? action = await ShowActionSheetAsync(
+			$"Share · {ViewModel.ActiveWorkspaceName}",
+			ImportFilesAction,
+			ImportCurlAction,
+			ExportWorkspaceAction);
+		switch (action)
+		{
+			case ImportFilesAction:
+				await ViewModel.ImportFilesAsync();
+				break;
+			case ImportCurlAction:
+				await ViewModel.ImportCurlFromClipboardAsync();
+				break;
+			case ExportWorkspaceAction:
+				await ViewModel.ExportActiveWorkspaceAsync();
+				break;
+		}
 	}
 
 	private void OnOpenWorkspaceAssistantClicked(object? sender, EventArgs e)
@@ -94,9 +119,20 @@ public partial class ExplorerPane : ContentView
 
 		ViewModel.SelectWorkspace(workspace);
 
-		string? action = await ShowActionSheetAsync(workspace.Title, RenameAction, DeleteAction);
+		string? action = await ShowActionSheetAsync(
+			workspace.Title,
+			RenameAction,
+			ExportWorkspaceAction,
+			ImportFilesAction,
+			DeleteAction);
 		switch (action)
 		{
+			case ExportWorkspaceAction:
+				await ViewModel.ExportActiveWorkspaceAsync();
+				break;
+			case ImportFilesAction:
+				await ViewModel.ImportFilesAsync();
+				break;
 			case RenameAction:
 				string? renamed = await PromptAsync("Rename Workspace", "Workspace name", workspace.Title);
 				if (!string.IsNullOrWhiteSpace(renamed))
@@ -144,11 +180,17 @@ public partial class ExplorerPane : ContentView
 
 		ViewModel.SelectExplorerItem(item);
 
-		string? action = await ShowActionSheetAsync(item.Title, OpenAction, RenameAction, DeleteAction);
+		string[] actions = string.Equals(item.DocumentKind, "request", StringComparison.Ordinal)
+			? [OpenAction, RenameAction, ExportScriptAction, DeleteAction]
+			: [OpenAction, RenameAction, DeleteAction];
+		string? action = await ShowActionSheetAsync(item.Title, actions);
 		switch (action)
 		{
 			case OpenAction:
 				ViewModel.SelectExplorerItem(item);
+				break;
+			case ExportScriptAction:
+				await ViewModel.ExportExplorerItemAsync(item);
 				break;
 			case RenameAction:
 				string? renamed = await PromptAsync("Rename", "Name", ViewModel.RequestName);

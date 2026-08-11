@@ -2176,6 +2176,11 @@ public partial class MonacoEditorSurface : ContentView, ICodeEditorSurface
 		return "https://appdir/";
 #elif ANDROID
 		return "file:///android_asset/";
+#elif MACCATALYST
+		// Raw MauiAssets (the Monaco bundle) land in the app bundle's Resources
+		// directory on Mac Catalyst. The MAUI WebView handler turns this path
+		// into the file base URL for HtmlWebViewSource.
+		return Foundation.NSBundle.MainBundle.ResourcePath + "/";
 #else
 		return "/";
 #endif

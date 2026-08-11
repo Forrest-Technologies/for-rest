@@ -96,11 +96,28 @@ public sealed class ThemeConfigNormalizer
 		bool skippingAiSection = false;
 		bool skippingMcpSection = false;
 		bool skippingOAuthSection = false;
+		bool skippingLegacyLicenseSection = false;
 
 		foreach (SettingsTomlLine line in document.Lines)
 		{
 			if (line.IsSectionHeader)
 			{
+				skippingLegacyLicenseSection = false;
+
+				// Settings files written before licensing was removed carry a
+				// generated [license.info] section. Drop it and its comment so
+				// existing installs self-heal on the next load.
+				if (string.Equals(line.SectionName, "license.info", StringComparison.OrdinalIgnoreCase))
+				{
+					while (output.Count > 0 &&
+					       (string.IsNullOrWhiteSpace(output[^1]) || output[^1].TrimStart().StartsWith('#')))
+					{
+						output.RemoveAt(output.Count - 1);
+					}
+
+					skippingLegacyLicenseSection = true;
+					continue;
+				}
 				if (skippingThemeSection)
 				{
 					skippingThemeSection = false;
@@ -223,7 +240,15 @@ public sealed class ThemeConfigNormalizer
 				}
 			}
 
-			if (skippingThemeSection || skippingStyleSection || skippingAiSection || skippingMcpSection || skippingOAuthSection)
+			if (skippingThemeSection || skippingStyleSection || skippingAiSection || skippingMcpSection || skippingOAuthSection || skippingLegacyLicenseSection)
+			{
+				continue;
+			}
+
+			// Legacy top-level license key from the removed licensing system.
+			if (line.IsKeyValue &&
+			    string.IsNullOrWhiteSpace(line.SectionName) &&
+			    string.Equals(line.Key, "license", StringComparison.OrdinalIgnoreCase))
 			{
 				continue;
 			}

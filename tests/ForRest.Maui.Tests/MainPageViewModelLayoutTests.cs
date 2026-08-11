@@ -2228,6 +2228,11 @@ public sealed class MainPageViewModelLayoutTests
 				scriptEngine ?? new FakeScriptEngine(),
 				new InMemoryExecutionHistoryRepository(),
 				new ForRestScriptDocumentTextService(),
+				new WorkspaceSharingService(
+					new ForRest.Services.Sharing.WorkspaceArchiveService(),
+					new ForRest.Services.Sharing.CurlImportService(),
+					new ForRest.Services.Sharing.PostmanImportService(),
+					new OpenApiScaffoldGenerator()),
 				aiSettingsProvider,
 				aiInlineConversationService ?? new FakeAiInlineConversationService(AiInlineConversationResult.NotHandled(string.Empty)),
 				new FakeAiWorkspaceConversationService());

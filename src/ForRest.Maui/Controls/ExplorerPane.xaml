@@ -10,7 +10,7 @@
             <Grid RowDefinitions="Auto,Auto,Auto,*">
                 <!-- Workspace switcher -->
                 <Grid Padding="10,8,10,6"
-                      ColumnDefinitions="*,Auto,Auto"
+                      ColumnDefinitions="*,Auto,Auto,Auto"
                       ColumnSpacing="8">
                     <Border Style="{StaticResource WorkspaceSwitcherStyle}">
                         <Border.GestureRecognizers>
@@ -35,6 +35,11 @@
                             IsVisible="{Binding IsAiEnabled}"
                             SemanticProperties.Description="Open the workspace assistant" />
                     <Button Grid.Column="2"
+                            Text="&#x21C5;"
+                            Style="{StaticResource SubtleToolbarButtonStyle}"
+                            Clicked="OnSharingClicked"
+                            SemanticProperties.Description="Import or export scripts and workspaces" />
+                    <Button Grid.Column="3"
                             Text="Hide"
                             Style="{StaticResource SubtleToolbarButtonStyle}"
                             Clicked="OnHideClicked" />

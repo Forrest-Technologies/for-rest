@@ -122,6 +122,39 @@ public sealed class ThemeConfigParserTests
 	}
 
 	[TestMethod]
+	public void Normalize_strips_legacy_license_key_and_license_info_section()
+	{
+		SettingsTomlTemplate template = new();
+		ThemeConfigParser parser = new();
+		ThemeConfigNormalizer normalizer = new(template);
+
+		// A settings.toml written before licensing was removed from the app.
+		ThemeConfigDocument document = parser.Parse(
+			"""
+			license = "legacy-license-key"
+
+			[appearance.theme]
+			light = false
+			azure = true
+			dark = false
+			black = false
+			amber = false
+
+			# Read-only activation details. Changes here are ignored.
+			[license.info]
+			state = "Licensed"
+			summary = "Activated"
+			""");
+
+		ThemeNormalizationResult result = normalizer.Normalize(document);
+
+		Assert.IsFalse(result.NormalizedText.Contains("legacy-license-key", StringComparison.Ordinal));
+		Assert.IsFalse(result.NormalizedText.Contains("license", StringComparison.OrdinalIgnoreCase));
+		Assert.IsFalse(result.NormalizedText.Contains("activation", StringComparison.OrdinalIgnoreCase));
+		StringAssert.Contains(result.NormalizedText, "[appearance.theme]");
+	}
+
+	[TestMethod]
 	public void Normalize_without_current_theme_keeps_first_enabled_flag()
 	{
 		SettingsTomlTemplate template = new();
