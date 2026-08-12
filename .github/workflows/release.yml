@@ -126,9 +126,10 @@ jobs:
             ```
             brew install --cask forrest-technologies/tap/for-rest
             ```
+            The cask clears the Gatekeeper quarantine flag automatically, so this just works.
 
             **Direct download:** grab `For-Rest-${{ steps.version.outputs.version }}-macos.zip` below, unzip, and move `For-Rest.app` to Applications.
 
-            The app is unsigned, so approve it once: `xattr -dr com.apple.quarantine /Applications/For-Rest.app`, or right-click → Open on first launch.
+            The app is unsigned, so a direct download (not via Homebrew) still needs one manual approval: `xattr -dr com.apple.quarantine /Applications/For-Rest.app`, or right-click → Open on first launch.
 
             `For-Rest-macos.zip` SHA-256: `${{ steps.package.outputs.sha256 }}`
