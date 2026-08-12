@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  ForRest.Scripting compiles every .frs script into an async C# method via
+  Roslyn at runtime. The default Mac Catalyst Release linker (MtouchLink=SdkOnly)
+  trims BCL members it can't prove are used by statically-analyzed app code,
+  which removes async state-machine plumbing (e.g.
+  AsyncTaskMethodBuilder`1.AwaitOnCompleted) that the runtime-compiled scripts
+  need but the linker can never see referenced. Root these assemblies from
+  trimming so the Roslyn scripting stack always has full metadata to compile
+  against, mirroring the equivalent TrimmerRootAssembly list already used for
+  the Android build.
+-->
+<linker>
+  <assembly fullname="System.Private.CoreLib" preserve="all" />
+  <assembly fullname="Microsoft.CSharp" preserve="all" />
+  <assembly fullname="Microsoft.CodeAnalysis" preserve="all" />
+  <assembly fullname="Microsoft.CodeAnalysis.CSharp" preserve="all" />
+  <assembly fullname="Microsoft.CodeAnalysis.CSharp.Scripting" preserve="all" />
+  <assembly fullname="Microsoft.CodeAnalysis.Scripting" preserve="all" />
+  <assembly fullname="System.Linq.Expressions" preserve="all" />
+  <assembly fullname="System.Reflection.Emit" preserve="all" />
+  <assembly fullname="System.Reflection.Emit.ILGeneration" preserve="all" />
+  <assembly fullname="System.Reflection.Emit.Lightweight" preserve="all" />
+  <assembly fullname="System.Reflection.Metadata" preserve="all" />
+  <assembly fullname="ForRest.Scripting" preserve="all" />
+  <assembly fullname="ForRest.Models" preserve="all" />
+</linker>
