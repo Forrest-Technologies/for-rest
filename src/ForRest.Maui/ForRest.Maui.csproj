@@ -120,6 +120,17 @@
 		<CodesignEntitlements>Platforms\MacCatalyst\Entitlements.plist</CodesignEntitlements>
 	</PropertyGroup>
 
+	<!-- Mac Catalyst defaults to MtouchLink=SdkOnly on Release, which trims BCL assemblies
+	     including System.Private.CoreLib's async state-machine plumbing (e.g.
+	     AsyncTaskMethodBuilder<T>.AwaitOnCompleted). ForRest.Scripting compiles every script
+	     as an async method at runtime via Roslyn, so a trimmed corelib makes ALL script
+	     execution fail with CS0656 even though the app itself launches fine. Disable linking
+	     for Mac Catalyst entirely so runtime-compiled scripts always have the full BCL surface
+	     to reference, matching the Android Debug configuration's AndroidLinkMode=None above. -->
+	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
+		<MtouchLink>None</MtouchLink>
+	</PropertyGroup>
+
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
 		<!-- Keep the runtime scripting stack intact while still allowing Android Release to trim the rest of the app. -->
 		<TrimmerRootAssembly Include="ForRest.Models" RootMode="All" />
