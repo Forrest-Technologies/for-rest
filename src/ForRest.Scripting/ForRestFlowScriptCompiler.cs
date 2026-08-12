@@ -1953,7 +1953,14 @@ internal static class ForRestFlowScriptCompiler
 
             if (depth == 0)
             {
-                if (c is ',' or '=' or ';' or '{' or '}' or '|' or '&' or '!' or '?')
+                // '>' and '<' matter here because a nested helper call like `__flow.Count(...)`
+                // can appear right after a lambda arrow (`x => __flow.Count(x.body) > 100`) once
+                // an earlier rewrite pass has already spliced it in. Without stopping at '>'/'<',
+                // the backward scan walks straight through the arrow and comparison operator and
+                // captures them as part of the receiver (e.g. "> __flow" instead of "__flow"),
+                // which then fails the BuiltInApiNames check and lets __flow.Count(...) get
+                // mis-rewritten as if it were a second, unrelated collection-method call.
+                if (c is ',' or '=' or ';' or '{' or '}' or '|' or '&' or '!' or '?' or '>' or '<')
                 {
                     break;
                 }
