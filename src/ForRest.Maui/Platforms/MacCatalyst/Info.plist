@@ -25,6 +25,14 @@
 	</array>
 	<key>XSAppIconAssets</key>
 	<string>Assets.xcassets/appicon.appiconset</string>
+	<!-- actool normally replaces XSAppIconAssets with CFBundleIconFile/CFBundleIconName
+	     in the final merged Info.plist during packaging, but our unsigned CI build runs
+	     with CreatePackage=false (no signing/dmg step), which skips that injection —
+	     the compiled appicon.icns still lands in Contents/Resources, just with nothing
+	     in Info.plist pointing at it, so macOS shows the generic placeholder icon in the
+	     Dock/Finder. Set it explicitly so the icon resolves regardless of packaging mode. -->
+	<key>CFBundleIconFile</key>
+	<string>appicon</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>NSHumanReadableCopyright</key>
