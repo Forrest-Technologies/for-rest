@@ -12,6 +12,11 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- Required for the self-hosted MCP server (HttpListener) to bind and accept
+	     inbound loopback connections; without it HttpListener.Start() throws under
+	     the sandbox and the server silently fails to start. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 </dict>
