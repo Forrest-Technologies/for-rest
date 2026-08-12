@@ -2609,33 +2609,46 @@ public static class CollectionApi
 
     private static List<object?> Materialize(object source)
     {
+        List<object?> items;
         if (source is List<object?> objectList)
         {
-            return objectList;
+            items = objectList;
         }
-
-        if (source is IEnumerable<object?> enumerable)
+        else if (source is IEnumerable<object?> enumerable)
         {
-            return enumerable.ToList();
+            items = enumerable.ToList();
         }
-
-        if (source is IList list)
+        else if (source is IList list)
         {
-            return list.Cast<object?>().ToList();
+            items = list.Cast<object?>().ToList();
         }
-
-        if (source is IEnumerable nonGeneric and not string)
+        else if (source is IEnumerable nonGeneric and not string)
         {
-            var result = new List<object?>();
+            items = new List<object?>();
             foreach (var item in nonGeneric)
             {
-                result.Add(item);
+                items.Add(item);
             }
-
-            return result;
+        }
+        else
+        {
+            throw new InvalidOperationException($"Cannot iterate a value of type '{source?.GetType().Name ?? "null"}'. Collection methods require an array or list.");
         }
 
-        throw new InvalidOperationException($"Cannot iterate a value of type '{source?.GetType().Name ?? "null"}'. Collection methods require an array or list.");
+        // Elements straight out of response.json() (or a raw JsonArray/JsonObject picked up via
+        // one of the branches above) are plain JsonNode instances, which don't support dynamic
+        // member access — `x.id` inside a .select/.where lambda would fail with NoSuchMember.
+        // Wrap them the same way normal `foreach item in response` iteration does, so collection
+        // method lambdas see the same dynamically-accessible objects as everywhere else.
+        for (int index = 0; index < items.Count; index++)
+        {
+            if (items[index] is JsonNode node)
+            {
+                items[index] = DynamicJsonObject.Wrap(node);
+            }
+        }
+
+        return items;
     }
 
     #endregion

@@ -1278,7 +1278,7 @@ internal static class ForRestFlowScriptCompiler
                 var urlPart = rest[..bodyJsonIdx].Trim();
                 var bodyPart = rest[(bodyJsonIdx + 9)..].Trim();
                 rest = urlPart;
-                bodyContent = StripQuotes(bodyPart);
+                bodyContent = UnescapeQuotedLiteral(bodyPart);
                 bodyContentType = "application/json";
             }
 
@@ -1361,6 +1361,32 @@ internal static class ForRestFlowScriptCompiler
         }
 
         return trimmed;
+    }
+
+    /// <summary>
+    /// Strips a quoted literal's delimiters AND JSON-unescapes its content (e.g. a `pipe`
+    /// step's `body json "{ \"name\": \"x\" }"` argument), unlike <see cref="StripQuotes"/>,
+    /// which only trims the outer quote characters and leaves any inner `\"` sequences as
+    /// literal backslash-quote pairs. Re-escaping that already-escaped text as a C# string
+    /// literal (via <see cref="RenderString"/>) would double the escaping and leave literal
+    /// backslashes in the value at runtime — exactly the malformed body a JSON API rejects.
+    /// </summary>
+    private static string UnescapeQuotedLiteral(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"')
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<string>(trimmed) ?? StripQuotes(trimmed);
+            }
+            catch (JsonException)
+            {
+                return StripQuotes(trimmed);
+            }
+        }
+
+        return StripQuotes(trimmed);
     }
 
     private static IReadOnlyList<string> SplitTopLevelCommas(string source)
@@ -1834,7 +1860,19 @@ internal static class ForRestFlowScriptCompiler
                 }
                 else if (args.Contains("=>"))
                 {
-                    replacement = $"CollectionApi.{methodName}({receiver}, (Func<object?,object?>)({args}))";
+                    // The earlier identifier pass (which turns bare script variable references
+                    // like `trace_id` into `__flow.V("trace_id")`) has no notion of lambda scope,
+                    // so it also wraps the lambda's own parameter name (e.g. `x => x.id` becomes
+                    // `__flow.V("x") => __flow.V("x").id`), which isn't valid as a lambda parameter
+                    // and breaks every occurrence of that name in the body. Unwrap it back to a
+                    // bare identifier so it compiles as a real lambda parameter. Cast to
+                    // Func<dynamic,dynamic> (identical to Func<object,object> at the CLR level, so
+                    // it still satisfies CollectionApi's Func<object?,object?> parameters) rather
+                    // than Func<object?,object?> directly, so member access like `x.id` or
+                    // `x.address.city` inside the lambda body resolves dynamically instead of
+                    // failing to compile against the static `object` type.
+                    var lambdaArgs = UnwrapLambdaParameter(args);
+                    replacement = $"CollectionApi.{methodName}({receiver}, (Func<dynamic,dynamic>)({lambdaArgs}))";
                 }
                 else
                 {
@@ -1941,6 +1979,26 @@ internal static class ForRestFlowScriptCompiler
         return text[(pos + 1)..end].Trim();
     }
 
+    /// <summary>
+    /// Undoes the earlier identifier-rewrite pass's <c>__flow.V("name")</c> wrapping for a
+    /// collection-method lambda's own parameter, so it compiles as a real C# lambda parameter
+    /// instead of a method call. Only unwraps the specific parameter name bound by this lambda
+    /// (its leading <c>name =></c> or <c>(name) =></c>), leaving references to other, genuinely
+    /// external script variables inside the lambda body untouched.
+    /// </summary>
+    private static string UnwrapLambdaParameter(string lambdaArgs)
+    {
+        Match match = Regex.Match(lambdaArgs, @"^\(?\s*__flow\.V\(""(?<name>[A-Za-z_][A-Za-z0-9_]*)""\)\s*\)?\s*=>");
+        if (!match.Success)
+        {
+            return lambdaArgs;
+        }
+
+        string parameterName = match.Groups["name"].Value;
+        string wrapped = $"__flow.V(\"{parameterName}\")";
+        return lambdaArgs.Replace(wrapped, parameterName, StringComparison.Ordinal);
+    }
+
     private static int FindMatchingCloseParen(string text, int openParenIndex)
     {
         var depth = 0;
@@ -1948,7 +2006,12 @@ internal static class ForRestFlowScriptCompiler
         {
             if (text[i] == '"' || text[i] == '\'')
             {
+                // SkipQuotedString already advances i to one past the closing quote; this is a
+                // `for` loop, so `continue` still runs the loop's `i++`, which would skip the very
+                // next character (often the paren that closes the call, e.g. `V("x"))`). Counter
+                // it with i-- so the loop's own increment lands back on the unread character.
                 SkipQuotedString(text, ref i);
+                i--;
                 continue;
             }
 
@@ -3536,7 +3599,24 @@ internal static class ForRestFlowScriptCompiler
 
     private static bool ShouldContinueStatement(string currentStatement, string nextTrimmed)
     {
-        if (string.IsNullOrWhiteSpace(nextTrimmed) || LooksLikeStandaloneFlowStatement(nextTrimmed))
+        if (string.IsNullOrWhiteSpace(nextTrimmed))
+        {
+            return false;
+        }
+
+        // If the statement collected so far still has an unclosed paren/bracket/brace (e.g. a
+        // multi-line function call like `fuzz.Run(\n  ...,\n  async (p) => {\n    ...\n  },\n  ...)`),
+        // the next line is structurally still part of the same expression no matter what it looks
+        // like on its own — a `{ }` lambda block nested inside a still-open call is not a new
+        // standalone statement. This must be checked before LooksLikeStandaloneFlowStatement,
+        // which would otherwise treat a line ending in `{` (the lambda's own block open) as the
+        // start of a fresh block statement and desync the whole rest of the parse.
+        if (HasUnbalancedDelimiters(TrimStatement(currentStatement)))
+        {
+            return true;
+        }
+
+        if (LooksLikeStandaloneFlowStatement(nextTrimmed))
         {
             return false;
         }

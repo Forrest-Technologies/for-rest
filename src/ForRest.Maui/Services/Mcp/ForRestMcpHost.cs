@@ -437,10 +437,7 @@ public sealed class ForRestMcpHost(
 
     private async Task<ForRestMcpExecutionResult> ExecuteSource(Guid workspaceId, string name, string source, CancellationToken cancellationToken)
     {
-        WorkspaceSnapshot snapshot = new()
-        {
-            Workspace = new WorkspaceDefinition { Id = workspaceId, Name = name },
-        };
+        WorkspaceSnapshot snapshot = await BuildWorkspaceSnapshot(workspaceId, name, cancellationToken);
 
         ForRestScriptExecutionOutcome outcome;
         try
@@ -489,6 +486,47 @@ public sealed class ForRestMcpHost(
             Stash: MapStash(execution.Stash),
             ErrorMessage: primaryRun?.ErrorMessage,
             SecretValues: CollectSecretValues(execution.RuntimeVariables));
+    }
+
+    /// <summary>
+    /// Builds the <see cref="WorkspaceSnapshot"/> passed into script execution. Populates
+    /// <see cref="WorkspaceSnapshot.Nodes"/> with every stored request in the workspace (each
+    /// compiled to a <see cref="RequestDefinition"/>) so that <c>workspace.execute()</c> inside
+    /// the running script has sibling requests to resolve by name or location. Without this,
+    /// workspace.execute() always fails with "could not find a matching request" because the
+    /// execution service resolves references purely against <see cref="WorkspaceSnapshot.Nodes"/>.
+    /// </summary>
+    private async Task<WorkspaceSnapshot> BuildWorkspaceSnapshot(Guid workspaceId, string workspaceName, CancellationToken cancellationToken)
+    {
+        WorkspaceDefinition workspaceDefinition = new() { Id = workspaceId, Name = workspaceName };
+
+        RequestWorkbenchState state = await LoadState(cancellationToken);
+        RequestWorkbenchWorkspaceState? workspace = FindWorkspace(state, workspaceId.ToString());
+        if (workspace is null)
+        {
+            return new WorkspaceSnapshot { Workspace = workspaceDefinition };
+        }
+
+        List<WorkspaceNodeDefinition> nodes = [];
+        foreach (RequestWorkbenchDocumentState document in workspace.Documents)
+        {
+            ForRestScriptCompilationResult compiled = scriptExecutionService.Compile(document.RequestSource, workspaceId, document.Title);
+            if (compiled.Payload is null)
+            {
+                continue;
+            }
+
+            nodes.Add(new WorkspaceNodeDefinition
+            {
+                WorkspaceId = workspaceId,
+                Kind = WorkspaceNodeKind.Request,
+                Name = document.Title,
+                Location = document.Location,
+                Request = compiled.Payload.Request,
+            });
+        }
+
+        return new WorkspaceSnapshot { Workspace = workspaceDefinition, Nodes = nodes };
     }
 
     #endregion
