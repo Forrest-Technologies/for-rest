@@ -2547,8 +2547,18 @@ internal static class ForRestFlowScriptCompiler
     {
         return Regex.Replace(
             expression,
-            @"\[\s*(?<start>-?\d+)\s*\.\.\s*(?<end>-?\d+)\s*\]",
-            static match => $"__flow.RangeClosed({match.Groups["start"].Value}, {match.Groups["end"].Value})",
+            @"\[\s*(?<start>[^\[\],]+?)\s*\.\.\s*(?<end>[^\[\],]+?)\s*\]",
+            static match =>
+            {
+                var start = match.Groups["start"].Value.Trim();
+                var end = match.Groups["end"].Value.Trim();
+                if (start.Length == 0 || end.Length == 0 || start.Contains("..") || end.Contains(".."))
+                {
+                    return match.Value;
+                }
+
+                return $"__flow.RangeClosed({start}, {end})";
+            },
             RegexOptions.CultureInvariant);
     }
 
@@ -4483,6 +4493,23 @@ public sealed class ForRestFlowRuntime(VariablesApi variables)
         }
 
         return Enumerable.Range(endInclusive, (startInclusive - endInclusive) + 1).Reverse();
+    }
+
+    public IEnumerable<int> RangeClosed(object? startInclusive, object? endInclusive)
+    {
+        return RangeClosed(CoerceRangeEndpoint(startInclusive), CoerceRangeEndpoint(endInclusive));
+    }
+
+    private static int CoerceRangeEndpoint(object? value)
+    {
+        return value switch
+        {
+            null => 0,
+            int intValue => intValue,
+            string stringValue => (int)long.Parse(stringValue.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture),
+            JsonNode jsonNode => (int)long.Parse(jsonNode.ToString().Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture),
+            _ => (int)Convert.ToInt64(value, CultureInfo.InvariantCulture),
+        };
     }
 
     public int Count(object? value)

@@ -712,7 +712,18 @@ public sealed class ForRestScriptParser
         }
 
         string remainder = trimmed[6..].TrimStart();
-        return remainder.Length > 0 && char.IsDigit(remainder[0]);
+        if (remainder.Length > 0 && char.IsDigit(remainder[0]))
+        {
+            return true;
+        }
+
+        if (!trimmed.TrimEnd().EndsWith('{'))
+        {
+            return false;
+        }
+
+        int braceIndex = trimmed.LastIndexOf('{');
+        return trimmed.IndexOf('=', 0, braceIndex) < 0;
     }
 
     private static bool TryReadDirectiveValue(string trimmed, string directive, out string rawValue)
