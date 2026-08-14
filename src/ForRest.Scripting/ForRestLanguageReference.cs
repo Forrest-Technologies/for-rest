@@ -257,7 +257,7 @@ internal static class ForRestLanguageReference
             "body json",
             "Request",
             "Write a structured JSON body.",
-            "Triple-quoted JSON blocks keep request payloads readable and work well with runtime interpolation.",
+            "Triple-quoted JSON blocks keep request payloads readable and work well with runtime interpolation. `json` is one of three body modes — see `body form / body multipart` for the non-JSON payloads.",
             "body json \"\"\"\n{\n  \"traceId\": \"{{trace_id}}\"\n}\n\"\"\"",
             ["payload", "json body", "request body"],
             ["body"],
@@ -265,16 +265,75 @@ internal static class ForRestLanguageReference
             "body json \"\"\"\n${1:{\n  \\\"traceId\\\": \\\"{{trace_id}}\\\"\n}}\n\"\"\"",
             true),
         new(
+            "body-form-multipart",
+            "body form / body multipart",
+            "Request",
+            "Write URL-encoded form or multipart request bodies.",
+            "Use `body form \"\"\"...\"\"\"` for `application/x-www-form-urlencoded` payloads and `body multipart \"\"\"...\"\"\"` for multipart form data. Both modes parse, compile, and round-trip through the canonical renderer exactly like `body json`, so editor rewrites never lose them.",
+            "body form \"\"\"\nusername=admin&password={{password}}\n\"\"\"",
+            ["form", "urlencoded", "multipart", "form data", "body mode", "x-www-form-urlencoded"],
+            ["body form", "body multipart"],
+            "Snippet",
+            "body ${1|form,multipart|} \"\"\"\n${2:username=admin&password=secret}\n\"\"\"",
+            true),
+        new(
             "expect",
             "expect",
             "Assertions",
             "Assert on status, headers, body content, or JSON selectors.",
-            "Use `expect` to keep scripts self-checking. Failed expectations are surfaced in the debug pane and history. `expect` is a top-level assertion form, not a flow statement, so keep it outside `if`, `else`, `foreach`, and `while` blocks.",
+            "Use `expect` to keep scripts self-checking. Failed expectations are surfaced in the debug pane and history. Operators include `==` and `!=`, `contains` / `startswith` / `endswith`, `regex`, numeric comparisons (`>`, `>=`, `<`, `<=`) on `status`, `body`, `header \"Name\"`, and `json \"$.selector\"` targets, and the json-only `exists` / `not exists`. A trailing quoted string is an optional label on every form. `expect` is a top-level assertion form, not a flow statement, so keep it outside `if`, `else`, `foreach`, and `while` blocks.",
             "expect status == 200 \"returns 200\"",
             ["assert", "test", "status", "json"],
             ["expect"],
             "Keyword",
             "expect status == ${1:200} \"${2:returns 200}\"",
+            true),
+        new(
+            "expect-numeric",
+            "expect ... > / >= / < / <=",
+            "Assertions",
+            "Compare status, body, header, or JSON values numerically.",
+            "Numeric comparisons work on `status`, `body`, `header \"Name\"`, and `json \"$.selector\"` targets. For string targets, both the actual and expected values are trimmed and parsed as invariant-culture decimals (`10`, `3.14`, and `1e3` all parse); when both sides parse the comparison is numeric, and when either side does not, the assertion fails with a clear `actual value '<v>' is not numeric` message instead of throwing.",
+            """
+            expect status >= 200 "success range"
+            expect json "$.count" > 5 "count above five"
+            expect header "X-Total" >= 10 "total floor"
+            expect body <= 100 "body is a small number"
+            """,
+            ["numeric", "greater than", "less than", "compare", "ordering", ">", ">=", "<", "<="],
+            ["expect"],
+            "Snippet",
+            "expect json \"${1:\\$.count}\" > ${2:5} \"${3:label}\"",
+            true),
+        new(
+            "expect-startswith",
+            "expect ... startswith / endswith",
+            "Assertions",
+            "Assert that response content starts or ends with a string.",
+            "`startswith` and `endswith` work on `body`, `header \"Name\"`, and `json \"$.selector\"` targets. The keyword is matched case-insensitively, but the comparison itself is case-sensitive ordinal — the same rule as `contains`. On `status` they raise a parse-time diagnostic pointing at the numeric operators instead. A trailing quoted string is an optional label.",
+            """
+            expect body startswith "hello" "greeting prefix"
+            expect json "$.name" endswith "rest" "name suffix"
+            """,
+            ["startswith", "endswith", "prefix", "suffix", "starts with", "ends with"],
+            ["startswith", "endswith"],
+            "Snippet",
+            "expect body startswith \"${1:value}\" \"${2:label}\"",
+            true),
+        new(
+            "expect-not-exists",
+            "expect json ... exists / not exists",
+            "Assertions",
+            "Assert that a JSON selector matches a value — or matches nothing.",
+            "`exists` passes when the JSON selector resolves to a value; `not exists` is its symmetric counterpart and passes when the selector matches nothing. Both are json-only: using them on `status`, `body`, or `header` targets raises a parse-time diagnostic explaining they are only supported for json assertions.",
+            """
+            expect json "$.id" exists
+            expect json "$.missing" not exists "no missing field"
+            """,
+            ["exists", "not exists", "missing", "absent", "json selector", "presence"],
+            ["exists", "not exists"],
+            "Snippet",
+            "expect json \"${1:\\$.selector}\" not exists \"${2:label}\"",
             true),
         new(
             "comments",
@@ -335,14 +394,18 @@ internal static class ForRestLanguageReference
             "foreach",
             "Flow",
             "Iterate arrays, ranges, header collections, or JSON lists.",
-            "Prefer `foreach item in source { }` for arrays, generated ranges, header collections, and JSON lists — it is the canonical loop header. `for item in source { }` is accepted as an alias but `foreach` reads best. Use the multiline block form (closing brace on its own line); inline a single-statement body only when it stays short.",
+            "Prefer `foreach item in source { }` for arrays, generated ranges, header collections, and JSON lists — it is the canonical loop header. `for item in source { }` is accepted as an alias but `foreach` reads best. Add an optional zero-based loop index with `foreach item, i in source { }` — the parenthesized `foreach (item, i) in source { }` form also parses, and `for` accepts the same pair. The index is a real integer usable in expressions, and it stays in scope after the loop holding the last index. Use the multiline block form (closing brace on its own line); inline a single-statement body only when it stays short.",
             """
             let attempts = [0..2]
             foreach attempt in attempts {
               log attempt
             }
+
+            foreach item, i in [10..12] {
+              log $"{i}:{item}"
+            }
             """,
-            ["loop", "iterate", "collection", "range"],
+            ["loop", "iterate", "collection", "range", "index", "loop index", "enumerate"],
             ["foreach", "for"],
             "Snippet",
             "foreach ${1:item} in ${2:[0..2]} {\n  $0\n}",
@@ -352,10 +415,10 @@ internal static class ForRestLanguageReference
             "switch / case / default",
             "Flow",
             "Branch on a value with multiple cases.",
-            "Use `switch expression { case value { ... } default { ... } }` to match a value against multiple cases. Compiles to an if/else chain. Each `case` tests equality against the switch expression. The `default` block runs when no case matches.",
+            "Use `switch expression { case value { ... } default { ... } }` to match a value against multiple cases. Compiles to an if/else chain. Each `case` tests equality against the switch expression, and a case may list several comma-separated values — `case 200, 201 { }` — matching when the expression equals any of them (OR semantics). Commas inside strings or parentheses do not split values. The `default` block runs when no case matches.",
             """
             switch response.status {
-              case 200 {
+              case 200, 201 {
                 log "OK"
               }
               case 404 {
@@ -366,7 +429,7 @@ internal static class ForRestLanguageReference
               }
             }
             """,
-            ["switch", "case", "default", "branch", "match"],
+            ["switch", "case", "default", "branch", "match", "multi-value", "comma"],
             ["switch", "case", "default"],
             "Snippet",
             "switch ${1:expression} {\n  case ${2:value} {\n    $0\n  }\n  default {\n    \n  }\n}",
@@ -620,14 +683,20 @@ internal static class ForRestLanguageReference
             "[0..9]",
             "Flow",
             "Create an inclusive numeric range literal.",
-            "Range literals are inclusive and work well with `foreach`. Descending ranges such as `[3..0]` are also supported.",
+            "Range literals are inclusive and work well with `foreach`. Endpoints may be expressions — identifiers, member access, or arithmetic like `[1..size - 1]` — not just integer literals, though an endpoint cannot contain a top-level comma or a nested `..`. Descending ranges such as `[3..0]` (or reversed variable endpoints) count down.",
             """
             let attempts = [0..2]
             foreach attempt in attempts {
               log attempt
             }
+
+            let low = 2
+            let high = 5
+            foreach value in [low..high] {
+              log value
+            }
             """,
-            ["range", "literal", "sequence", "loop counter"],
+            ["range", "literal", "sequence", "loop counter", "variable endpoints", "expression"],
             ["range", "[0..9]"],
             "Snippet",
             "[${1:0}..${2:2}]",
@@ -933,15 +1002,21 @@ internal static class ForRestLanguageReference
             "retry N with backoff { ... }",
             "Flow",
             "Retry a block of flow code with optional backoff or fixed delay.",
-            "Use `retry` to wrap sends in automatic retry logic. `retry N { }` retries up to N times. `retry N with backoff { }` adds exponential backoff (100ms, 200ms, 400ms, ...). `retry N with delay M { }` waits M milliseconds between retries. Use `break` inside the block to exit early on success.",
+            "Use `retry` to wrap sends in automatic retry logic. `retry N { }` retries up to N times. `retry N with backoff { }` adds exponential backoff (100ms, 200ms, 400ms, ...). `retry N with delay M { }` waits M milliseconds between retries. The count and the delay can be any expression — a literal, a variable, member access, or arithmetic — with the count clamped to at least 1 and the delay to non-negative milliseconds. At the document top level (outside an explicit flow block) a non-literal count needs the `{` on the same line as the `retry` header. Use `break` inside the block to exit early on success.",
             """
             retry 3 with backoff {
               let sent = request.send()
               if sent.status >= 200 and sent.status < 500 { break }
               warn $"Attempt returned {sent.status}, retrying..."
             }
+
+            let attempts = 4
+            retry attempts with delay 250 {
+              let sent = request.send()
+              if sent.status == 200 { break }
+            }
             """,
-            ["retry", "backoff", "delay", "resilience", "transient", "retry loop"],
+            ["retry", "backoff", "delay", "resilience", "transient", "retry loop", "expression count"],
             ["retry"],
             "Snippet",
             "retry ${1:3} with backoff {\n  let sent = request.send()\n  if sent.status >= 200 and sent.status < 500 { break }\n  warn $\"Attempt returned {sent.status}, retrying...\"\n}",
@@ -1255,7 +1330,7 @@ internal static class ForRestLanguageReference
             "break / continue",
             "Flow",
             "Exit or skip iterations in loops and retry blocks.",
-            "Use `break` to exit the nearest enclosing `foreach`, `while`, or `retry` block. Use `continue` to skip to the next iteration. Both are commonly used inside retry blocks to stop retrying on success.",
+            "Use `break` to exit the nearest enclosing `foreach`, `while`, or `retry` block. Use `continue` to skip to the next iteration. Both are commonly used inside retry blocks to stop retrying on success. To end the whole flow early rather than just a loop, use `stop`.",
             """
             retry 3 with backoff {
               let sent = request.send()
@@ -1271,6 +1346,25 @@ internal static class ForRestLanguageReference
             ["break", "continue"],
             "Keyword",
             "break",
+            false),
+        new(
+            "stop",
+            "stop",
+            "Flow",
+            "End the main flow early and successfully.",
+            "Use `stop` to finish the script without running the remaining flow statements — variables and tests that were already set are kept, and the run still completes successfully. Inside a `define` subroutine, `stop` returns from the subroutine only and the caller continues. `stop` is a reserved word, so it cannot be used as a variable name. Use `break` when you only want to exit the nearest loop.",
+            """
+            let sent = request.send()
+            if sent.status == 204 {
+              runtime empty_result = "yes"
+              stop
+            }
+            runtime processed = "yes"
+            """,
+            ["stop", "end flow", "early exit", "halt", "return", "short circuit"],
+            ["stop"],
+            "Keyword",
+            "stop",
             false),
         new(
             "delay",

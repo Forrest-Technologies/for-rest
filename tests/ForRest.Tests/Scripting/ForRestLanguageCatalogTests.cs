@@ -43,6 +43,11 @@ public sealed class ForRestLanguageCatalogTests
         Assert.IsTrue(entries.Any(static entry => entry.Key == "runtime-functions"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "string-interpolation"));
         Assert.IsTrue(entries.Any(static entry => entry.Key == "break-continue"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "stop"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "expect-numeric"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "expect-startswith"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "expect-not-exists"));
+        Assert.IsTrue(entries.Any(static entry => entry.Key == "body-form-multipart"));
         Assert.AreEqual(entries.Count, entries.Select(static entry => entry.Key).Distinct(StringComparer.Ordinal).Count());
     }
 
@@ -103,6 +108,11 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(markdown, "### `tests.Assert / tests.Equal`");
         StringAssert.Contains(markdown, "### `guid() / now() / utc_now() / random()`");
         StringAssert.Contains(markdown, "### `break / continue`");
+        StringAssert.Contains(markdown, "### `stop`");
+        StringAssert.Contains(markdown, "### `expect ... startswith / endswith`");
+        StringAssert.Contains(markdown, "### `expect json ... exists / not exists`");
+        StringAssert.Contains(markdown, "### `body form / body multipart`");
+        StringAssert.Contains(markdown, "expect json \"$.count\" > 5 \"count above five\"");
     }
 
     [TestMethod]
@@ -136,6 +146,8 @@ public sealed class ForRestLanguageCatalogTests
         StringAssert.Contains(prompt, "`tests.Assert / tests.Equal`: Programmatic test assertions inside flow code.");
         StringAssert.Contains(prompt, "`guid() / now() / utc_now() / random()`: Built-in runtime variable seed functions.");
         StringAssert.Contains(prompt, "`break / continue`: Exit or skip iterations in loops and retry blocks.");
+        StringAssert.Contains(prompt, "`stop`: End the main flow early and successfully.");
+        StringAssert.Contains(prompt, "`expect ... startswith / endswith`: Assert that response content starts or ends with a string.");
         StringAssert.Contains(prompt, "If a requested feature is not listed, treat it as unsupported");
     }
 }

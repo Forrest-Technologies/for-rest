@@ -622,6 +622,25 @@ Before submitting code, verify:
 
 ## Progress Tracking
 
+2026-08-14 — FRS language enhancement pass (docs synced to code):
+
+- Flow: `foreach item, i in ...` loop index; multi-value `case 200, 201 { }`; expression-based `retry` counts/delays; range literals with expression endpoints; new `stop` statement (reserved word).
+- Assertions: numeric `>` `>=` `<` `<=` on body/header/json (invariant-culture decimal parse with clear non-numeric failure messages); new `startswith` / `endswith` operators; json-only `not exists`; parse-time diagnostics for invalid operator/target pairs.
+- Document/renderer: `body form` / `body multipart` modes parse; canonical renderer now round-trips regex extractions, imports, handlers, scenarios, and regex assertions loss-free with a fixed emission order.
+- Engine: compiled-script cache — SHA-256-derived assembly identity, bounded LRU (32) of collectible AssemblyLoadContexts, thread-safe, unload on eviction.
+- Docs: `ForRestLanguageReference.cs` catalog and `docs/architecture/forrest-script-language.md` updated to match; catalog tests extended for the new entries.
+
 ## Known Gaps After This Commit
 
+- Flow transpilation is still string-based — no lexer/AST for flow expressions.
+- Diagnostic columns are whitespace-count only; Roslyn errors can leak generated C# into user-facing messages.
+- `use` import merges variables only (no header/define merge on the lightweight path).
+- The language catalog is hand-maintained; no automated cross-check test between catalog entries and parser capabilities.
+
 ## Next Priorities
+
+- Tokenizer/AST for flow expressions to replace string slicing in the transpiler.
+- Source-mapped diagnostics from generated C# back to `.frs` lines/columns.
+- Import merging beyond variables (headers, extractions, scenarios).
+- Enrich `parallel` / `pipe` blocks (bodies, headers, per-step expectations).
+- Catalog/parser conformance test that compiles every catalog example.
