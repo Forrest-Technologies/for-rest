@@ -347,6 +347,7 @@ public static class ForRestScriptDocumentRenderer
         string operation = assertion.Operator switch
         {
             ForRestScriptComparisonOperator.Exists => "exists",
+            ForRestScriptComparisonOperator.NotExists => "not exists",
             ForRestScriptComparisonOperator.RegexMatch => $"regex {RenderExpression(assertion.Value ?? new ForRestScriptStringExpression(string.Empty))}",
             _ => $"{RenderOperator(assertion.Operator)} {RenderExpression(assertion.Value ?? new ForRestScriptStringExpression(string.Empty))}"
         };
@@ -361,6 +362,8 @@ public static class ForRestScriptDocumentRenderer
             ForRestScriptComparisonOperator.Equal => "==",
             ForRestScriptComparisonOperator.NotEqual => "!=",
             ForRestScriptComparisonOperator.Contains => "contains",
+            ForRestScriptComparisonOperator.StartsWith => "startswith",
+            ForRestScriptComparisonOperator.EndsWith => "endswith",
             ForRestScriptComparisonOperator.GreaterThan => ">",
             ForRestScriptComparisonOperator.GreaterThanOrEqual => ">=",
             ForRestScriptComparisonOperator.LessThan => "<",

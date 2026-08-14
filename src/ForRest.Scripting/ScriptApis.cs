@@ -1034,6 +1034,46 @@ public sealed class TestsApi
         Assert(success, success ? message : $"{message} Expected '{expected}', received '{actual}'.");
     }
 
+    public void AssertNumeric(string? actual, string comparison, string? expected, string message)
+    {
+        if (!TryParseNumeric(actual, out var actualNumber))
+        {
+            Fail($"{message} failed: actual value '{actual}' is not numeric");
+            return;
+        }
+
+        if (!TryParseNumeric(expected, out var expectedNumber))
+        {
+            Fail($"{message} failed: expected value '{expected}' is not numeric");
+            return;
+        }
+
+        switch (comparison)
+        {
+            case "==":
+                Assert(actualNumber == expectedNumber, message);
+                break;
+            case "!=":
+                Assert(actualNumber != expectedNumber, message);
+                break;
+            case ">":
+                Assert(actualNumber > expectedNumber, message);
+                break;
+            case ">=":
+                Assert(actualNumber >= expectedNumber, message);
+                break;
+            case "<":
+                Assert(actualNumber < expectedNumber, message);
+                break;
+            case "<=":
+                Assert(actualNumber <= expectedNumber, message);
+                break;
+            default:
+                Fail($"{message} failed: unsupported numeric comparison '{comparison}'");
+                break;
+        }
+    }
+
     public void Fail(string message)
     {
         Assert(false, message);
@@ -1052,6 +1092,15 @@ public sealed class TestsApi
     public void Import(IEnumerable<TestResult> results)
     {
         testResults.AddRange(results);
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    private static bool TryParseNumeric(string? text, out decimal value)
+    {
+        return decimal.TryParse(text?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
     #endregion

@@ -655,6 +655,12 @@ public sealed class ForRestScriptParser
         }
 
         string assertionText = trimmed[7..].Trim();
+        if (TryDescribeUnsupportedAssertion(assertionText, out var unsupportedMessage))
+        {
+            diagnostics.Add(CreateDiagnostic(unsupportedMessage, lineNumber, sourceLine));
+            return true;
+        }
+
         if (TryParseStatusAssertion(assertionText, out var assertion)
             || TryParseBodyAssertion(assertionText, out assertion)
             || TryParseHeaderAssertion(assertionText, out assertion)
@@ -1239,6 +1245,13 @@ public sealed class ForRestScriptParser
                 ? trimmed[7..].Trim()
                 : trimmed;
 
+            if (TryDescribeUnsupportedAssertion(assertionInput, out var unsupportedMessage))
+            {
+                diagnostics.Add(CreateDiagnostic(unsupportedMessage, index + 1, line));
+                index++;
+                continue;
+            }
+
             if (TryParseStatusAssertion(assertionInput, out var parsedAssertion)
                 || TryParseBodyAssertion(assertionInput, out parsedAssertion)
                 || TryParseHeaderAssertion(assertionInput, out parsedAssertion)
@@ -1441,29 +1454,115 @@ public sealed class ForRestScriptParser
     {
         assertion = null;
         string trimmed = TrimOptionalTerminator(input);
-        if (string.Equals(trimmed, "exists", StringComparison.OrdinalIgnoreCase))
+        if (TryReadExistsOperator(trimmed, out var existsOperator))
         {
             assertion = new(
                 ForRestScriptAssertionTarget.Json,
-                ForRestScriptComparisonOperator.Exists,
-                $"json \"{selector}\" exists",
+                existsOperator,
+                $"json \"{selector}\" {RenderExistsKeyword(existsOperator)}",
                 Selector: selector);
             return true;
         }
 
         if (TryReadTrailingQuotedString(trimmed, out var withoutLabel, out var label)
-            && string.Equals(withoutLabel.Trim(), "exists", StringComparison.OrdinalIgnoreCase)
+            && TryReadExistsOperator(withoutLabel.Trim(), out var labeledOperator)
             && !string.IsNullOrWhiteSpace(label))
         {
             assertion = new(
                 ForRestScriptAssertionTarget.Json,
-                ForRestScriptComparisonOperator.Exists,
+                labeledOperator,
                 label!,
                 Selector: selector);
             return true;
         }
 
         return false;
+    }
+
+    private static bool TryReadExistsOperator(string text, out ForRestScriptComparisonOperator existsOperator)
+    {
+        if (string.Equals(text, "exists", StringComparison.OrdinalIgnoreCase))
+        {
+            existsOperator = ForRestScriptComparisonOperator.Exists;
+            return true;
+        }
+
+        if (Regex.IsMatch(text, @"^not\s+exists$", RegexOptions.IgnoreCase))
+        {
+            existsOperator = ForRestScriptComparisonOperator.NotExists;
+            return true;
+        }
+
+        existsOperator = ForRestScriptComparisonOperator.Exists;
+        return false;
+    }
+
+    private static string RenderExistsKeyword(ForRestScriptComparisonOperator existsOperator)
+    {
+        return existsOperator == ForRestScriptComparisonOperator.NotExists ? "not exists" : "exists";
+    }
+
+    /// <summary>
+    /// Detect assertion shapes whose target/operator combination is invalid
+    /// so parsing can fail with a targeted diagnostic instead of the generic
+    /// "could not parse" message. Returns the diagnostic text when the shape
+    /// is recognized as unsupported.
+    /// </summary>
+    private static bool TryDescribeUnsupportedAssertion(string assertionText, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+
+        if (assertionText.StartsWith("status ", StringComparison.OrdinalIgnoreCase))
+        {
+            var statusRemainder = assertionText[7..].Trim();
+            if (statusRemainder.StartsWith("startswith ", StringComparison.OrdinalIgnoreCase)
+                || statusRemainder.StartsWith("endswith ", StringComparison.OrdinalIgnoreCase))
+            {
+                errorMessage = "The 'startswith' and 'endswith' operators are not supported for status assertions. Use a numeric comparison such as ==, !=, >, >=, <, or <=.";
+                return true;
+            }
+
+            if (IsExistsOperatorShape(statusRemainder))
+            {
+                errorMessage = "The 'exists' and 'not exists' operators are only supported for json assertions, e.g. expect json \"$.id\" exists.";
+                return true;
+            }
+
+            return false;
+        }
+
+        if (assertionText.StartsWith("body ", StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsExistsOperatorShape(assertionText[5..].Trim()))
+            {
+                errorMessage = "The 'exists' and 'not exists' operators are only supported for json assertions, e.g. expect json \"$.id\" exists.";
+                return true;
+            }
+
+            return false;
+        }
+
+        if (assertionText.StartsWith("header ", StringComparison.OrdinalIgnoreCase)
+            && TryReadQuotedToken(assertionText[7..].Trim(), out _, out var afterHeaderName)
+            && IsExistsOperatorShape(afterHeaderName.Trim()))
+        {
+            errorMessage = "The 'exists' and 'not exists' operators are only supported for json assertions, e.g. expect json \"$.id\" exists.";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsExistsOperatorShape(string text)
+    {
+        var trimmed = TrimOptionalTerminator(text);
+        if (TryReadTrailingQuotedString(trimmed, out var withoutLabel, out var label)
+            && !string.IsNullOrWhiteSpace(label))
+        {
+            trimmed = withoutLabel.Trim();
+        }
+
+        return TryReadExistsOperator(trimmed, out _);
     }
 
     /// <summary>
@@ -1674,6 +1773,8 @@ public sealed class ForRestScriptParser
         foreach (var candidate in new[]
                  {
                      ("contains ", ForRestScriptComparisonOperator.Contains),
+                     ("startswith ", ForRestScriptComparisonOperator.StartsWith),
+                     ("endswith ", ForRestScriptComparisonOperator.EndsWith),
                      ("== ", ForRestScriptComparisonOperator.Equal),
                      ("!= ", ForRestScriptComparisonOperator.NotEqual),
                      (">= ", ForRestScriptComparisonOperator.GreaterThanOrEqual),

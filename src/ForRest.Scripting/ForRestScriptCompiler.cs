@@ -578,6 +578,12 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
                         break;
                     }
 
+                    if (assertion.Operator == ForRestScriptComparisonOperator.NotExists)
+                    {
+                        builder.AppendLine($"tests.Assert(string.IsNullOrWhiteSpace({jsonVariableName}), {RenderString(assertion.Message)});");
+                        break;
+                    }
+
                     if (!TryRenderScalar(assertion.Value, out var jsonValue))
                     {
                         diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "JSON assertions require a scalar comparison value.", 0, 0));
@@ -613,8 +619,20 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             case ForRestScriptComparisonOperator.Contains:
                 builder.AppendLine($"tests.Assert(({actualExpression}).Contains({expectedLiteral}, StringComparison.Ordinal), {messageLiteral});");
                 break;
+            case ForRestScriptComparisonOperator.StartsWith:
+                builder.AppendLine($"tests.Assert(({actualExpression}).StartsWith({expectedLiteral}, StringComparison.Ordinal), {messageLiteral});");
+                break;
+            case ForRestScriptComparisonOperator.EndsWith:
+                builder.AppendLine($"tests.Assert(({actualExpression}).EndsWith({expectedLiteral}, StringComparison.Ordinal), {messageLiteral});");
+                break;
             case ForRestScriptComparisonOperator.RegexMatch:
                 builder.AppendLine($"tests.Assert(regex.IsMatch({actualExpression}, {expectedLiteral}), {messageLiteral});");
+                break;
+            case ForRestScriptComparisonOperator.GreaterThan:
+            case ForRestScriptComparisonOperator.GreaterThanOrEqual:
+            case ForRestScriptComparisonOperator.LessThan:
+            case ForRestScriptComparisonOperator.LessThanOrEqual:
+                builder.AppendLine($"tests.AssertNumeric({actualExpression}, {RenderString(RenderOperator(comparisonOperator))}, {expectedLiteral}, {messageLiteral});");
                 break;
             default:
                 builder.AppendLine($"tests.Fail({RenderString($"Unsupported string operator '{comparisonOperator}'.")});");
