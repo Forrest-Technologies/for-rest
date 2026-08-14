@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -61,6 +62,11 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         CreateScriptRuntimeConfiguration,
         LazyThreadSafetyMode.ExecutionAndPublication);
 
+    private readonly object cacheLock = new();
+    private readonly Dictionary<string, CachedScript> compilationCache = new(StringComparer.Ordinal);
+    private long cacheClock;
+    private int compilationCount;
+
     #endregion
 
     #region Public Methods
@@ -68,6 +74,11 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     public ScriptValidationResult Validate(string script)
     {
         if (string.IsNullOrWhiteSpace(script))
+        {
+            return new();
+        }
+
+        if (TryGetCachedScript(script) is not null)
         {
             return new();
         }
@@ -171,20 +182,26 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 browser = new ScriptBrowserApi(request.BrowserBridge ?? NullBrowserBridge.Instance),
             };
 
-            ScriptCompilationResult compilation = CompileScript(request.Script);
-            ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics(cancellationToken)
-                .Where(static item => item.Severity == DiagnosticSeverity.Error)
-                .ToImmutableArray();
-            if (!diagnostics.IsEmpty)
+            var cached = TryGetCachedScript(request.Script);
+            if (cached is null)
             {
-                string message = string.Join(Environment.NewLine, diagnostics.Select(static item => item.ToString()));
-                logger.LogWarning("Script compilation failed: {Message}", message);
-                consoleApi.Error(message);
-                return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
+                ScriptCompilationResult compilation = CompileScript(request.Script);
+                ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics(cancellationToken)
+                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
+                    .ToImmutableArray();
+                if (!diagnostics.IsEmpty)
+                {
+                    string message = string.Join(Environment.NewLine, diagnostics.Select(static item => item.ToString()));
+                    logger.LogWarning("Script compilation failed: {Message}", message);
+                    consoleApi.Error(message);
+                    return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
+                }
+
+                cached = CacheOrReuseLoadedScript(request.Script, EmitAndLoadScript(compilation, cancellationToken));
             }
 
             using IDisposable scope = ScriptRuntimeContext.Enter(globals);
-            await ExecuteCompiledScript(compilation, cancellationToken);
+            await InvokeCompiledScript(cached, cancellationToken);
         }
         catch (Exception exception)
         {
@@ -200,6 +217,40 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         }
 
         return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, string.Empty);
+    }
+
+    #endregion
+
+    #region Internal Cache Instrumentation
+
+    internal int CacheCapacity { get; set; } = 32;
+
+    internal int CompilationCount => Volatile.Read(ref compilationCount);
+
+    internal int CacheSize
+    {
+        get
+        {
+            lock (cacheLock)
+            {
+                return compilationCache.Count;
+            }
+        }
+    }
+
+    internal void ClearCache()
+    {
+        List<CachedScript> evicted;
+        lock (cacheLock)
+        {
+            evicted = [.. compilationCache.Values];
+            compilationCache.Clear();
+        }
+
+        foreach (var entry in evicted)
+        {
+            entry.LoadContext.Unload();
+        }
     }
 
     #endregion
@@ -268,11 +319,13 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             };
     }
 
-    private static ScriptCompilationResult CompileScript(string script)
+    private ScriptCompilationResult CompileScript(string script)
     {
+        Interlocked.Increment(ref compilationCount);
         ScriptRuntimeConfiguration scriptRuntime = ScriptRuntime.Value;
-        string typeName = $"GeneratedScript_{Guid.NewGuid():N}";
-        string assemblyName = $"ForRest.Script.{Guid.NewGuid():N}";
+        string scriptHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(script)));
+        string typeName = $"GeneratedScript_{scriptHash}";
+        string assemblyName = $"ForRest.Script.{scriptHash}";
         string preparedScript = BuildScriptSource(typeName, script);
         SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(
             preparedScript,
@@ -333,7 +386,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         return builder.ToString();
     }
 
-    private static async Task ExecuteCompiledScript(ScriptCompilationResult compilation, CancellationToken cancellationToken)
+    private static CachedScript EmitAndLoadScript(ScriptCompilationResult compilation, CancellationToken cancellationToken)
     {
         using MemoryStream assemblyStream = new();
         EmitResult emitResult = compilation.Compilation.Emit(assemblyStream, cancellationToken: cancellationToken);
@@ -356,7 +409,20 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             Type scriptType = assembly.GetType($"ForRest.Scripting.Generated.{compilation.TypeName}", throwOnError: true)!;
             MethodInfo method = scriptType.GetMethod("RunAsync", BindingFlags.Public | BindingFlags.Static)
                 ?? throw new MissingMethodException(scriptType.FullName, "RunAsync");
-            Task executionTask = (Task)(method.Invoke(null, null)
+            return new(loadContext, method);
+        }
+        catch
+        {
+            loadContext.Unload();
+            throw;
+        }
+    }
+
+    private static async Task InvokeCompiledScript(CachedScript cached, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var executionTask = (Task)(cached.RunMethod.Invoke(null, null)
                 ?? throw new InvalidOperationException("Compiled script did not return a task."));
             await executionTask.WaitAsync(cancellationToken);
         }
@@ -365,10 +431,55 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
             throw;
         }
-        finally
+    }
+
+    private CachedScript? TryGetCachedScript(string script)
+    {
+        lock (cacheLock)
         {
-            loadContext.Unload();
+            if (compilationCache.TryGetValue(script, out var cached))
+            {
+                cached.LastUsed = ++cacheClock;
+                return cached;
+            }
+
+            return null;
         }
+    }
+
+    private CachedScript CacheOrReuseLoadedScript(string script, CachedScript loaded)
+    {
+        List<CachedScript> evicted = [];
+        CachedScript result;
+        lock (cacheLock)
+        {
+            if (compilationCache.TryGetValue(script, out var existing))
+            {
+                existing.LastUsed = ++cacheClock;
+                evicted.Add(loaded);
+                result = existing;
+            }
+            else
+            {
+                loaded.LastUsed = ++cacheClock;
+                compilationCache[script] = loaded;
+                while (compilationCache.Count > CacheCapacity)
+                {
+                    var oldest = compilationCache.MinBy(static item => item.Value.LastUsed);
+                    compilationCache.Remove(oldest.Key);
+                    evicted.Add(oldest.Value);
+                }
+
+                result = loaded;
+            }
+        }
+
+        foreach (var entry in evicted)
+        {
+            entry.LoadContext.Unload();
+        }
+
+        return result;
     }
 
     private static string BuildFriendlyRuntimeErrorMessage(Exception exception)
@@ -919,6 +1030,15 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     private sealed record ScriptCompilationResult(
         CSharpCompilation Compilation,
         string TypeName);
+
+    private sealed class CachedScript(ScriptAssemblyLoadContext loadContext, MethodInfo runMethod)
+    {
+        public ScriptAssemblyLoadContext LoadContext { get; } = loadContext;
+
+        public MethodInfo RunMethod { get; } = runMethod;
+
+        public long LastUsed { get; set; }
+    }
 
     private sealed record ScriptRuntimeConfiguration(
         IReadOnlyList<MetadataReference> References,

@@ -2052,6 +2052,12 @@ public sealed class ForRestScriptParser
             case "text":
                 mode = RequestBodyMode.RawText;
                 return true;
+            case "form":
+                mode = RequestBodyMode.FormUrlEncoded;
+                return true;
+            case "multipart":
+                mode = RequestBodyMode.MultipartFormData;
+                return true;
             default:
                 mode = RequestBodyMode.None;
                 return false;

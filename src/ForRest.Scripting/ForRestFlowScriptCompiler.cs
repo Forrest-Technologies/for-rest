@@ -58,6 +58,7 @@ internal static class ForRestFlowScriptCompiler
         "secret",
         "snapshot",
         "stash",
+        "stop",
         "string",
         "StringComparison",
         "strings",
@@ -178,7 +179,8 @@ internal static class ForRestFlowScriptCompiler
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
         ref int tempCounter,
-        bool allowBlockTerminator)
+        bool allowBlockTerminator,
+        bool inSubroutine = false)
     {
         while (index < lines.Count)
         {
@@ -221,6 +223,13 @@ internal static class ForRestFlowScriptCompiler
                 return;
             }
 
+            if (trimmed is "stop" or "stop;")
+            {
+                builder.AppendLine(inSubroutine ? "return;" : "return null;");
+                index++;
+                continue;
+            }
+
             if (TryCompileDefineStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
             {
                 continue;
@@ -236,27 +245,27 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
-            if (TryCompileIfStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileIfStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine))
             {
                 continue;
             }
 
-            if (TryCompileWhileStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileWhileStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine))
             {
                 continue;
             }
 
-            if (TryCompileRetryStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileRetryStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine))
             {
                 continue;
             }
 
-            if (TryCompileForEachStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileForEachStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine))
             {
                 continue;
             }
 
-            if (TryCompileSwitchStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileSwitchStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine))
             {
                 continue;
             }
@@ -352,7 +361,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine(TranslateRawStatement(statementText, locals));
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
                 builder.AppendLine("}");
                 continue;
             }
@@ -396,7 +405,8 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine)
     {
         if (!TryReadBlockHeader(lines, index, "if", out var condition, out var consumedLineCount))
         {
@@ -407,7 +417,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
         builder.AppendLine("}");
 
         while (index < lines.Count)
@@ -434,7 +444,7 @@ internal static class ForRestFlowScriptCompiler
                 builder.Append(TranslateExpression(elseIfCondition, locals));
                 builder.AppendLine(") {");
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
                 builder.AppendLine("}");
                 continue;
             }
@@ -443,7 +453,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine("else {");
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
                 builder.AppendLine("}");
             }
 
@@ -460,7 +470,8 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine)
     {
         if (!TryReadBlockHeader(lines, index, "while", out var condition, out var consumedLineCount))
         {
@@ -471,7 +482,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
         builder.AppendLine("}");
         return true;
     }
@@ -483,11 +494,19 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine)
     {
-        if (!TryReadForEachHeader(lines, index, out var iteratorName, out var sourceExpression, out var consumedLineCount))
+        if (!TryReadForEachHeader(lines, index, out var iteratorName, out var indexName, out var sourceExpression, out var consumedLineCount))
         {
             return false;
+        }
+
+        if (indexName.Length > 0)
+        {
+            builder.Append(locals.Contains(indexName) ? string.Empty : "int ");
+            builder.Append(indexName);
+            builder.AppendLine(" = -1;");
         }
 
         builder.Append("foreach (dynamic ");
@@ -499,8 +518,16 @@ internal static class ForRestFlowScriptCompiler
         {
             iteratorName
         };
+        if (indexName.Length > 0)
+        {
+            builder.Append(indexName);
+            builder.AppendLine("++;");
+            nestedLocals.Add(indexName);
+            locals.Add(indexName);
+        }
+
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
         builder.AppendLine("}");
         return true;
     }
@@ -645,7 +672,8 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine)
     {
         if (!TryReadBlockHeader(lines, index, "switch", out var expression, out var consumedLineCount))
         {
@@ -689,12 +717,29 @@ internal static class ForRestFlowScriptCompiler
             if (TryReadBlockHeader(lines, index, "case", out var caseValue, out var caseConsumed))
             {
                 builder.Append(isFirstCase ? "if (" : "else if (");
-                builder.Append(switchVar);
-                builder.Append(" == ");
-                builder.Append(TranslateExpression(caseValue, locals));
+                var isFirstCaseValue = true;
+                foreach (var caseValuePart in SplitTopLevelCommas(caseValue))
+                {
+                    var caseValueText = caseValuePart.Trim();
+                    if (string.IsNullOrWhiteSpace(caseValueText))
+                    {
+                        continue;
+                    }
+
+                    if (!isFirstCaseValue)
+                    {
+                        builder.Append(" || ");
+                    }
+
+                    builder.Append(switchVar);
+                    builder.Append(" == ");
+                    builder.Append(TranslateExpression(caseValueText, locals));
+                    isFirstCaseValue = false;
+                }
+
                 builder.AppendLine(") {");
                 index += caseConsumed;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
                 builder.AppendLine("}");
                 isFirstCase = false;
                 continue;
@@ -704,7 +749,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine(isFirstCase ? "{" : "else {");
                 index += defaultConsumed;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
                 builder.AppendLine("}");
                 isFirstCase = false;
                 continue;
@@ -852,7 +897,8 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine)
     {
         if (!TryReadBlockHeader(lines, index, "retry", out var expression, out var consumedLineCount))
         {
@@ -862,12 +908,36 @@ internal static class ForRestFlowScriptCompiler
         tempCounter++;
         var retryVar = $"__retryIdx{tempCounter}";
 
-        var parts = expression.Split([' '], StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0 || !int.TryParse(parts[0], out var maxRetries))
+        var countText = expression;
+        var modifierText = string.Empty;
+        var withIndex = expression.IndexOf(" with ", StringComparison.OrdinalIgnoreCase);
+        if (withIndex >= 0)
         {
-            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "retry requires a numeric count, e.g. 'retry 3 { }'.", index + 1, 1));
+            countText = expression[..withIndex].Trim();
+            modifierText = expression[(withIndex + 6)..].Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(countText))
+        {
+            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "retry requires a count, e.g. 'retry 3 { }' or 'retry attempts { }'.", index + 1, 1));
             index += consumedLineCount;
             return true;
+        }
+
+        string countExpression;
+        if (int.TryParse(countText, out var maxRetries))
+        {
+            countExpression = maxRetries.ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            var countVar = $"__retryCount{tempCounter}";
+            builder.Append("var ");
+            builder.Append(countVar);
+            builder.Append(" = Math.Max(1, (int)Convert.ToInt64((object)(");
+            builder.Append(TranslateExpression(countText, locals));
+            builder.AppendLine(")));");
+            countExpression = countVar;
         }
 
         builder.Append("for (int ");
@@ -875,14 +945,14 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(" = 0; ");
         builder.Append(retryVar);
         builder.Append(" < ");
-        builder.Append(maxRetries);
+        builder.Append(countExpression);
         builder.Append("; ");
         builder.Append(retryVar);
         builder.AppendLine("++) {");
 
-        if (parts.Length >= 3 && string.Equals(parts[1], "with", StringComparison.OrdinalIgnoreCase))
+        if (modifierText.Length > 0)
         {
-            if (string.Equals(parts[2], "backoff", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(modifierText, "backoff", StringComparison.OrdinalIgnoreCase))
             {
                 builder.Append("if (");
                 builder.Append(retryVar);
@@ -890,20 +960,29 @@ internal static class ForRestFlowScriptCompiler
                 builder.Append(retryVar);
                 builder.AppendLine(" - 1))); }");
             }
-            else if (string.Equals(parts[2], "delay", StringComparison.OrdinalIgnoreCase)
-                     && parts.Length >= 4
-                     && int.TryParse(parts[3], out var delayMs))
+            else if (TryReadKeywordRemainder(modifierText, "delay", out var delayText))
             {
-                builder.Append("if (");
-                builder.Append(retryVar);
-                builder.Append(" > 0) { await Task.Delay(");
-                builder.Append(delayMs);
-                builder.AppendLine("); }");
+                if (int.TryParse(delayText, out var delayMs))
+                {
+                    builder.Append("if (");
+                    builder.Append(retryVar);
+                    builder.Append(" > 0) { await Task.Delay(");
+                    builder.Append(delayMs);
+                    builder.AppendLine("); }");
+                }
+                else
+                {
+                    builder.Append("if (");
+                    builder.Append(retryVar);
+                    builder.Append(" > 0) { await Task.Delay((int)Math.Max(0L, Convert.ToInt64((object)(");
+                    builder.Append(TranslateExpression(delayText, locals));
+                    builder.AppendLine(")))); }");
+                }
             }
         }
 
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine);
         builder.AppendLine("}");
         return true;
     }
@@ -1022,7 +1101,7 @@ internal static class ForRestFlowScriptCompiler
         }
 
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine: true);
         builder.AppendLine("}");
         return true;
     }
@@ -2827,10 +2906,12 @@ internal static class ForRestFlowScriptCompiler
         IReadOnlyList<string> lines,
         int startIndex,
         out string iteratorName,
+        out string indexName,
         out string sourceExpression,
         out int consumedLineCount)
     {
         iteratorName = string.Empty;
+        indexName = string.Empty;
         sourceExpression = string.Empty;
         if (!TryCollectHeaderText(lines, startIndex, out string combinedHeader, out consumedLineCount))
         {
@@ -2875,7 +2956,24 @@ internal static class ForRestFlowScriptCompiler
             return false;
         }
 
-        iteratorName = NormalizeForEachIterator(header[..separatorIndex]);
+        var iteratorText = header[..separatorIndex].Trim();
+        if (iteratorText.StartsWith('(') && iteratorText.EndsWith(')'))
+        {
+            iteratorText = iteratorText[1..^1].Trim();
+        }
+
+        var commaIndex = iteratorText.IndexOf(',');
+        if (commaIndex >= 0)
+        {
+            indexName = NormalizeForEachIterator(iteratorText[(commaIndex + 1)..]);
+            iteratorText = iteratorText[..commaIndex];
+            if (!IsFlowIdentifier(indexName))
+            {
+                return false;
+            }
+        }
+
+        iteratorName = NormalizeForEachIterator(iteratorText);
         sourceExpression = header[(separatorIndex + 4)..].Trim();
         return IsFlowIdentifier(iteratorName) && !string.IsNullOrWhiteSpace(sourceExpression);
     }
