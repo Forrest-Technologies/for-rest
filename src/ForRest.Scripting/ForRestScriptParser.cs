@@ -1553,6 +1553,12 @@ public sealed class ForRestScriptParser
                 return true;
             }
 
+            if (statusRemainder.StartsWith("contains ", StringComparison.OrdinalIgnoreCase))
+            {
+                errorMessage = "The 'contains' operator is not supported for status assertions. Use == for an exact status, or a range comparison such as expect status >= 200 with expect status < 300.";
+                return true;
+            }
+
             if (IsExistsOperatorShape(statusRemainder))
             {
                 errorMessage = "The 'exists' and 'not exists' operators are only supported for json assertions, e.g. expect json \"$.id\" exists.";

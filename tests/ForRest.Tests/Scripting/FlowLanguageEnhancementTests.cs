@@ -25,9 +25,57 @@ public sealed class FlowLanguageEnhancementTests
             }
             """);
 
-        StringAssert.Contains(script, "int i = -1;");
+        StringAssert.Contains(script, "dynamic i = -1;");
         StringAssert.Contains(script, "foreach (dynamic item in __flow.RangeClosed(10, 12))");
         StringAssert.Contains(script, "i++;");
+    }
+
+    [TestMethod]
+    public async Task Run_foreach_index_can_be_reassigned_to_a_string_after_the_loop()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Foreach Index Reassign"
+            method GET
+            url "https://api.example.test"
+
+            flow {
+              foreach item, i in [1..3] {
+                log $"{i}:{item}"
+              }
+              let i = "done"
+              runtime index_after = i
+            }
+            """);
+
+        var result = await RunScript(script);
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("done", result.RuntimeVariables.Single(static item => item.Key == "index_after").Value);
+    }
+
+    [TestMethod]
+    public async Task Run_foreach_index_declares_a_new_local_when_only_a_differently_cased_name_exists()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Foreach Index Casing"
+            method GET
+            url "https://api.example.test"
+
+            flow {
+              let Total = 1
+              foreach x, total in [1..2] {
+                log $"{total}:{x}"
+              }
+              runtime casing_outcome = $"{Total}:{total}"
+            }
+            """);
+
+        var result = await RunScript(script);
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("1:1", result.RuntimeVariables.Single(static item => item.Key == "casing_outcome").Value);
     }
 
     [TestMethod]
@@ -213,6 +261,49 @@ public sealed class FlowLanguageEnhancementTests
         StringAssert.Contains(script, " < 3; ");
         StringAssert.Contains(script, "Task.Delay(250);");
         Assert.IsFalse(script.Contains("__retryCount", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Compile_retry_with_zero_literal_clamps_the_loop_bound_to_one()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Retry Zero Literal Shape"
+            method GET
+            url "https://api.example.test"
+
+            retry 0 {
+              log "attempt"
+            }
+            """);
+
+        StringAssert.Contains(script, " < 1; ");
+        Assert.IsFalse(script.Contains(" < 0; ", StringComparison.Ordinal));
+        Assert.IsFalse(script.Contains("__retryCount", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Run_retry_with_zero_literal_still_runs_the_body_once()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Retry Zero Literal Run"
+            method GET
+            url "https://api.example.test"
+
+            flow {
+              let runs = 0
+              retry 0 {
+                runs = runs + 1
+              }
+              runtime zero_run_count = runs
+            }
+            """);
+
+        var result = await RunScript(script);
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("1", result.RuntimeVariables.Single(static item => item.Key == "zero_run_count").Value);
     }
 
     [TestMethod]
@@ -472,6 +563,137 @@ public sealed class FlowLanguageEnhancementTests
         Assert.AreEqual("yes", result.RuntimeVariables.Single(static item => item.Key == "after_call").Value);
     }
 
+    [TestMethod]
+    public void Compile_stop_with_status_handlers_emits_goto_and_the_handler_label()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Stop Handler Shape"
+            method GET
+            url "https://api.example.test"
+
+            runtime before = "yes"
+            stop
+
+            on status 500 {
+              runtime handled = "yes"
+            }
+            """);
+
+        StringAssert.Contains(script, "goto __forrestHandlers;");
+        StringAssert.Contains(script, "__forrestHandlers: ;");
+        Assert.IsFalse(script.Contains("return null;", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Compile_status_handlers_without_a_stop_do_not_emit_the_handler_label()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Handler No Stop Shape"
+            method GET
+            url "https://api.example.test"
+
+            runtime before = "yes"
+
+            on status 500 {
+              runtime handled = "yes"
+            }
+            """);
+
+        Assert.IsFalse(script.Contains("__forrestHandlers", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Run_stop_in_main_flow_still_runs_matching_status_handlers()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Stop Handler Run"
+            method GET
+            url "https://api.example.test"
+
+            flow {
+              runtime before_stop = "yes"
+              stop
+              runtime after_stop = "yes"
+            }
+
+            on status 500 {
+              runtime handled = "yes"
+            }
+            """);
+
+        var result = await RunScript(script, responseStatusCode: 500);
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("yes", result.RuntimeVariables.Single(static item => item.Key == "before_stop").Value);
+        Assert.IsFalse(result.RuntimeVariables.Any(static item => item.Key == "after_stop"));
+        Assert.AreEqual("yes", result.RuntimeVariables.Single(static item => item.Key == "handled").Value);
+    }
+
+    [TestMethod]
+    public async Task Run_stop_with_status_handlers_skips_handlers_for_other_status_codes()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Stop Handler Mismatch Run"
+            method GET
+            url "https://api.example.test"
+
+            flow {
+              runtime before_stop = "yes"
+              stop
+              runtime after_stop = "yes"
+            }
+
+            on status 500 {
+              runtime handled = "yes"
+            }
+            """);
+
+        var result = await RunScript(script, responseStatusCode: 200);
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("yes", result.RuntimeVariables.Single(static item => item.Key == "before_stop").Value);
+        Assert.IsFalse(result.RuntimeVariables.Any(static item => item.Key == "after_stop"));
+        Assert.IsFalse(result.RuntimeVariables.Any(static item => item.Key == "handled"));
+    }
+
+    [TestMethod]
+    public async Task Run_stop_inside_define_with_status_handlers_exits_the_subroutine_only()
+    {
+        var script = CompilePreRequestScript(
+            """
+            name "Stop Define Handler Run"
+            method GET
+            url "https://api.example.test"
+
+            flow {
+              define helper {
+                runtime inside_before = "yes"
+                stop
+                runtime inside_after = "yes"
+              }
+
+              call helper
+              runtime after_call = "yes"
+            }
+
+            on status 500 {
+              runtime handled = "yes"
+            }
+            """);
+
+        var result = await RunScript(script, responseStatusCode: 500);
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage);
+        Assert.AreEqual("yes", result.RuntimeVariables.Single(static item => item.Key == "inside_before").Value);
+        Assert.IsFalse(result.RuntimeVariables.Any(static item => item.Key == "inside_after"));
+        Assert.AreEqual("yes", result.RuntimeVariables.Single(static item => item.Key == "after_call").Value);
+        Assert.AreEqual("yes", result.RuntimeVariables.Single(static item => item.Key == "handled").Value);
+    }
+
     #endregion
 
     #region Helpers
@@ -491,7 +713,7 @@ public sealed class FlowLanguageEnhancementTests
         return compilation.Payload.Request.PreRequestScript;
     }
 
-    private Task<ScriptExecutionResult> RunScript(string script)
+    private Task<ScriptExecutionResult> RunScript(string script, int? responseStatusCode = null)
     {
         return scriptEngine.Run(
             new()
@@ -501,6 +723,14 @@ public sealed class FlowLanguageEnhancementTests
                 {
                     Uri = new("https://api.example.test"),
                 },
+                Response = responseStatusCode is null
+                    ? null
+                    : new()
+                    {
+                        StatusCode = responseStatusCode.Value,
+                        Body = """{"ok":true}""",
+                        ContentType = "application/json",
+                    },
                 Workspace = new()
                 {
                     Name = "Demo",

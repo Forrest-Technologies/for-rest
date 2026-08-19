@@ -310,6 +310,40 @@ public sealed class AssertionOperatorTests
     }
 
     [TestMethod]
+    public void Parse_rejects_contains_on_status_with_a_targeted_diagnostic()
+    {
+        var result = new ForRestScriptParser().Parse(
+            """
+            name "Invalid Status Contains"
+            method GET
+            url "https://api.example.test/echo"
+
+            expect status contains 200
+            """);
+
+        Assert.IsFalse(result.Succeeded);
+        var diagnostic = result.Diagnostics.Single(static item => item.Severity == ForRestScriptDiagnosticSeverity.Error);
+        StringAssert.Contains(diagnostic.Message, "'contains' operator is not supported for status assertions");
+    }
+
+    [TestMethod]
+    public void Parse_still_accepts_equality_on_status_after_the_contains_guard()
+    {
+        var document = ParseValid(
+            """
+            name "Valid Status"
+            method GET
+            url "https://api.example.test/echo"
+
+            expect status == 200
+            """);
+
+        var assertion = document.Tests.Single();
+        Assert.AreEqual(ForRestScriptAssertionTarget.Status, assertion.Target);
+        Assert.AreEqual(ForRestScriptComparisonOperator.Equal, assertion.Operator);
+    }
+
+    [TestMethod]
     public void Parse_rejects_exists_on_body_with_a_targeted_diagnostic()
     {
         var result = new ForRestScriptParser().Parse(

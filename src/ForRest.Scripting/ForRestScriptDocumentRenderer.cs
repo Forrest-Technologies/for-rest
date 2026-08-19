@@ -165,10 +165,17 @@ public static class ForRestScriptDocumentRenderer
 
         lines.Add($"body {mode} \"\"\"");
 
-        // The parser records the closing delimiter line as a trailing empty content entry, so
-        // trailing newlines are trimmed here to keep parse -> render cycles from growing the
-        // body by one blank line per round trip.
-        lines.AddRange(Normalize(body.Content).TrimEnd('\n').Split('\n'));
+        // The parser records the closing delimiter line as exactly one trailing empty content
+        // entry, so exactly one trailing newline is removed here to keep parse -> render cycles
+        // from growing the body by one blank line per round trip. Trimming every trailing
+        // newline would destroy intentional blank lines at the end of a payload.
+        var content = Normalize(body.Content);
+        if (content.EndsWith('\n'))
+        {
+            content = content[..^1];
+        }
+
+        lines.AddRange(content.Split('\n'));
         lines.Add("\"\"\"");
     }
 

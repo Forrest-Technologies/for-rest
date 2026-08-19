@@ -280,6 +280,32 @@ public sealed class ForRestScriptDocumentRendererTests
         AssertCanonicallyEqual(document, reparsed);
     }
 
+    [TestMethod]
+    public void Body_with_a_deliberate_trailing_blank_line_survives_the_round_trip()
+    {
+        var document = ParseValid(
+            """"
+            name "Trailing Blank Body"
+            method POST
+            url "https://api.example.test/items"
+
+            body raw """
+            line-one
+
+            """
+            """");
+
+        var reparsed = RenderAndReparse(document);
+
+        // The renderer must strip only the parser's single closing-delimiter artifact line,
+        // not the user's intentional trailing blank line.
+        var rendered = ForRestScriptDocumentRenderer.Render(document);
+        StringAssert.Contains(rendered, "line-one\n\n\"\"\"");
+        Assert.IsNotNull(reparsed.Body);
+        Assert.AreEqual(document.Body!.Content, reparsed.Body.Content, "the body content must be byte-identical after a parse -> render -> parse cycle");
+        AssertCanonicallyEqual(document, reparsed);
+    }
+
     #endregion
 
     #region Renderer Stability

@@ -28,8 +28,9 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
 
         if (document.Imports.Count > 0 && options.ResolveImport is not null)
         {
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            ResolveImports(document, options.ResolveImport, visited, diagnostics);
+            var importPathStack = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var mergedImports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            ResolveImports(document, options.ResolveImport, importPathStack, mergedImports, diagnostics);
         }
 
         var requestVariables = new List<VariableDefinition>();
@@ -689,15 +690,27 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             builder.AppendLine("try {");
         }
 
-        var mainFlow = ForRestFlowScriptCompiler.Compile(flowSource, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false);
+        // `stop` in the main flow must not compile to `return null;` here — the on-status
+        // if-blocks are spliced after the flow in the same generated method, and a return
+        // would skip them. The stop target makes `stop` jump to a label emitted just before
+        // the status handlers instead; the label itself is only emitted when a stop actually
+        // produced a goto, so handler-only documents stay free of unused-label warnings.
+        var stopTarget = onStatusHandlers.Count > 0 ? new ForRestFlowStopTarget("__forrestHandlers") : null;
+        var sharedTempCounter = new ForRestFlowTempCounter();
+        var mainFlow = ForRestFlowScriptCompiler.Compile(flowSource, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false, stopTarget, sharedTempCounter);
         if (!string.IsNullOrWhiteSpace(mainFlow))
         {
             builder.AppendLine(mainFlow);
         }
 
+        if (stopTarget?.EmittedGoto == true)
+        {
+            builder.AppendLine($"{stopTarget.Label}: ;");
+        }
+
         foreach (var statusHandler in onStatusHandlers)
         {
-            var handlerScript = ForRestFlowScriptCompiler.Compile(statusHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false);
+            var handlerScript = ForRestFlowScriptCompiler.Compile(statusHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false, stopTarget: null, sharedTempCounter);
             builder.Append("if (response.Status == ");
             builder.Append(statusHandler.StatusCode);
             builder.AppendLine(") {");
@@ -711,7 +724,7 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             builder.AppendLine("var __errorMessage = __onErrorEx.Message;");
             foreach (var errorHandler in onErrorHandlers)
             {
-                var handlerScript = ForRestFlowScriptCompiler.Compile(errorHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false);
+                var handlerScript = ForRestFlowScriptCompiler.Compile(errorHandler.Body, flowVariableNames, templateBoundVariableNames, diagnostics, emitRuntimePreamble: false, stopTarget: null, sharedTempCounter);
                 builder.AppendLine(handlerScript);
             }
 
@@ -779,14 +792,24 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
     private static void ResolveImports(
         ForRestScriptDocument document,
         Func<string, string?> resolveImport,
-        HashSet<string> visited,
+        HashSet<string> importPathStack,
+        HashSet<string> mergedImports,
         List<ForRestScriptDiagnostic> diagnostics)
     {
         foreach (var importPath in document.Imports)
         {
-            if (!visited.Add(importPath))
+            // Two sets on purpose: the path stack holds only the chain currently being
+            // resolved (a hit there is a real cycle), while the merged set remembers every
+            // import already folded into the graph (a hit there is a diamond — A imports B
+            // and C, both importing shared X — which is legal and merges X exactly once).
+            if (importPathStack.Contains(importPath))
             {
                 diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Warning, $"Circular import detected for '{importPath}'.", 0, 0));
+                continue;
+            }
+
+            if (!mergedImports.Add(importPath))
+            {
                 continue;
             }
 
@@ -808,7 +831,9 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
 
             if (importedDocument.Imports.Count > 0)
             {
-                ResolveImports(importedDocument, resolveImport, visited, diagnostics);
+                importPathStack.Add(importPath);
+                ResolveImports(importedDocument, resolveImport, importPathStack, mergedImports, diagnostics);
+                importPathStack.Remove(importPath);
             }
 
             MergeImportedDocument(document, importedDocument);

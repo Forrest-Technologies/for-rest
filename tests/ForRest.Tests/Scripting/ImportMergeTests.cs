@@ -296,6 +296,55 @@ public sealed class ImportMergeTests
         Assert.AreEqual("c-value", result.Payload.RuntimeSeeds.Single(static seed => seed.Key == "c_var").LiteralValue);
     }
 
+    [TestMethod]
+    public void Compile_diamond_import_merges_the_shared_file_once_without_a_circular_warning()
+    {
+        var source =
+            """
+            import "shared/b.frs"
+            import "shared/c.frs"
+
+            name "Diamond Import"
+            method GET
+            url "https://api.example.test/items"
+            """;
+
+        var imports = new Dictionary<string, string>
+        {
+            ["shared/b.frs"] =
+                """
+                import "shared/x.frs"
+
+                header "X-B" = "b"
+                """,
+            ["shared/c.frs"] =
+                """
+                import "shared/x.frs"
+
+                header "X-C" = "c"
+                """,
+            ["shared/x.frs"] =
+                """
+                header "X-Shared" = "shared"
+                runtime x_var = "x-value"
+                """,
+        };
+
+        var result = Compile(source, imports);
+
+        Assert.IsTrue(result.Succeeded, Describe(result));
+        Assert.AreEqual(0, result.Diagnostics.Count, Describe(result));
+        Assert.AreEqual("b", GetEntry(result.Payload!.Request.Headers, "X-B"));
+        Assert.AreEqual("c", GetEntry(result.Payload.Request.Headers, "X-C"));
+        var sharedHeaders = result.Payload.Request.Headers
+            .Where(static entry => string.Equals(entry.Key, "X-Shared", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.AreEqual(1, sharedHeaders.Count);
+        Assert.AreEqual("shared", sharedHeaders[0].Value);
+        Assert.AreEqual(1, result.Payload.RuntimeSeeds.Count(static seed => seed.Key == "x_var"));
+        Assert.AreEqual("x-value", result.Payload.RuntimeSeeds.Single(static seed => seed.Key == "x_var").LiteralValue);
+    }
+
     #endregion
 
     #region Import Resolution Diagnostics
