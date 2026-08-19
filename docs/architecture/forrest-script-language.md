@@ -230,7 +230,7 @@ Supported flow forms today:
 - `parallel { ... }` fan-out, including `let [a, b] = parallel { ... }` destructuring
 - `pipe { ... }` sequential request chains
 
-At the document level, `scenario "name" { ... }` sections declare named test scenarios that share the base request, and `import` / `use` directives pull in shared modules.
+At the document level, `scenario "name" { ... }` sections declare named test scenarios that share the base request, and `import` / `use` directives pull in shared modules. An import merges the imported file's variables, headers, query/form/multipart entries, auth keys, and extractions into the importing document. The importing document always wins on a name clash, and between multiple imports the first import wins. Flow code, tests, defines, scenarios, and handlers are never imported — executable behavior stays in the file that declares it. Imports resolve transitively, and circular imports are detected and surfaced as warnings.
 
 **Block style.** The canonical form puts the opening brace on the header line, indents the
 body, and closes with `}` on its own line (every example below uses it). A block whose body
@@ -488,6 +488,8 @@ The runtime then:
 
 Compiled flow scripts are cached: each script text gets a deterministic SHA-256-derived assembly/type identity, and a bounded, thread-safe LRU (32 entries) keeps loaded collectible `AssemblyLoadContext`s, unloading them on eviction. Repeated executions of an unchanged script skip Roslyn entirely, and editor Validate reuses the same cached compilations.
 
+Diagnostics are written for `.frs` authors, not C# readers. Unclosed sections report the line where the section opened; a top-level line that closely resembles a known directive (for example `hedaer` for `header`) produces a did-you-mean warning while still compiling as flow code; and script compile failures are rendered as `Script error (line N): ...` with a plain-language explanation for common mistakes (unknown names, missing members, unclosed braces), keeping the raw compiler diagnostic appended after a `| details:` separator for bug reports.
+
 ## Current Boundaries
 
 Included now:
@@ -510,7 +512,7 @@ Included now:
 - range literals with expression endpoints
 - `retry` blocks with expression counts and delays (`with backoff` / `with delay`), `on status` / `on error` handlers
 - `define` / `call` subroutines, `parallel` and `pipe` composition
-- `scenario` sections and `import` / `use` shared-module directives
+- `scenario` sections and `import` / `use` shared-module directives (merging variables, headers, query/form/multipart entries, auth keys, and extractions — document wins, first import wins)
 - `workspace.execute()` nested request execution
 - `ssl`, `history`, `timeout`, `redirects`, `content_type`, and `max_send_iterations` request settings
 - `payloads` corpora (with mutation) and the `fuzz` engine (bounded concurrency, baseline diffing, fingerprinting, host-scope governance)

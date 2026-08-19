@@ -628,19 +628,21 @@ Before submitting code, verify:
 - Assertions: numeric `>` `>=` `<` `<=` on body/header/json (invariant-culture decimal parse with clear non-numeric failure messages); new `startswith` / `endswith` operators; json-only `not exists`; parse-time diagnostics for invalid operator/target pairs.
 - Document/renderer: `body form` / `body multipart` modes parse; canonical renderer now round-trips regex extractions, imports, handlers, scenarios, and regex assertions loss-free with a fixed emission order.
 - Engine: compiled-script cache — SHA-256-derived assembly identity, bounded LRU (32) of collectible AssemblyLoadContexts, thread-safe, unload on eviction.
+- Imports: `import` / `use` now merge headers, query/form/multipart entries, auth keys, and extractions in addition to variables (document wins, first import wins; flow/tests/defines/scenarios/handlers stay local); circular and unresolvable imports warn.
+- Diagnostics: unclosed sections report their opening line; mistyped top-level directives get a did-you-mean warning; Roslyn compile failures render as `Script error (line N)` with plain-language text and the raw diagnostic preserved in a details suffix.
 - Docs: `ForRestLanguageReference.cs` catalog and `docs/architecture/forrest-script-language.md` updated to match; catalog tests extended for the new entries.
 
 ## Known Gaps After This Commit
 
 - Flow transpilation is still string-based — no lexer/AST for flow expressions.
-- Diagnostic columns are whitespace-count only; Roslyn errors can leak generated C# into user-facing messages.
-- `use` import merges variables only (no header/define merge on the lightweight path).
+- Diagnostic columns are whitespace-count only; there is no source map from generated C# back to `.frs` lines beyond the `#line 1` offset.
+- Imports never merge flow, tests, defines, scenarios, or handlers — shared executable behavior still requires `workspace.execute()`.
 - The language catalog is hand-maintained; no automated cross-check test between catalog entries and parser capabilities.
 
 ## Next Priorities
 
 - Tokenizer/AST for flow expressions to replace string slicing in the transpiler.
 - Source-mapped diagnostics from generated C# back to `.frs` lines/columns.
-- Import merging beyond variables (headers, extractions, scenarios).
+- Import merging for defines and scenarios once executable-import semantics are designed.
 - Enrich `parallel` / `pipe` blocks (bodies, headers, per-step expectations).
 - Catalog/parser conformance test that compiles every catalog example.

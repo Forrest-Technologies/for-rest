@@ -1189,8 +1189,8 @@ internal static class ForRestLanguageReference
             "import-use",
             "import / use",
             "Flow",
-            "Include definitions and variables from external .frs files.",
-            "Use `import \"path.frs\"` to merge variables, subroutines (defines), and headers from another file. Use `use \"path.frs\"` for a lighter-weight inclusion that merges only variables. Both directives detect and prevent circular imports.",
+            "Include shared declarations from external .frs files.",
+            "Use `import \"path.frs\"` (or its alias `use`) to merge variables, headers, query/form/multipart entries, auth keys, and extractions from another file. The importing document always wins on a name clash, and between multiple imports the first import wins. Flow code, tests, defines, scenarios, and handlers are never imported. Imports resolve transitively; circular imports are detected and reported as warnings.",
             """
             import "shared/auth-helpers.frs"
             use "shared/variables.frs"
