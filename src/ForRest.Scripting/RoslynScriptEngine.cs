@@ -87,11 +87,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         {
             ScriptCompilationResult compilation = CompileScript(script);
             ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics();
-            string message = string.Join(
-                Environment.NewLine,
-                diagnostics
-                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
-                    .Select(static item => item.ToString()));
+            string message = BuildFriendlyCompileErrorMessage(diagnostics);
             if (string.IsNullOrWhiteSpace(message))
             {
                 return new();
@@ -191,7 +187,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                     .ToImmutableArray();
                 if (!diagnostics.IsEmpty)
                 {
-                    string message = string.Join(Environment.NewLine, diagnostics.Select(static item => item.ToString()));
+                    string message = BuildFriendlyCompileErrorMessage(diagnostics);
                     logger.LogWarning("Script compilation failed: {Message}", message);
                     consoleApi.Error(message);
                     return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
@@ -392,11 +388,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         EmitResult emitResult = compilation.Compilation.Emit(assemblyStream, cancellationToken: cancellationToken);
         if (!emitResult.Success)
         {
-            string message = string.Join(
-                Environment.NewLine,
-                emitResult.Diagnostics
-                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
-                    .Select(static item => item.ToString()));
+            string message = BuildFriendlyCompileErrorMessage(emitResult.Diagnostics);
             throw new InvalidOperationException(message);
         }
 
@@ -480,6 +472,84 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         }
 
         return result;
+    }
+
+    private static string BuildFriendlyCompileErrorMessage(IEnumerable<Diagnostic> diagnostics)
+    {
+        return string.Join(
+            Environment.NewLine,
+            diagnostics
+                .Where(static item => item.Severity == DiagnosticSeverity.Error)
+                .Select(static item => BuildFriendlyDiagnosticLine(item)));
+    }
+
+    private static string BuildFriendlyDiagnosticLine(Diagnostic diagnostic)
+    {
+        var mappedSpan = diagnostic.Location.GetMappedLineSpan();
+        var line = mappedSpan.IsValid ? mappedSpan.StartLinePosition.Line + 1 : 0;
+        var friendly = BuildFriendlyDiagnosticText(diagnostic, line);
+        var prefix = line > 0 ? $"Script error (line {line}): " : "Script error: ";
+        return $"{prefix}{friendly} | details: {diagnostic}";
+    }
+
+    private static string BuildFriendlyDiagnosticText(Diagnostic diagnostic, int line)
+    {
+        var message = diagnostic.GetMessage();
+        switch (diagnostic.Id)
+        {
+            case "CS0103":
+            {
+                var match = Regex.Match(message, "The name '([^']+)' does not exist");
+                if (match.Success)
+                {
+                    var name = match.Groups[1].Value;
+                    return IsGeneratedIdentifier(name)
+                        ? $"Internal script translation error — please report this script. ({message})"
+                        : $"Unknown name '{name}'. Declare it with 'let {name} = ...' or check the spelling.";
+                }
+
+                break;
+            }
+
+            case "CS1061":
+            {
+                var match = Regex.Match(message, "'([^']+)' does not contain a definition for '([^']+)'");
+                if (match.Success)
+                {
+                    var typeName = match.Groups[1].Value;
+                    var memberName = match.Groups[2].Value;
+                    return IsGeneratedIdentifier(typeName)
+                        ? $"'{memberName}' is not available here. Check the member name."
+                        : $"'{memberName}' is not available on '{typeName}'. Check the member name.";
+                }
+
+                break;
+            }
+
+            case "CS1002":
+            case "CS1513":
+            case "CS1026":
+            {
+                return line > 0
+                    ? $"Incomplete statement near line {line} — check for a missing closing brace, parenthesis, or unfinished expression."
+                    : "Incomplete statement — check for a missing closing brace, parenthesis, or unfinished expression.";
+            }
+        }
+
+        return $"error {diagnostic.Id}: {StripGeneratedReferences(message)}";
+    }
+
+    private static bool IsGeneratedIdentifier(string name)
+    {
+        return name.StartsWith("__", StringComparison.Ordinal) ||
+               name.Contains("GeneratedScript_", StringComparison.Ordinal) ||
+               name.StartsWith("ForRest.Scripting.Generated", StringComparison.Ordinal) ||
+               name.StartsWith("dynamic", StringComparison.Ordinal);
+    }
+
+    private static string StripGeneratedReferences(string message)
+    {
+        return Regex.Replace(message, @"(ForRest\.Scripting\.Generated\.)?GeneratedScript_[0-9A-Fa-f]+", "script");
     }
 
     private static string BuildFriendlyRuntimeErrorMessage(Exception exception)

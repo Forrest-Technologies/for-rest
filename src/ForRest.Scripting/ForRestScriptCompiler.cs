@@ -25,6 +25,13 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
         }
 
         var document = parseResult.Document;
+
+        if (document.Imports.Count > 0 && options.ResolveImport is not null)
+        {
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            ResolveImports(document, options.ResolveImport, visited, diagnostics);
+        }
+
         var requestVariables = new List<VariableDefinition>();
         var runtimeSeeds = new List<ForRestRuntimeVariableSeed>();
 
@@ -121,12 +128,6 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
             {
                 FormValues = multipartValues,
             };
-        }
-
-        if (document.Imports.Count > 0 && options.ResolveImport is not null)
-        {
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            ResolveImports(document, options.ResolveImport, visited, document.Variables, runtimeSeeds, flowVariableNames, diagnostics);
         }
 
         var templateBoundVariableNames = CollectTemplateBoundVariableNames(urlTemplate ?? string.Empty, headers, queryParameters, body, auth);
@@ -779,9 +780,6 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
         ForRestScriptDocument document,
         Func<string, string?> resolveImport,
         HashSet<string> visited,
-        List<ForRestScriptVariableDeclaration> variables,
-        List<ForRestRuntimeVariableSeed> runtimeSeeds,
-        List<string> flowVariableNames,
         List<ForRestScriptDiagnostic> diagnostics)
     {
         foreach (var importPath in document.Imports)
@@ -810,16 +808,55 @@ public sealed class ForRestScriptCompiler(ForRestScriptParser parser) : IForRest
 
             if (importedDocument.Imports.Count > 0)
             {
-                ResolveImports(importedDocument, resolveImport, visited, variables, runtimeSeeds, flowVariableNames, diagnostics);
+                ResolveImports(importedDocument, resolveImport, visited, diagnostics);
             }
 
-            foreach (var variable in importedDocument.Variables)
+            MergeImportedDocument(document, importedDocument);
+        }
+    }
+
+    private static void MergeImportedDocument(ForRestScriptDocument document, ForRestScriptDocument importedDocument)
+    {
+        // Precedence: the importing document always wins; between multiple imports the first
+        // import wins. Flow, tests, scenarios, and handlers are deliberately never imported —
+        // pulling executable behavior across files would change execution semantics.
+        foreach (var variable in importedDocument.Variables)
+        {
+            if (document.Variables.All(existing => !string.Equals(existing.Key, variable.Key, StringComparison.OrdinalIgnoreCase)))
             {
-                if (variables.All(existing => !string.Equals(existing.Key, variable.Key, StringComparison.OrdinalIgnoreCase)))
-                {
-                    variables.Add(variable);
-                    flowVariableNames.Add(variable.Key);
-                }
+                document.Variables.Add(variable);
+            }
+        }
+
+        MergeNamedValues(document.Headers, importedDocument.Headers);
+        MergeNamedValues(document.QueryParameters, importedDocument.QueryParameters);
+        MergeNamedValues(document.FormValues, importedDocument.FormValues);
+        MergeNamedValues(document.MultipartValues, importedDocument.MultipartValues);
+
+        foreach (var (key, value) in importedDocument.Auth)
+        {
+            if (!document.Auth.ContainsKey(key))
+            {
+                document.Auth[key] = value;
+            }
+        }
+
+        foreach (var extraction in importedDocument.Extractions)
+        {
+            if (document.Extractions.All(existing => !string.Equals(existing.TargetVariableName, extraction.TargetVariableName, StringComparison.OrdinalIgnoreCase)))
+            {
+                document.Extractions.Add(extraction);
+            }
+        }
+    }
+
+    private static void MergeNamedValues(List<ForRestScriptNamedValue> target, List<ForRestScriptNamedValue> imported)
+    {
+        foreach (var entry in imported)
+        {
+            if (target.All(existing => !string.Equals(existing.Key, entry.Key, StringComparison.OrdinalIgnoreCase)))
+            {
+                target.Add(entry);
             }
         }
     }
