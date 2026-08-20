@@ -10,6 +10,7 @@ public static class ForRestScriptDocumentRenderer
 
         List<string> lines = [];
 
+        AppendImports(lines, document.Imports);
         AppendMeta(lines, document.Meta);
         AppendRequest(lines, document.Request);
         AppendAuth(lines, document.Auth);
@@ -24,8 +25,22 @@ public static class ForRestScriptDocumentRenderer
         AppendTests(lines, document.Tests);
         AppendTopLevelKeyValues(lines, "repeat", document.Repeat);
         AppendTopLevelKeyValues(lines, "retry", document.Retry);
+        AppendHandlers(lines, document.Handlers);
+        AppendScenarios(lines, document.Scenarios);
 
         return string.Join('\n', TrimBlankLines(lines));
+    }
+
+    // Imports render first so shared definitions are declared before anything that uses them.
+    // The parser accepts 'use' as an alias, but 'import' is the canonical spelling.
+    private static void AppendImports(List<string> lines, IReadOnlyList<string> imports)
+    {
+        foreach (var import in imports)
+        {
+            // The parser reads the path between the quotes literally (no escape handling),
+            // so the raw path is emitted as-is rather than escaped.
+            lines.Add($"import \"{import}\"");
+        }
     }
 
     private static void AppendMeta(List<string> lines, Dictionary<string, ForRestScriptValueExpression> meta)
@@ -149,7 +164,18 @@ public static class ForRestScriptDocumentRenderer
         };
 
         lines.Add($"body {mode} \"\"\"");
-        lines.AddRange(Normalize(body.Content).Split('\n'));
+
+        // The parser records the closing delimiter line as exactly one trailing empty content
+        // entry, so exactly one trailing newline is removed here to keep parse -> render cycles
+        // from growing the body by one blank line per round trip. Trimming every trailing
+        // newline would destroy intentional blank lines at the end of a payload.
+        var content = Normalize(body.Content);
+        if (content.EndsWith('\n'))
+        {
+            content = content[..^1];
+        }
+
+        lines.AddRange(content.Split('\n'));
         lines.Add("\"\"\"");
     }
 
@@ -163,9 +189,26 @@ public static class ForRestScriptDocumentRenderer
         EnsureSeparated(lines);
         foreach (ForRestScriptExtraction extraction in extractions)
         {
-            string scope = extraction.TargetScope == VariableScope.RequestLocal ? "request" : "runtime";
-            lines.Add($"extract {scope} {extraction.TargetVariableName} = json {RenderQuotedString(extraction.Selector)}");
+            lines.Add(RenderExtraction(extraction));
         }
+    }
+
+    // Regex extractions carry a pattern (and optional capture group) the parser distinguishes
+    // from plain JSON selector extractions; collapsing them all to 'json' would silently delete
+    // the pattern from user files on the next editor round trip.
+    private static string RenderExtraction(ForRestScriptExtraction extraction)
+    {
+        var scope = extraction.TargetScope == VariableScope.RequestLocal ? "request" : "runtime";
+        var prefix = $"extract {scope} {extraction.TargetVariableName} =";
+        var groupSuffix = extraction.Group == 1 ? string.Empty : $" {extraction.Group}";
+
+        return extraction.Source switch
+        {
+            ForRestScriptExtractionSource.Body => $"{prefix} regex body {RenderQuotedString(extraction.Pattern)}{groupSuffix}",
+            ForRestScriptExtractionSource.Header => $"{prefix} regex header {RenderQuotedString(extraction.Selector)} {RenderQuotedString(extraction.Pattern)}{groupSuffix}",
+            _ when !string.IsNullOrEmpty(extraction.Pattern) => $"{prefix} regex json {RenderQuotedString(extraction.Selector)} {RenderQuotedString(extraction.Pattern)}{groupSuffix}",
+            _ => $"{prefix} json {RenderQuotedString(extraction.Selector)}",
+        };
     }
 
     private static void AppendFlow(List<string> lines, string flow)
@@ -206,6 +249,62 @@ public static class ForRestScriptDocumentRenderer
         {
             lines.Add($"{keyword} {key} = {RenderExpression(value)}");
         }
+    }
+
+    private static void AppendHandlers(List<string> lines, IReadOnlyList<ForRestScriptHandler> handlers)
+    {
+        foreach (var handler in handlers)
+        {
+            EnsureSeparated(lines);
+            var opening = handler.Kind == ForRestScriptHandlerKind.OnStatus
+                ? $"on status {handler.StatusCode} {{"
+                : "on error {";
+
+            lines.Add(opening);
+            AppendVerbatimBlockBody(lines, handler.Body);
+            lines.Add("}");
+        }
+    }
+
+    private static void AppendScenarios(List<string> lines, IReadOnlyList<ForRestScriptScenario> scenarios)
+    {
+        foreach (var scenario in scenarios)
+        {
+            EnsureSeparated(lines);
+            lines.Add($"scenario \"{scenario.Name}\" {{");
+
+            foreach ((var key, var value) in scenario.Auth)
+            {
+                lines.Add($"  auth {key} = {RenderExpression(value)}");
+            }
+
+            foreach (var header in scenario.Headers)
+            {
+                lines.Add($"  header {RenderQuotedString(header.Key)} = {RenderExpression(header.Value)}");
+            }
+
+            foreach (var test in scenario.Tests)
+            {
+                lines.Add($"  expect {RenderAssertion(test)}");
+            }
+
+            AppendVerbatimBlockBody(lines, scenario.Flow);
+            lines.Add("}");
+        }
+    }
+
+    // Handler bodies and scenario flow are stored as raw trimmed text; the parser re-trims only
+    // the outer edges on the next parse, so interior indentation must be emitted untouched —
+    // adding canonical indentation here would grow into the stored text on every round trip.
+    private static void AppendVerbatimBlockBody(List<string> lines, string body)
+    {
+        var normalized = Normalize(body).Trim('\n');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return;
+        }
+
+        lines.AddRange(normalized.Split('\n'));
     }
 
     private static void AppendAuth(List<string> lines, Dictionary<string, ForRestScriptValueExpression> auth)
@@ -255,6 +354,8 @@ public static class ForRestScriptDocumentRenderer
         string operation = assertion.Operator switch
         {
             ForRestScriptComparisonOperator.Exists => "exists",
+            ForRestScriptComparisonOperator.NotExists => "not exists",
+            ForRestScriptComparisonOperator.RegexMatch => $"regex {RenderExpression(assertion.Value ?? new ForRestScriptStringExpression(string.Empty))}",
             _ => $"{RenderOperator(assertion.Operator)} {RenderExpression(assertion.Value ?? new ForRestScriptStringExpression(string.Empty))}"
         };
 
@@ -268,6 +369,8 @@ public static class ForRestScriptDocumentRenderer
             ForRestScriptComparisonOperator.Equal => "==",
             ForRestScriptComparisonOperator.NotEqual => "!=",
             ForRestScriptComparisonOperator.Contains => "contains",
+            ForRestScriptComparisonOperator.StartsWith => "startswith",
+            ForRestScriptComparisonOperator.EndsWith => "endswith",
             ForRestScriptComparisonOperator.GreaterThan => ">",
             ForRestScriptComparisonOperator.GreaterThanOrEqual => ">=",
             ForRestScriptComparisonOperator.LessThan => "<",

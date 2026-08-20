@@ -6,6 +6,25 @@ namespace ForRest.Scripting;
 
 public sealed class ForRestScriptParser
 {
+    #region Private Fields
+
+    private static readonly string[] DirectiveWords =
+    [
+        "meta", "vars", "request", "auth", "query", "headers", "form", "multipart", "extract", "tests", "repeat", "retry",
+        "name", "method", "url", "timeout", "redirects", "ssl", "history", "content_type", "user_agent", "header", "body",
+        "flow", "expect", "import", "use", "scenario", "on", "runtime", "secret",
+    ];
+
+    private static readonly HashSet<string> FlowStatementStarters = new(
+        [
+            "let", "if", "else", "while", "foreach", "for", "switch", "case", "default", "retry", "define", "call",
+            "parallel", "pipe", "log", "warn", "error", "delay", "stop", "break", "continue", "runtime", "secret",
+            "snapshot", "stash", "request", "response", "await",
+        ],
+        StringComparer.OrdinalIgnoreCase);
+
+    #endregion
+
     #region Public Methods
 
     public ForRestScriptParseResult Parse(string source)
@@ -84,45 +103,46 @@ public sealed class ForRestScriptParser
 
             if (TryGetKnownSectionName(trimmed, out var sectionName))
             {
+                var sectionLineNumber = index + 1;
                 index++;
 
                 switch (sectionName)
                 {
                     case "meta":
-                        ParseKeyValueSection(lines, ref index, meta, diagnostics, sectionName);
+                        ParseKeyValueSection(lines, ref index, meta, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "vars":
-                        ParseVariablesSection(lines, ref index, variables, diagnostics);
+                        ParseVariablesSection(lines, ref index, variables, diagnostics, sectionLineNumber);
                         break;
                     case "request":
-                        ParseKeyValueSection(lines, ref index, request, diagnostics, sectionName);
+                        ParseKeyValueSection(lines, ref index, request, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "auth":
-                        ParseKeyValueSection(lines, ref index, auth, diagnostics, sectionName);
+                        ParseKeyValueSection(lines, ref index, auth, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "query":
-                        ParseNamedValueSection(lines, ref index, query, diagnostics, sectionName);
+                        ParseNamedValueSection(lines, ref index, query, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "headers":
-                        ParseNamedValueSection(lines, ref index, headers, diagnostics, sectionName);
+                        ParseNamedValueSection(lines, ref index, headers, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "form":
-                        ParseNamedValueSection(lines, ref index, formValues, diagnostics, sectionName);
+                        ParseNamedValueSection(lines, ref index, formValues, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "multipart":
-                        ParseNamedValueSection(lines, ref index, multipartValues, diagnostics, sectionName);
+                        ParseNamedValueSection(lines, ref index, multipartValues, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "extract":
-                        ParseExtractionSection(lines, ref index, extractions, diagnostics);
+                        ParseExtractionSection(lines, ref index, extractions, diagnostics, sectionLineNumber);
                         break;
                     case "tests":
-                        ParseTestsSection(lines, ref index, tests, diagnostics);
+                        ParseTestsSection(lines, ref index, tests, diagnostics, sectionLineNumber);
                         break;
                     case "repeat":
-                        ParseKeyValueSection(lines, ref index, repeat, diagnostics, sectionName);
+                        ParseKeyValueSection(lines, ref index, repeat, diagnostics, sectionName, sectionLineNumber);
                         break;
                     case "retry":
-                        ParseKeyValueSection(lines, ref index, retry, diagnostics, sectionName);
+                        ParseKeyValueSection(lines, ref index, retry, diagnostics, sectionName, sectionLineNumber);
                         break;
                 }
 
@@ -146,6 +166,7 @@ public sealed class ForRestScriptParser
                 continue;
             }
 
+            WarnWhenLineLooksLikeMistypedDirective(trimmed, index + 1, line, diagnostics);
             flowLines.Add(line);
             rawFlowDepth = Math.Max(0, CountBraceDelta(line));
             index++;
@@ -350,15 +371,17 @@ public sealed class ForRestScriptParser
 
             if (TryGetKnownSectionName(lineTrimmed, out var sectionName) && sectionName == "auth")
             {
+                var sectionLineNumber = index + 1;
                 index++;
-                ParseKeyValueSection(lines, ref index, scenarioAuth, diagnostics, "auth");
+                ParseKeyValueSection(lines, ref index, scenarioAuth, diagnostics, "auth", sectionLineNumber);
                 continue;
             }
 
             if (TryGetKnownSectionName(lineTrimmed, out sectionName) && sectionName == "headers")
             {
+                var sectionLineNumber = index + 1;
                 index++;
-                ParseNamedValueSection(lines, ref index, scenarioHeaders, diagnostics, "headers");
+                ParseNamedValueSection(lines, ref index, scenarioHeaders, diagnostics, "headers", sectionLineNumber);
                 continue;
             }
 
@@ -655,6 +678,12 @@ public sealed class ForRestScriptParser
         }
 
         string assertionText = trimmed[7..].Trim();
+        if (TryDescribeUnsupportedAssertion(assertionText, out var unsupportedMessage))
+        {
+            diagnostics.Add(CreateDiagnostic(unsupportedMessage, lineNumber, sourceLine));
+            return true;
+        }
+
         if (TryParseStatusAssertion(assertionText, out var assertion)
             || TryParseBodyAssertion(assertionText, out assertion)
             || TryParseHeaderAssertion(assertionText, out assertion)
@@ -712,7 +741,18 @@ public sealed class ForRestScriptParser
         }
 
         string remainder = trimmed[6..].TrimStart();
-        return remainder.Length > 0 && char.IsDigit(remainder[0]);
+        if (remainder.Length > 0 && char.IsDigit(remainder[0]))
+        {
+            return true;
+        }
+
+        if (!trimmed.TrimEnd().EndsWith('{'))
+        {
+            return false;
+        }
+
+        int braceIndex = trimmed.LastIndexOf('{');
+        return trimmed.IndexOf('=', 0, braceIndex) < 0;
     }
 
     private static bool TryReadDirectiveValue(string trimmed, string directive, out string rawValue)
@@ -758,6 +798,8 @@ public sealed class ForRestScriptParser
             return false;
         }
 
+        var openingLineNumber = index + 1;
+
         var remainder = trimmed[5..].Trim();
         var delimiterIndex = remainder.IndexOf("\"\"\"", StringComparison.Ordinal);
         if (delimiterIndex < 0)
@@ -802,7 +844,7 @@ public sealed class ForRestScriptParser
 
         if (!terminated)
         {
-            diagnostics.Add(CreateDiagnostic("The body section is missing a closing triple quote.", index, line));
+            diagnostics.Add(CreateDiagnostic("The body section is missing a closing triple quote.", openingLineNumber, line));
             return true;
         }
 
@@ -815,7 +857,8 @@ public sealed class ForRestScriptParser
         ref int index,
         Dictionary<string, ForRestScriptValueExpression> target,
         List<ForRestScriptDiagnostic> diagnostics,
-        string sectionName)
+        string sectionName,
+        int sectionLineNumber)
     {
         while (index < lines.Count)
         {
@@ -854,14 +897,15 @@ public sealed class ForRestScriptParser
             index++;
         }
 
-        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The '{sectionName}' section is missing a closing '}}'.", index, 1));
+        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The '{sectionName}' section opened on line {sectionLineNumber} is missing a closing '}}'.", sectionLineNumber, 1));
     }
 
     private static void ParseVariablesSection(
         IReadOnlyList<string> lines,
         ref int index,
         List<ForRestScriptVariableDeclaration> variables,
-        List<ForRestScriptDiagnostic> diagnostics)
+        List<ForRestScriptDiagnostic> diagnostics,
+        int sectionLineNumber)
     {
         while (index < lines.Count)
         {
@@ -898,7 +942,7 @@ public sealed class ForRestScriptParser
             index++;
         }
 
-        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The 'vars' section is missing a closing '}'.", index, 1));
+        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The 'vars' section opened on line {sectionLineNumber} is missing a closing '}}'.", sectionLineNumber, 1));
     }
 
     private static void ParseNamedValueSection(
@@ -906,7 +950,8 @@ public sealed class ForRestScriptParser
         ref int index,
         List<ForRestScriptNamedValue> values,
         List<ForRestScriptDiagnostic> diagnostics,
-        string sectionName)
+        string sectionName,
+        int sectionLineNumber)
     {
         while (index < lines.Count)
         {
@@ -943,14 +988,15 @@ public sealed class ForRestScriptParser
             index++;
         }
 
-        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The '{sectionName}' section is missing a closing '}}'.", index, 1));
+        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The '{sectionName}' section opened on line {sectionLineNumber} is missing a closing '}}'.", sectionLineNumber, 1));
     }
 
     private static void ParseExtractionSection(
         IReadOnlyList<string> lines,
         ref int index,
         List<ForRestScriptExtraction> extractions,
-        List<ForRestScriptDiagnostic> diagnostics)
+        List<ForRestScriptDiagnostic> diagnostics,
+        int sectionLineNumber)
     {
         while (index < lines.Count)
         {
@@ -987,7 +1033,7 @@ public sealed class ForRestScriptParser
             index++;
         }
 
-        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The 'extract' section is missing a closing '}'.", index, 1));
+        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The 'extract' section opened on line {sectionLineNumber} is missing a closing '}}'.", sectionLineNumber, 1));
     }
 
     private static bool TryParseVariableDeclaration(
@@ -1206,7 +1252,8 @@ public sealed class ForRestScriptParser
         IReadOnlyList<string> lines,
         ref int index,
         List<ForRestScriptAssertion> tests,
-        List<ForRestScriptDiagnostic> diagnostics)
+        List<ForRestScriptDiagnostic> diagnostics,
+        int sectionLineNumber)
     {
         while (index < lines.Count)
         {
@@ -1227,6 +1274,13 @@ public sealed class ForRestScriptParser
             string assertionInput = trimmed.StartsWith("expect ", StringComparison.OrdinalIgnoreCase)
                 ? trimmed[7..].Trim()
                 : trimmed;
+
+            if (TryDescribeUnsupportedAssertion(assertionInput, out var unsupportedMessage))
+            {
+                diagnostics.Add(CreateDiagnostic(unsupportedMessage, index + 1, line));
+                index++;
+                continue;
+            }
 
             if (TryParseStatusAssertion(assertionInput, out var parsedAssertion)
                 || TryParseBodyAssertion(assertionInput, out parsedAssertion)
@@ -1254,7 +1308,7 @@ public sealed class ForRestScriptParser
             index++;
         }
 
-        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The 'tests' section is missing a closing '}'.", index, 1));
+        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The 'tests' section opened on line {sectionLineNumber} is missing a closing '}}'.", sectionLineNumber, 1));
     }
 
     private static bool TryParseFlow(
@@ -1271,6 +1325,7 @@ public sealed class ForRestScriptParser
             return false;
         }
 
+        var sectionLineNumber = index + 1;
         var builder = new StringBuilder();
         var depth = 1;
         index++;
@@ -1298,7 +1353,7 @@ public sealed class ForRestScriptParser
             index++;
         }
 
-        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "The 'flow' section is missing a closing '}'.", index, 1));
+        diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, $"The 'flow' section opened on line {sectionLineNumber} is missing a closing '}}'.", sectionLineNumber, 1));
         flow = builder.ToString().TrimEnd();
         return true;
     }
@@ -1430,29 +1485,121 @@ public sealed class ForRestScriptParser
     {
         assertion = null;
         string trimmed = TrimOptionalTerminator(input);
-        if (string.Equals(trimmed, "exists", StringComparison.OrdinalIgnoreCase))
+        if (TryReadExistsOperator(trimmed, out var existsOperator))
         {
             assertion = new(
                 ForRestScriptAssertionTarget.Json,
-                ForRestScriptComparisonOperator.Exists,
-                $"json \"{selector}\" exists",
+                existsOperator,
+                $"json \"{selector}\" {RenderExistsKeyword(existsOperator)}",
                 Selector: selector);
             return true;
         }
 
         if (TryReadTrailingQuotedString(trimmed, out var withoutLabel, out var label)
-            && string.Equals(withoutLabel.Trim(), "exists", StringComparison.OrdinalIgnoreCase)
+            && TryReadExistsOperator(withoutLabel.Trim(), out var labeledOperator)
             && !string.IsNullOrWhiteSpace(label))
         {
             assertion = new(
                 ForRestScriptAssertionTarget.Json,
-                ForRestScriptComparisonOperator.Exists,
+                labeledOperator,
                 label!,
                 Selector: selector);
             return true;
         }
 
         return false;
+    }
+
+    private static bool TryReadExistsOperator(string text, out ForRestScriptComparisonOperator existsOperator)
+    {
+        if (string.Equals(text, "exists", StringComparison.OrdinalIgnoreCase))
+        {
+            existsOperator = ForRestScriptComparisonOperator.Exists;
+            return true;
+        }
+
+        if (Regex.IsMatch(text, @"^not\s+exists$", RegexOptions.IgnoreCase))
+        {
+            existsOperator = ForRestScriptComparisonOperator.NotExists;
+            return true;
+        }
+
+        existsOperator = ForRestScriptComparisonOperator.Exists;
+        return false;
+    }
+
+    private static string RenderExistsKeyword(ForRestScriptComparisonOperator existsOperator)
+    {
+        return existsOperator == ForRestScriptComparisonOperator.NotExists ? "not exists" : "exists";
+    }
+
+    /// <summary>
+    /// Detect assertion shapes whose target/operator combination is invalid
+    /// so parsing can fail with a targeted diagnostic instead of the generic
+    /// "could not parse" message. Returns the diagnostic text when the shape
+    /// is recognized as unsupported.
+    /// </summary>
+    private static bool TryDescribeUnsupportedAssertion(string assertionText, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+
+        if (assertionText.StartsWith("status ", StringComparison.OrdinalIgnoreCase))
+        {
+            var statusRemainder = assertionText[7..].Trim();
+            if (statusRemainder.StartsWith("startswith ", StringComparison.OrdinalIgnoreCase)
+                || statusRemainder.StartsWith("endswith ", StringComparison.OrdinalIgnoreCase))
+            {
+                errorMessage = "The 'startswith' and 'endswith' operators are not supported for status assertions. Use a numeric comparison such as ==, !=, >, >=, <, or <=.";
+                return true;
+            }
+
+            if (statusRemainder.StartsWith("contains ", StringComparison.OrdinalIgnoreCase))
+            {
+                errorMessage = "The 'contains' operator is not supported for status assertions. Use == for an exact status, or a range comparison such as expect status >= 200 with expect status < 300.";
+                return true;
+            }
+
+            if (IsExistsOperatorShape(statusRemainder))
+            {
+                errorMessage = "The 'exists' and 'not exists' operators are only supported for json assertions, e.g. expect json \"$.id\" exists.";
+                return true;
+            }
+
+            return false;
+        }
+
+        if (assertionText.StartsWith("body ", StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsExistsOperatorShape(assertionText[5..].Trim()))
+            {
+                errorMessage = "The 'exists' and 'not exists' operators are only supported for json assertions, e.g. expect json \"$.id\" exists.";
+                return true;
+            }
+
+            return false;
+        }
+
+        if (assertionText.StartsWith("header ", StringComparison.OrdinalIgnoreCase)
+            && TryReadQuotedToken(assertionText[7..].Trim(), out _, out var afterHeaderName)
+            && IsExistsOperatorShape(afterHeaderName.Trim()))
+        {
+            errorMessage = "The 'exists' and 'not exists' operators are only supported for json assertions, e.g. expect json \"$.id\" exists.";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsExistsOperatorShape(string text)
+    {
+        var trimmed = TrimOptionalTerminator(text);
+        if (TryReadTrailingQuotedString(trimmed, out var withoutLabel, out var label)
+            && !string.IsNullOrWhiteSpace(label))
+        {
+            trimmed = withoutLabel.Trim();
+        }
+
+        return TryReadExistsOperator(trimmed, out _);
     }
 
     /// <summary>
@@ -1620,41 +1767,6 @@ public sealed class ForRestScriptParser
         return false;
     }
 
-    private static bool TrySplitOperator(
-        string text,
-        out string left,
-        out ForRestScriptComparisonOperator comparisonOperator,
-        out string right)
-    {
-        foreach (var candidate in new[]
-                 {
-                     (" contains ", ForRestScriptComparisonOperator.Contains),
-                     (" == ", ForRestScriptComparisonOperator.Equal),
-                     (" != ", ForRestScriptComparisonOperator.NotEqual),
-                     (" >= ", ForRestScriptComparisonOperator.GreaterThanOrEqual),
-                     (" <= ", ForRestScriptComparisonOperator.LessThanOrEqual),
-                     (" > ", ForRestScriptComparisonOperator.GreaterThan),
-                     (" < ", ForRestScriptComparisonOperator.LessThan),
-                 })
-        {
-            var separatorIndex = text.IndexOf(candidate.Item1, StringComparison.OrdinalIgnoreCase);
-            if (separatorIndex < 0)
-            {
-                continue;
-            }
-
-            left = text[..separatorIndex].Trim();
-            right = text[(separatorIndex + candidate.Item1.Length)..].Trim();
-            comparisonOperator = candidate.Item2;
-            return true;
-        }
-
-        left = string.Empty;
-        right = string.Empty;
-        comparisonOperator = ForRestScriptComparisonOperator.Equal;
-        return false;
-    }
-
     private static bool TryReadLeadingOperator(
         string text,
         out ForRestScriptComparisonOperator comparisonOperator,
@@ -1663,6 +1775,8 @@ public sealed class ForRestScriptParser
         foreach (var candidate in new[]
                  {
                      ("contains ", ForRestScriptComparisonOperator.Contains),
+                     ("startswith ", ForRestScriptComparisonOperator.StartsWith),
+                     ("endswith ", ForRestScriptComparisonOperator.EndsWith),
                      ("== ", ForRestScriptComparisonOperator.Equal),
                      ("!= ", ForRestScriptComparisonOperator.NotEqual),
                      (">= ", ForRestScriptComparisonOperator.GreaterThanOrEqual),
@@ -2052,33 +2166,142 @@ public sealed class ForRestScriptParser
             case "text":
                 mode = RequestBodyMode.RawText;
                 return true;
+            case "form":
+                mode = RequestBodyMode.FormUrlEncoded;
+                return true;
+            case "multipart":
+                mode = RequestBodyMode.MultipartFormData;
+                return true;
             default:
                 mode = RequestBodyMode.None;
                 return false;
         }
     }
 
-    private static void SkipSection(IReadOnlyList<string> lines, ref int index)
-    {
-        while (index < lines.Count)
-        {
-            if (lines[index].Trim() == "}")
-            {
-                index++;
-                return;
-            }
-
-            index++;
-        }
-    }
-
-    private static ForRestScriptDiagnostic CreateDiagnostic(string message, int lineNumber, string sourceLine)
+    private static ForRestScriptDiagnostic CreateDiagnostic(
+        string message,
+        int lineNumber,
+        string sourceLine,
+        ForRestScriptDiagnosticSeverity severity = ForRestScriptDiagnosticSeverity.Error)
     {
         var column = string.IsNullOrWhiteSpace(sourceLine)
             ? 1
             : sourceLine.TakeWhile(static character => char.IsWhiteSpace(character)).Count() + 1;
 
-        return new(ForRestScriptDiagnosticSeverity.Error, message, lineNumber, column);
+        return new(severity, message, lineNumber, column);
+    }
+
+    #endregion
+
+    #region Mistyped Directive Detection
+
+    private static void WarnWhenLineLooksLikeMistypedDirective(
+        string trimmed,
+        int lineNumber,
+        string sourceLine,
+        List<ForRestScriptDiagnostic> diagnostics)
+    {
+        var firstWord = ReadLeadingIdentifier(trimmed);
+        if (firstWord.Length < 4 || firstWord.Length == trimmed.Length)
+        {
+            return;
+        }
+
+        if (FlowStatementStarters.Contains(firstWord))
+        {
+            return;
+        }
+
+        var afterWord = trimmed[firstWord.Length..].TrimStart();
+        if (afterWord.Length == 0 || afterWord[0] is '.' or '=' or '(')
+        {
+            return;
+        }
+
+        var suggestion = FindClosestDirectiveWord(firstWord);
+        if (suggestion is null)
+        {
+            return;
+        }
+
+        diagnostics.Add(CreateDiagnostic(
+            $"Line looks like a mistyped directive: did you mean '{suggestion}'? Treating it as flow code.",
+            lineNumber,
+            sourceLine,
+            ForRestScriptDiagnosticSeverity.Warning));
+    }
+
+    private static string ReadLeadingIdentifier(string trimmed)
+    {
+        var length = 0;
+        while (length < trimmed.Length && (char.IsLetterOrDigit(trimmed[length]) || trimmed[length] == '_'))
+        {
+            length++;
+        }
+
+        return length > 0 && (char.IsLetter(trimmed[0]) || trimmed[0] == '_')
+            ? trimmed[..length]
+            : string.Empty;
+    }
+
+    private static string? FindClosestDirectiveWord(string firstWord)
+    {
+        var lowered = firstWord.ToLowerInvariant();
+        var maxDistance = lowered.Length >= 6 ? 2 : 1;
+        string? closest = null;
+        var closestDistance = int.MaxValue;
+
+        foreach (var candidate in DirectiveWords)
+        {
+            if (candidate == lowered)
+            {
+                continue;
+            }
+
+            var distance = DamerauLevenshteinDistance(lowered, candidate);
+            if (distance <= maxDistance && distance < closestDistance)
+            {
+                closestDistance = distance;
+                closest = candidate;
+            }
+        }
+
+        return closest;
+    }
+
+    private static int DamerauLevenshteinDistance(string source, string target)
+    {
+        var distances = new int[source.Length + 1, target.Length + 1];
+        for (var row = 0; row <= source.Length; row++)
+        {
+            distances[row, 0] = row;
+        }
+
+        for (var column = 0; column <= target.Length; column++)
+        {
+            distances[0, column] = column;
+        }
+
+        for (var row = 1; row <= source.Length; row++)
+        {
+            for (var column = 1; column <= target.Length; column++)
+            {
+                var substitutionCost = source[row - 1] == target[column - 1] ? 0 : 1;
+                distances[row, column] = Math.Min(
+                    Math.Min(distances[row - 1, column] + 1, distances[row, column - 1] + 1),
+                    distances[row - 1, column - 1] + substitutionCost);
+
+                if (row > 1
+                    && column > 1
+                    && source[row - 1] == target[column - 2]
+                    && source[row - 2] == target[column - 1])
+                {
+                    distances[row, column] = Math.Min(distances[row, column], distances[row - 2, column - 2] + 1);
+                }
+            }
+        }
+
+        return distances[source.Length, target.Length];
     }
 
     #endregion

@@ -1,6 +1,6 @@
 # For-Rest Script Language
 
-Date: 2026-08-10
+Date: 2026-08-14
 
 ## Canonical Source
 
@@ -66,6 +66,10 @@ max_send_iterations 3
 ```
 
 Comments start with `#`. Blank lines are ignored.
+
+`body` supports three modes: `body json """..."""`, `body form """..."""` (URL-encoded pairs), and `body multipart """..."""`. All three parse, compile, and survive editor round-trips.
+
+The canonical renderer emits sections in a fixed order — imports, meta, request, auth, variables, query, headers, body, form, multipart, extract, flow, tests, repeat, retry, handlers, scenarios — and round-trips every renderable construct (regex extractions, `import` directives, `on error` / `on status` handlers, `scenario` blocks, and `regex` assertions included), so editor rewrites are loss-free.
 
 ## Inline AI
 
@@ -216,16 +220,17 @@ Supported flow forms today:
 
 - `if / else if / else`
 - `while`
-- `foreach` (preferred) / `for` (accepted alias)
-- `switch / case / default`
+- `foreach` (preferred) / `for` (accepted alias), with an optional zero-based loop index: `foreach item, i in source { }` (the parenthesized `foreach (item, i) in source { }` form also parses). The index is a real integer usable in expressions and stays in scope after the loop holding the last index.
+- `switch / case / default`, including comma-separated multi-value cases — `case 200, 201 { }` matches when the expression equals any listed value (OR semantics); commas inside strings or parentheses do not split values
 - `range(start, end)`
-- inclusive range literals like `[0..9]`
-- `retry <count> { ... }` with optional `with backoff` (exponential) or `with delay <ms>`
+- inclusive range literals like `[0..9]`, with expression endpoints (`[low..high]`, `[1..size - 1]`); reversed endpoints count down. Endpoints cannot contain top-level commas or a nested `..`.
+- `retry <count> { ... }` with optional `with backoff` (exponential, 100ms doubling) or `with delay <ms>`. Both the count and the delay accept expressions — variables, member access, arithmetic — with the count clamped to at least 1. At the document top level (outside an explicit flow block) a non-literal count needs the `{` on the same line as the `retry` header.
+- `stop` — ends the main flow early and successfully (already-set variables and tests are kept). Inside a `define` subroutine, `stop` returns from the subroutine only and the caller continues. `stop` is a reserved word and cannot be used as a variable name.
 - `define name with param1, param2 { ... }` subroutines invoked via `call name with arg1, arg2`
 - `parallel { ... }` fan-out, including `let [a, b] = parallel { ... }` destructuring
 - `pipe { ... }` sequential request chains
 
-At the document level, `scenario "name" { ... }` sections declare named test scenarios that share the base request, and `import` / `use` directives pull in shared modules.
+At the document level, `scenario "name" { ... }` sections declare named test scenarios that share the base request, and `import` / `use` directives pull in shared modules. An import merges the imported file's variables, headers, query/form/multipart entries, auth keys, and extractions into the importing document. The importing document always wins on a name clash, and between multiple imports the first import wins. Flow code, tests, defines, scenarios, and handlers are never imported — executable behavior stays in the file that declares it. Imports resolve transitively, and circular imports are detected and surfaced as warnings.
 
 **Block style.** The canonical form puts the opening brace on the header line, indents the
 body, and closes with `}` on its own line (every example below uses it). A block whose body
@@ -251,8 +256,14 @@ foreach index in range(0, 3) {
 ```
 
 ```ruby
+foreach item, i in [10..12] {
+  log $"{i}:{item}"
+}
+```
+
+```ruby
 switch response.status {
-  case 200 {
+  case 200, 201 {
     log "OK"
   }
   case 404 {
@@ -262,6 +273,25 @@ switch response.status {
     error "Unexpected status"
   }
 }
+```
+
+## Assertions
+
+`expect` assertions target `status`, `body`, `header "Name"`, and `json "$.selector"`, either at the top level or inside a `tests { }` section. A trailing quoted string is an optional label on every form.
+
+Supported operators:
+
+- `==` / `!=` — equality
+- `contains`, `startswith`, `endswith` — case-sensitive ordinal string matching on `body`, `header`, and `json` targets. The keywords themselves parse case-insensitively. On `status` these raise a parse-time diagnostic pointing at the numeric operators instead.
+- `>`, `>=`, `<`, `<=` — numeric comparisons on all four targets. For string targets, both the actual and expected values are trimmed and parsed as invariant-culture decimals (`10`, `3.14`, and `1e3` all parse); when both sides parse the comparison is numeric, and when either does not, the assertion fails with a clear `<label> failed: actual value '<v>' is not numeric` message (or the expected-value variant) instead of throwing.
+- `regex "pattern"` — regex matching on `body`, `header`, and `json` targets
+- `exists` / `not exists` — json-only presence checks; `not exists` passes when the selector matches nothing. On non-json targets they raise a parse-time diagnostic explaining they are only supported for json assertions.
+
+```ruby
+expect status >= 200 "success range"
+expect json "$.count" > 5 "count above five"
+expect body startswith "hello" "greeting prefix"
+expect json "$.missing" not exists "no missing field"
 ```
 
 ## Response and Error Handlers
@@ -456,6 +486,10 @@ The runtime then:
 7. runs generated assertions
 8. returns execution runs, response snapshots, console output, tests, and runtime variables
 
+Compiled flow scripts are cached: each script text gets a deterministic SHA-256-derived assembly/type identity, and a bounded, thread-safe LRU (32 entries) keeps loaded collectible `AssemblyLoadContext`s, unloading them on eviction. Repeated executions of an unchanged script skip Roslyn entirely, and editor Validate reuses the same cached compilations.
+
+Diagnostics are written for `.frs` authors, not C# readers. Unclosed sections report the line where the section opened; a top-level line that closely resembles a known directive (for example `hedaer` for `header`) produces a did-you-mean warning while still compiling as flow code; and script compile failures are rendered as `Script error (line N): ...` with a plain-language explanation for common mistakes (unknown names, missing members, unclosed braces), keeping the raw compiler diagnostic appended after a `| details:` separator for bug reports.
+
 ## Current Boundaries
 
 Included now:
@@ -471,11 +505,14 @@ Included now:
 - OAuth token acquisition (`oauth_client_credentials`, `oauth_device_code`, `oauth_authorization_code`, `oauth_integrated_windows`)
 - JSON extraction
 - regex extraction and regex-backed expectations
+- numeric (`>` `>=` `<` `<=`), affix (`startswith` / `endswith`), and json-only `exists` / `not exists` assertion operators
+- `json`, `form`, and `multipart` body modes with loss-free renderer round-trips
 - structured response stash data
-- `while`, `foreach`, `range(start, end)`, `if`, and `switch / case / default` flow forms
-- `retry` blocks (`with backoff` / `with delay`), `on status` / `on error` handlers
+- `while`, `foreach` (with optional loop index), `range(start, end)`, `if`, `switch / case / default` (multi-value cases), and `stop` flow forms
+- range literals with expression endpoints
+- `retry` blocks with expression counts and delays (`with backoff` / `with delay`), `on status` / `on error` handlers
 - `define` / `call` subroutines, `parallel` and `pipe` composition
-- `scenario` sections and `import` / `use` shared-module directives
+- `scenario` sections and `import` / `use` shared-module directives (merging variables, headers, query/form/multipart entries, auth keys, and extractions — document wins, first import wins)
 - `workspace.execute()` nested request execution
 - `ssl`, `history`, `timeout`, `redirects`, `content_type`, and `max_send_iterations` request settings
 - `payloads` corpora (with mutation) and the `fuzz` engine (bounded concurrency, baseline diffing, fingerprinting, host-scope governance)
@@ -492,7 +529,7 @@ Those are future language/runtime expansions, not parser bugs.
 
 ## Status & Roadmap
 
-The language and runtime surfaces above are implemented and test-covered today. The surrounding product surfaces below are **planned but not yet implemented** — contributors should not expect to find them in the codebase yet:
+The language and runtime surfaces above are implemented and test-covered today, including the 2026-08-14 enhancement pass: foreach loop indexes, multi-value switch cases, expression-based retry counts and range endpoints, the `stop` statement, the widened assertion operator set, loss-free renderer round-trips for all body modes and renderable constructs, and the compiled-script cache. The surrounding product surfaces below are **planned but not yet implemented** — contributors should not expect to find them in the codebase yet:
 
 - **Workspace management.** Basic workspace switching, create/rename/delete, and per-workspace document state exist in the shell (and over MCP). Richer management — folder/collection organization, moving and duplicating requests between workspaces, and bulk operations — still needs to be implemented.
 - **Script / collection management.** `.frs` documents live at simple locations (for example `/requests/get-users`) inside a workspace. A fuller script library — collections, tagging, search, and reusable shared-module management to back `import` / `use` at scale — is planned.

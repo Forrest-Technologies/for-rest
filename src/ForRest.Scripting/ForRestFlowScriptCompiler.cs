@@ -58,6 +58,7 @@ internal static class ForRestFlowScriptCompiler
         "secret",
         "snapshot",
         "stash",
+        "stop",
         "string",
         "StringComparison",
         "strings",
@@ -101,7 +102,9 @@ internal static class ForRestFlowScriptCompiler
         IEnumerable<string> knownVariableNames,
         IEnumerable<string>? templateBoundVariableNames,
         List<ForRestScriptDiagnostic> diagnostics,
-        bool emitRuntimePreamble = true)
+        bool emitRuntimePreamble = true,
+        ForRestFlowStopTarget? stopTarget = null,
+        ForRestFlowTempCounter? sharedTempCounter = null)
     {
         if (string.IsNullOrWhiteSpace(flowSource))
         {
@@ -130,8 +133,18 @@ internal static class ForRestFlowScriptCompiler
 
         var lines = ExpandInlineBlocks(Normalize(flowSource).Split('\n'));
         var index = 0;
-        var tempCounter = 0;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(knownIdentifiers, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: false);
+
+        // Fragments spliced into the same generated method (the main flow plus each
+        // on-status / on-error handler body) must share one temp counter — restarting at
+        // zero per fragment would redeclare temps like __runtimeValue1 across nested
+        // scopes of the same method, which is a CS0136 compile error.
+        var tempCounter = sharedTempCounter?.Value ?? 0;
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(knownIdentifiers, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: false, inSubroutine: false, stopTarget);
+        if (sharedTempCounter is not null)
+        {
+            sharedTempCounter.Value = tempCounter;
+        }
+
         return builder.ToString().Trim();
     }
 
@@ -178,7 +191,9 @@ internal static class ForRestFlowScriptCompiler
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
         ref int tempCounter,
-        bool allowBlockTerminator)
+        bool allowBlockTerminator,
+        bool inSubroutine = false,
+        ForRestFlowStopTarget? stopTarget = null)
     {
         while (index < lines.Count)
         {
@@ -221,6 +236,29 @@ internal static class ForRestFlowScriptCompiler
                 return;
             }
 
+            if (trimmed is "stop" or "stop;")
+            {
+                // Inside a define, stop exits the subroutine only. In the main flow, a plain
+                // `return null;` would also skip any on-status handler if-blocks spliced after
+                // the flow in the same generated method, so when a stop target label is
+                // provided the stop jumps to it instead of returning.
+                if (inSubroutine)
+                {
+                    builder.AppendLine("return;");
+                }
+                else if (stopTarget is not null)
+                {
+                    builder.AppendLine(stopTarget.RenderGoto());
+                }
+                else
+                {
+                    builder.AppendLine("return null;");
+                }
+
+                index++;
+                continue;
+            }
+
             if (TryCompileDefineStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
             {
                 continue;
@@ -236,27 +274,27 @@ internal static class ForRestFlowScriptCompiler
                 continue;
             }
 
-            if (TryCompileIfStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileIfStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine, stopTarget))
             {
                 continue;
             }
 
-            if (TryCompileWhileStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileWhileStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine, stopTarget))
             {
                 continue;
             }
 
-            if (TryCompileRetryStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileRetryStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine, stopTarget))
             {
                 continue;
             }
 
-            if (TryCompileForEachStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileForEachStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine, stopTarget))
             {
                 continue;
             }
 
-            if (TryCompileSwitchStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter))
+            if (TryCompileSwitchStatement(builder, lines, ref index, diagnostics, locals, templateBoundIdentifiers, ref tempCounter, inSubroutine, stopTarget))
             {
                 continue;
             }
@@ -352,7 +390,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine(TranslateRawStatement(statementText, locals));
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
                 builder.AppendLine("}");
                 continue;
             }
@@ -396,7 +434,9 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine,
+        ForRestFlowStopTarget? stopTarget)
     {
         if (!TryReadBlockHeader(lines, index, "if", out var condition, out var consumedLineCount))
         {
@@ -407,7 +447,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
         builder.AppendLine("}");
 
         while (index < lines.Count)
@@ -434,7 +474,7 @@ internal static class ForRestFlowScriptCompiler
                 builder.Append(TranslateExpression(elseIfCondition, locals));
                 builder.AppendLine(") {");
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
                 builder.AppendLine("}");
                 continue;
             }
@@ -443,7 +483,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine("else {");
                 index += consumedLineCount;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
                 builder.AppendLine("}");
             }
 
@@ -460,7 +500,9 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine,
+        ForRestFlowStopTarget? stopTarget)
     {
         if (!TryReadBlockHeader(lines, index, "while", out var condition, out var consumedLineCount))
         {
@@ -471,7 +513,7 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(TranslateExpression(condition, locals));
         builder.AppendLine(") {");
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
         builder.AppendLine("}");
         return true;
     }
@@ -483,11 +525,25 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine,
+        ForRestFlowStopTarget? stopTarget)
     {
-        if (!TryReadForEachHeader(lines, index, out var iteratorName, out var sourceExpression, out var consumedLineCount))
+        if (!TryReadForEachHeader(lines, index, out var iteratorName, out var indexName, out var sourceExpression, out var consumedLineCount))
         {
             return false;
+        }
+
+        if (indexName.Length > 0)
+        {
+            // The index is dynamic like every other flow local so a later `let i = "done"`
+            // reassignment stays legal. The declaration check must be case-sensitive: the
+            // locals set compares OrdinalIgnoreCase, but C# identifiers do not, so an existing
+            // local `Total` must not suppress the declaration of a new index named `total`.
+            var indexAlreadyDeclared = locals.Any(local => string.Equals(local, indexName, StringComparison.Ordinal));
+            builder.Append(indexAlreadyDeclared ? string.Empty : "dynamic ");
+            builder.Append(indexName);
+            builder.AppendLine(" = -1;");
         }
 
         builder.Append("foreach (dynamic ");
@@ -499,8 +555,16 @@ internal static class ForRestFlowScriptCompiler
         {
             iteratorName
         };
+        if (indexName.Length > 0)
+        {
+            builder.Append(indexName);
+            builder.AppendLine("++;");
+            nestedLocals.Add(indexName);
+            locals.Add(indexName);
+        }
+
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
         builder.AppendLine("}");
         return true;
     }
@@ -645,7 +709,9 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine,
+        ForRestFlowStopTarget? stopTarget)
     {
         if (!TryReadBlockHeader(lines, index, "switch", out var expression, out var consumedLineCount))
         {
@@ -689,12 +755,29 @@ internal static class ForRestFlowScriptCompiler
             if (TryReadBlockHeader(lines, index, "case", out var caseValue, out var caseConsumed))
             {
                 builder.Append(isFirstCase ? "if (" : "else if (");
-                builder.Append(switchVar);
-                builder.Append(" == ");
-                builder.Append(TranslateExpression(caseValue, locals));
+                var isFirstCaseValue = true;
+                foreach (var caseValuePart in SplitTopLevelCommas(caseValue))
+                {
+                    var caseValueText = caseValuePart.Trim();
+                    if (string.IsNullOrWhiteSpace(caseValueText))
+                    {
+                        continue;
+                    }
+
+                    if (!isFirstCaseValue)
+                    {
+                        builder.Append(" || ");
+                    }
+
+                    builder.Append(switchVar);
+                    builder.Append(" == ");
+                    builder.Append(TranslateExpression(caseValueText, locals));
+                    isFirstCaseValue = false;
+                }
+
                 builder.AppendLine(") {");
                 index += caseConsumed;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
                 builder.AppendLine("}");
                 isFirstCase = false;
                 continue;
@@ -704,7 +787,7 @@ internal static class ForRestFlowScriptCompiler
             {
                 builder.AppendLine(isFirstCase ? "{" : "else {");
                 index += defaultConsumed;
-                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+                CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
                 builder.AppendLine("}");
                 isFirstCase = false;
                 continue;
@@ -852,7 +935,9 @@ internal static class ForRestFlowScriptCompiler
         List<ForRestScriptDiagnostic> diagnostics,
         HashSet<string> locals,
         IReadOnlySet<string> templateBoundIdentifiers,
-        ref int tempCounter)
+        ref int tempCounter,
+        bool inSubroutine,
+        ForRestFlowStopTarget? stopTarget)
     {
         if (!TryReadBlockHeader(lines, index, "retry", out var expression, out var consumedLineCount))
         {
@@ -862,12 +947,38 @@ internal static class ForRestFlowScriptCompiler
         tempCounter++;
         var retryVar = $"__retryIdx{tempCounter}";
 
-        var parts = expression.Split([' '], StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0 || !int.TryParse(parts[0], out var maxRetries))
+        var countText = expression;
+        var modifierText = string.Empty;
+        var withIndex = expression.IndexOf(" with ", StringComparison.OrdinalIgnoreCase);
+        if (withIndex >= 0)
         {
-            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "retry requires a numeric count, e.g. 'retry 3 { }'.", index + 1, 1));
+            countText = expression[..withIndex].Trim();
+            modifierText = expression[(withIndex + 6)..].Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(countText))
+        {
+            diagnostics.Add(new(ForRestScriptDiagnosticSeverity.Error, "retry requires a count, e.g. 'retry 3 { }' or 'retry attempts { }'.", index + 1, 1));
             index += consumedLineCount;
             return true;
+        }
+
+        string countExpression;
+        if (int.TryParse(countText, out var maxRetries))
+        {
+            // Literal counts are clamped at compile time to match the runtime clamp on the
+            // expression path below — the body always runs at least once.
+            countExpression = Math.Max(1, maxRetries).ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            var countVar = $"__retryCount{tempCounter}";
+            builder.Append("var ");
+            builder.Append(countVar);
+            builder.Append(" = Math.Max(1, (int)Convert.ToInt64((object)(");
+            builder.Append(TranslateExpression(countText, locals));
+            builder.AppendLine(")));");
+            countExpression = countVar;
         }
 
         builder.Append("for (int ");
@@ -875,14 +986,14 @@ internal static class ForRestFlowScriptCompiler
         builder.Append(" = 0; ");
         builder.Append(retryVar);
         builder.Append(" < ");
-        builder.Append(maxRetries);
+        builder.Append(countExpression);
         builder.Append("; ");
         builder.Append(retryVar);
         builder.AppendLine("++) {");
 
-        if (parts.Length >= 3 && string.Equals(parts[1], "with", StringComparison.OrdinalIgnoreCase))
+        if (modifierText.Length > 0)
         {
-            if (string.Equals(parts[2], "backoff", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(modifierText, "backoff", StringComparison.OrdinalIgnoreCase))
             {
                 builder.Append("if (");
                 builder.Append(retryVar);
@@ -890,20 +1001,29 @@ internal static class ForRestFlowScriptCompiler
                 builder.Append(retryVar);
                 builder.AppendLine(" - 1))); }");
             }
-            else if (string.Equals(parts[2], "delay", StringComparison.OrdinalIgnoreCase)
-                     && parts.Length >= 4
-                     && int.TryParse(parts[3], out var delayMs))
+            else if (TryReadKeywordRemainder(modifierText, "delay", out var delayText))
             {
-                builder.Append("if (");
-                builder.Append(retryVar);
-                builder.Append(" > 0) { await Task.Delay(");
-                builder.Append(delayMs);
-                builder.AppendLine("); }");
+                if (int.TryParse(delayText, out var delayMs))
+                {
+                    builder.Append("if (");
+                    builder.Append(retryVar);
+                    builder.Append(" > 0) { await Task.Delay(");
+                    builder.Append(delayMs);
+                    builder.AppendLine("); }");
+                }
+                else
+                {
+                    builder.Append("if (");
+                    builder.Append(retryVar);
+                    builder.Append(" > 0) { await Task.Delay((int)Math.Max(0L, Convert.ToInt64((object)(");
+                    builder.Append(TranslateExpression(delayText, locals));
+                    builder.AppendLine(")))); }");
+                }
             }
         }
 
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, new HashSet<string>(locals, StringComparer.OrdinalIgnoreCase), templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine, stopTarget);
         builder.AppendLine("}");
         return true;
     }
@@ -1022,7 +1142,7 @@ internal static class ForRestFlowScriptCompiler
         }
 
         index += consumedLineCount;
-        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true);
+        CompileBlock(builder, lines, ref index, diagnostics, nestedLocals, templateBoundIdentifiers, ref tempCounter, allowBlockTerminator: true, inSubroutine: true);
         builder.AppendLine("}");
         return true;
     }
@@ -2468,8 +2588,18 @@ internal static class ForRestFlowScriptCompiler
     {
         return Regex.Replace(
             expression,
-            @"\[\s*(?<start>-?\d+)\s*\.\.\s*(?<end>-?\d+)\s*\]",
-            static match => $"__flow.RangeClosed({match.Groups["start"].Value}, {match.Groups["end"].Value})",
+            @"\[\s*(?<start>[^\[\],]+?)\s*\.\.\s*(?<end>[^\[\],]+?)\s*\]",
+            static match =>
+            {
+                var start = match.Groups["start"].Value.Trim();
+                var end = match.Groups["end"].Value.Trim();
+                if (start.Length == 0 || end.Length == 0 || start.Contains("..") || end.Contains(".."))
+                {
+                    return match.Value;
+                }
+
+                return $"__flow.RangeClosed({start}, {end})";
+            },
             RegexOptions.CultureInvariant);
     }
 
@@ -2827,10 +2957,12 @@ internal static class ForRestFlowScriptCompiler
         IReadOnlyList<string> lines,
         int startIndex,
         out string iteratorName,
+        out string indexName,
         out string sourceExpression,
         out int consumedLineCount)
     {
         iteratorName = string.Empty;
+        indexName = string.Empty;
         sourceExpression = string.Empty;
         if (!TryCollectHeaderText(lines, startIndex, out string combinedHeader, out consumedLineCount))
         {
@@ -2875,7 +3007,24 @@ internal static class ForRestFlowScriptCompiler
             return false;
         }
 
-        iteratorName = NormalizeForEachIterator(header[..separatorIndex]);
+        var iteratorText = header[..separatorIndex].Trim();
+        if (iteratorText.StartsWith('(') && iteratorText.EndsWith(')'))
+        {
+            iteratorText = iteratorText[1..^1].Trim();
+        }
+
+        var commaIndex = iteratorText.IndexOf(',');
+        if (commaIndex >= 0)
+        {
+            indexName = NormalizeForEachIterator(iteratorText[(commaIndex + 1)..]);
+            iteratorText = iteratorText[..commaIndex];
+            if (!IsFlowIdentifier(indexName))
+            {
+                return false;
+            }
+        }
+
+        iteratorName = NormalizeForEachIterator(iteratorText);
         sourceExpression = header[(separatorIndex + 4)..].Trim();
         return IsFlowIdentifier(iteratorName) && !string.IsNullOrWhiteSpace(sourceExpression);
     }
@@ -4387,6 +4536,23 @@ public sealed class ForRestFlowRuntime(VariablesApi variables)
         return Enumerable.Range(endInclusive, (startInclusive - endInclusive) + 1).Reverse();
     }
 
+    public IEnumerable<int> RangeClosed(object? startInclusive, object? endInclusive)
+    {
+        return RangeClosed(CoerceRangeEndpoint(startInclusive), CoerceRangeEndpoint(endInclusive));
+    }
+
+    private static int CoerceRangeEndpoint(object? value)
+    {
+        return value switch
+        {
+            null => 0,
+            int intValue => intValue,
+            string stringValue => (int)long.Parse(stringValue.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture),
+            JsonNode jsonNode => (int)long.Parse(jsonNode.ToString().Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture),
+            _ => (int)Convert.ToInt64(value, CultureInfo.InvariantCulture),
+        };
+    }
+
     public int Count(object? value)
     {
         return value switch
@@ -4603,4 +4769,49 @@ public sealed class ForRestFlowRuntime(VariablesApi variables)
             return null;
         }
     }
+}
+
+
+/// <summary>
+/// Compile-time context for the main flow's <c>stop</c> statement. When on-status handlers
+/// are spliced after the main flow in the same generated method, <c>stop</c> must jump to a
+/// label in front of those handler if-blocks instead of returning past them. The caller
+/// checks <see cref="EmittedGoto"/> to only emit the label when a <c>stop</c> actually
+/// produced a <c>goto</c>, avoiding an unused-label warning (CS0164) in the generated code.
+/// </summary>
+internal sealed class ForRestFlowStopTarget(string label)
+{
+    #region Properties
+
+    public string Label { get; } = label;
+
+    public bool EmittedGoto { get; private set; }
+
+    #endregion
+
+    #region Public Methods
+
+    public string RenderGoto()
+    {
+        EmittedGoto = true;
+        return $"goto {Label};";
+    }
+
+    #endregion
+}
+
+
+/// <summary>
+/// Shares a single temp-variable counter across the separate
+/// <see cref="ForRestFlowScriptCompiler.Compile"/> calls whose outputs are spliced into one
+/// generated method (the main flow plus each on-status / on-error handler body), so temps
+/// like <c>__runtimeValue1</c> stay unique within that method.
+/// </summary>
+internal sealed class ForRestFlowTempCounter
+{
+    #region Properties
+
+    public int Value { get; set; }
+
+    #endregion
 }

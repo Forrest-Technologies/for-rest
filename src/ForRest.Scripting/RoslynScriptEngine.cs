@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -61,6 +62,11 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         CreateScriptRuntimeConfiguration,
         LazyThreadSafetyMode.ExecutionAndPublication);
 
+    private readonly object cacheLock = new();
+    private readonly Dictionary<string, CachedScript> compilationCache = new(StringComparer.Ordinal);
+    private long cacheClock;
+    private int compilationCount;
+
     #endregion
 
     #region Public Methods
@@ -72,15 +78,16 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             return new();
         }
 
+        if (TryGetCachedScript(script) is not null)
+        {
+            return new();
+        }
+
         try
         {
             ScriptCompilationResult compilation = CompileScript(script);
             ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics();
-            string message = string.Join(
-                Environment.NewLine,
-                diagnostics
-                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
-                    .Select(static item => item.ToString()));
+            string message = BuildFriendlyCompileErrorMessage(diagnostics);
             if (string.IsNullOrWhiteSpace(message))
             {
                 return new();
@@ -171,20 +178,26 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 browser = new ScriptBrowserApi(request.BrowserBridge ?? NullBrowserBridge.Instance),
             };
 
-            ScriptCompilationResult compilation = CompileScript(request.Script);
-            ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics(cancellationToken)
-                .Where(static item => item.Severity == DiagnosticSeverity.Error)
-                .ToImmutableArray();
-            if (!diagnostics.IsEmpty)
+            var cached = TryGetCachedScript(request.Script);
+            if (cached is null)
             {
-                string message = string.Join(Environment.NewLine, diagnostics.Select(static item => item.ToString()));
-                logger.LogWarning("Script compilation failed: {Message}", message);
-                consoleApi.Error(message);
-                return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
+                ScriptCompilationResult compilation = CompileScript(request.Script);
+                ImmutableArray<Diagnostic> diagnostics = compilation.Compilation.GetDiagnostics(cancellationToken)
+                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
+                    .ToImmutableArray();
+                if (!diagnostics.IsEmpty)
+                {
+                    string message = BuildFriendlyCompileErrorMessage(diagnostics);
+                    logger.LogWarning("Script compilation failed: {Message}", message);
+                    consoleApi.Error(message);
+                    return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, message);
+                }
+
+                cached = CacheOrReuseLoadedScript(request.Script, EmitAndLoadScript(compilation, cancellationToken));
             }
 
             using IDisposable scope = ScriptRuntimeContext.Enter(globals);
-            await ExecuteCompiledScript(compilation, cancellationToken);
+            await InvokeCompiledScript(cached, cancellationToken);
         }
         catch (Exception exception)
         {
@@ -200,6 +213,40 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         }
 
         return BuildResult(request, requestApi, responseApi, variablesApi, testsApi, consoleApi, stashApi, string.Empty);
+    }
+
+    #endregion
+
+    #region Internal Cache Instrumentation
+
+    internal int CacheCapacity { get; set; } = 32;
+
+    internal int CompilationCount => Volatile.Read(ref compilationCount);
+
+    internal int CacheSize
+    {
+        get
+        {
+            lock (cacheLock)
+            {
+                return compilationCache.Count;
+            }
+        }
+    }
+
+    internal void ClearCache()
+    {
+        List<CachedScript> evicted;
+        lock (cacheLock)
+        {
+            evicted = [.. compilationCache.Values];
+            compilationCache.Clear();
+        }
+
+        foreach (var entry in evicted)
+        {
+            entry.LoadContext.Unload();
+        }
     }
 
     #endregion
@@ -268,11 +315,13 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             };
     }
 
-    private static ScriptCompilationResult CompileScript(string script)
+    private ScriptCompilationResult CompileScript(string script)
     {
+        Interlocked.Increment(ref compilationCount);
         ScriptRuntimeConfiguration scriptRuntime = ScriptRuntime.Value;
-        string typeName = $"GeneratedScript_{Guid.NewGuid():N}";
-        string assemblyName = $"ForRest.Script.{Guid.NewGuid():N}";
+        string scriptHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(script)));
+        string typeName = $"GeneratedScript_{scriptHash}";
+        string assemblyName = $"ForRest.Script.{scriptHash}";
         string preparedScript = BuildScriptSource(typeName, script);
         SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(
             preparedScript,
@@ -333,17 +382,13 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
         return builder.ToString();
     }
 
-    private static async Task ExecuteCompiledScript(ScriptCompilationResult compilation, CancellationToken cancellationToken)
+    private static CachedScript EmitAndLoadScript(ScriptCompilationResult compilation, CancellationToken cancellationToken)
     {
         using MemoryStream assemblyStream = new();
         EmitResult emitResult = compilation.Compilation.Emit(assemblyStream, cancellationToken: cancellationToken);
         if (!emitResult.Success)
         {
-            string message = string.Join(
-                Environment.NewLine,
-                emitResult.Diagnostics
-                    .Where(static item => item.Severity == DiagnosticSeverity.Error)
-                    .Select(static item => item.ToString()));
+            string message = BuildFriendlyCompileErrorMessage(emitResult.Diagnostics);
             throw new InvalidOperationException(message);
         }
 
@@ -356,7 +401,20 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             Type scriptType = assembly.GetType($"ForRest.Scripting.Generated.{compilation.TypeName}", throwOnError: true)!;
             MethodInfo method = scriptType.GetMethod("RunAsync", BindingFlags.Public | BindingFlags.Static)
                 ?? throw new MissingMethodException(scriptType.FullName, "RunAsync");
-            Task executionTask = (Task)(method.Invoke(null, null)
+            return new(loadContext, method);
+        }
+        catch
+        {
+            loadContext.Unload();
+            throw;
+        }
+    }
+
+    private static async Task InvokeCompiledScript(CachedScript cached, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var executionTask = (Task)(cached.RunMethod.Invoke(null, null)
                 ?? throw new InvalidOperationException("Compiled script did not return a task."));
             await executionTask.WaitAsync(cancellationToken);
         }
@@ -365,10 +423,133 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
             ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
             throw;
         }
-        finally
+    }
+
+    private CachedScript? TryGetCachedScript(string script)
+    {
+        lock (cacheLock)
         {
-            loadContext.Unload();
+            if (compilationCache.TryGetValue(script, out var cached))
+            {
+                cached.LastUsed = ++cacheClock;
+                return cached;
+            }
+
+            return null;
         }
+    }
+
+    private CachedScript CacheOrReuseLoadedScript(string script, CachedScript loaded)
+    {
+        List<CachedScript> evicted = [];
+        CachedScript result;
+        lock (cacheLock)
+        {
+            if (compilationCache.TryGetValue(script, out var existing))
+            {
+                existing.LastUsed = ++cacheClock;
+                evicted.Add(loaded);
+                result = existing;
+            }
+            else
+            {
+                loaded.LastUsed = ++cacheClock;
+                compilationCache[script] = loaded;
+                while (compilationCache.Count > CacheCapacity)
+                {
+                    var oldest = compilationCache.MinBy(static item => item.Value.LastUsed);
+                    compilationCache.Remove(oldest.Key);
+                    evicted.Add(oldest.Value);
+                }
+
+                result = loaded;
+            }
+        }
+
+        foreach (var entry in evicted)
+        {
+            entry.LoadContext.Unload();
+        }
+
+        return result;
+    }
+
+    private static string BuildFriendlyCompileErrorMessage(IEnumerable<Diagnostic> diagnostics)
+    {
+        return string.Join(
+            Environment.NewLine,
+            diagnostics
+                .Where(static item => item.Severity == DiagnosticSeverity.Error)
+                .Select(static item => BuildFriendlyDiagnosticLine(item)));
+    }
+
+    private static string BuildFriendlyDiagnosticLine(Diagnostic diagnostic)
+    {
+        var mappedSpan = diagnostic.Location.GetMappedLineSpan();
+        var line = mappedSpan.IsValid ? mappedSpan.StartLinePosition.Line + 1 : 0;
+        var friendly = BuildFriendlyDiagnosticText(diagnostic, line);
+        var prefix = line > 0 ? $"Script error (line {line}): " : "Script error: ";
+        return $"{prefix}{friendly} | details: {diagnostic}";
+    }
+
+    private static string BuildFriendlyDiagnosticText(Diagnostic diagnostic, int line)
+    {
+        var message = diagnostic.GetMessage();
+        switch (diagnostic.Id)
+        {
+            case "CS0103":
+            {
+                var match = Regex.Match(message, "The name '([^']+)' does not exist");
+                if (match.Success)
+                {
+                    var name = match.Groups[1].Value;
+                    return IsGeneratedIdentifier(name)
+                        ? $"Internal script translation error — please report this script. ({message})"
+                        : $"Unknown name '{name}'. Declare it with 'let {name} = ...' or check the spelling.";
+                }
+
+                break;
+            }
+
+            case "CS1061":
+            {
+                var match = Regex.Match(message, "'([^']+)' does not contain a definition for '([^']+)'");
+                if (match.Success)
+                {
+                    var typeName = match.Groups[1].Value;
+                    var memberName = match.Groups[2].Value;
+                    return IsGeneratedIdentifier(typeName)
+                        ? $"'{memberName}' is not available here. Check the member name."
+                        : $"'{memberName}' is not available on '{typeName}'. Check the member name.";
+                }
+
+                break;
+            }
+
+            case "CS1002":
+            case "CS1513":
+            case "CS1026":
+            {
+                return line > 0
+                    ? $"Incomplete statement near line {line} — check for a missing closing brace, parenthesis, or unfinished expression."
+                    : "Incomplete statement — check for a missing closing brace, parenthesis, or unfinished expression.";
+            }
+        }
+
+        return $"error {diagnostic.Id}: {StripGeneratedReferences(message)}";
+    }
+
+    private static bool IsGeneratedIdentifier(string name)
+    {
+        return name.StartsWith("__", StringComparison.Ordinal) ||
+               name.Contains("GeneratedScript_", StringComparison.Ordinal) ||
+               name.StartsWith("ForRest.Scripting.Generated", StringComparison.Ordinal) ||
+               name.StartsWith("dynamic", StringComparison.Ordinal);
+    }
+
+    private static string StripGeneratedReferences(string message)
+    {
+        return Regex.Replace(message, @"(ForRest\.Scripting\.Generated\.)?GeneratedScript_[0-9A-Fa-f]+", "script");
     }
 
     private static string BuildFriendlyRuntimeErrorMessage(Exception exception)
@@ -919,6 +1100,15 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
     private sealed record ScriptCompilationResult(
         CSharpCompilation Compilation,
         string TypeName);
+
+    private sealed class CachedScript(ScriptAssemblyLoadContext loadContext, MethodInfo runMethod)
+    {
+        public ScriptAssemblyLoadContext LoadContext { get; } = loadContext;
+
+        public MethodInfo RunMethod { get; } = runMethod;
+
+        public long LastUsed { get; set; }
+    }
 
     private sealed record ScriptRuntimeConfiguration(
         IReadOnlyList<MetadataReference> References,

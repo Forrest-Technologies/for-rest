@@ -140,6 +140,11 @@ public sealed class ForRestScriptDocumentTextService
             return $"exists \"{Escape(assertion.Message)}\"";
         }
 
+        if (assertion.Operator == ForRestScriptComparisonOperator.NotExists)
+        {
+            return $"not exists \"{Escape(assertion.Message)}\"";
+        }
+
         return $"{RenderOperator(assertion.Operator)} {RenderExpression(assertion.Value ?? new ForRestScriptStringExpression(string.Empty))} \"{Escape(assertion.Message)}\"";
     }
 
@@ -150,6 +155,8 @@ public sealed class ForRestScriptDocumentTextService
             ForRestScriptComparisonOperator.Equal => "==",
             ForRestScriptComparisonOperator.NotEqual => "!=",
             ForRestScriptComparisonOperator.Contains => "contains",
+            ForRestScriptComparisonOperator.StartsWith => "startswith",
+            ForRestScriptComparisonOperator.EndsWith => "endswith",
             ForRestScriptComparisonOperator.GreaterThan => ">",
             ForRestScriptComparisonOperator.GreaterThanOrEqual => ">=",
             ForRestScriptComparisonOperator.LessThan => "<",
