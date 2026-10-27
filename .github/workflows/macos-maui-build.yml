@@ -1,6 +1,10 @@
 name: macOS MAUI Build
 
 on:
+  push:
+    branches: [develop, master]
+  pull_request:
+    branches: [develop, master]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +16,9 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: macos-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, macOS, ARM64, ft-mac-mini]
+    timeout-minutes: 5
     outputs:
       build_configuration: ${{ steps.version.outputs.build_configuration }}
       version_label: ${{ steps.version.outputs.version_label }}
@@ -50,21 +56,31 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     needs: prepare
-    runs-on: macos-latest
+    runs-on: [self-hosted, macOS, ARM64, ft-mac-mini]
+    timeout-minutes: 60
     env:
       MACCATALYST_TFM: net10.0-maccatalyst
       MAC_ONLY_BUILD: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure writable toolchain state
+        shell: pwsh
+        run: |
+          "DOTNET_INSTALL_DIR=$(Join-Path $env:RUNNER_TOOL_CACHE 'for-rest-dotnet')" >> $env:GITHUB_ENV
+          "DOTNET_CLI_HOME=$(Join-Path $env:RUNNER_TEMP 'for-rest-dotnet-home')" >> $env:GITHUB_ENV
+          "NUGET_HTTP_CACHE_PATH=$(Join-Path $env:RUNNER_TEMP 'for-rest-nuget-http')" >> $env:GITHUB_ENV
+          "NUGET_PACKAGES=$(Join-Path $env:RUNNER_TOOL_CACHE 'for-rest-nuget-packages')" >> $env:GITHUB_ENV
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
-          dotnet-quality: preview
-          global-json-file: global.json
+          dotnet-version: '10.0.302'
 
       - name: Show toolchain
         shell: bash
@@ -75,43 +91,49 @@ jobs:
 
       - name: Restore MAUI workloads
         shell: bash
-        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:ForRestMacOnly=${MAC_ONLY_BUILD}
+        run: dotnet workload install maui-maccatalyst --version 10.0.103
 
       - name: Run core unit tests
         shell: bash
         run: dotnet test tests/ForRest.Tests/ForRest.Tests.csproj -c Debug
 
+      - name: Run MAUI unit tests
+        shell: bash
+        run: dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj -c Debug
+
+      - name: Build full solution
+        shell: bash
+        run: dotnet build ForRest.slnx -p:ForRestMacUnsigned=true
+
       - name: Build macOS (Mac Catalyst) app
         shell: bash
         run: |
           set -euo pipefail
-          OUTPUT_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/ci/maccatalyst"
-          dotnet build src/ForRest.Maui/ForRest.Maui.csproj \
+          dotnet publish src/ForRest.Maui/ForRest.Maui.csproj \
             -c "${{ needs.prepare.outputs.build_configuration }}" \
             -f "${MACCATALYST_TFM}" \
-            -p:ForRestMacOnly=${MAC_ONLY_BUILD} \
+            -p:ForRestMacOnly="${MAC_ONLY_BUILD}" \
+            -p:ForRestMacUnsigned=true \
             -p:ContinuousIntegrationBuild=true \
             -p:CreatePackage=false \
-            -p:EnableCodeSigning=false \
             -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} \
             -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} \
             -p:Version="${{ needs.prepare.outputs.version_label }}" \
             -p:InformationalVersion="${{ needs.prepare.outputs.version_label }}" \
             -p:FileVersion=${{ needs.prepare.outputs.file_version }} \
             -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} \
-            -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} \
-            -o "${OUTPUT_DIRECTORY}"
+            -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }}
 
       - name: Package macOS build output
         shell: bash
         run: |
           set -euo pipefail
           ARTIFACT_BASE="for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst"
-          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/ci/maccatalyst"
+          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/src/ForRest.Maui/bin/${{ needs.prepare.outputs.build_configuration }}/${MACCATALYST_TFM}"
           RELEASE_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release/maccatalyst"
           mkdir -p "${RELEASE_DIRECTORY}"
 
-          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 3 -type d -name '*.app' | head -n 1 || true)
+          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 1 -type d -name '*.app' | head -n 1 || true)
           if [[ -z "${APP_BUNDLE}" ]]; then
             echo "No .app bundle was produced by the Mac Catalyst build." >&2
             ls -R "${BUILD_DIRECTORY}" >&2 || true
@@ -120,6 +142,13 @@ jobs:
 
           ZIP_PATH="${RELEASE_DIRECTORY}/${ARTIFACT_BASE}.zip"
           rm -f "${ZIP_PATH}"
+          APP_EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "${APP_BUNDLE}/Contents/Info.plist")
+          ARCHITECTURES=$(/usr/bin/lipo -archs "${APP_BUNDLE}/Contents/MacOS/${APP_EXECUTABLE}")
+          if [[ " ${ARCHITECTURES} " != *" arm64 "* || " ${ARCHITECTURES} " != *" x86_64 "* ]]; then
+            echo "Expected Intel and Apple Silicon code; found: ${ARCHITECTURES}" >&2
+            exit 1
+          fi
+          /usr/bin/codesign --verify --deep --strict "${APP_BUNDLE}"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"
 
       - name: Upload workflow artifacts
@@ -128,4 +157,4 @@ jobs:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst
           path: artifacts/release/maccatalyst/*
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1
