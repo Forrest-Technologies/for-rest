@@ -49,7 +49,11 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IWorkbenchAiSettingsProvider, WorkbenchAiSettingsProvider>();
 		builder.Services.AddSingleton<IWorkbenchMcpSettingsProvider, WorkbenchMcpSettingsProvider>();
 		builder.Services.AddSingleton<IWorkbenchOAuthSettingsProvider, WorkbenchOAuthSettingsProvider>();
+#if MACCATALYST && FORREST_MAC_ADHOC
+		builder.Services.AddSingleton<IProviderTokenStore, InMemoryProviderTokenStore>();
+#else
 		builder.Services.AddSingleton<IProviderTokenStore, SecureStorageProviderTokenStore>();
+#endif
 		builder.Services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 		builder.Services.AddSingleton<IThemeService, ThemeService>();
 		builder.Services.AddSingleton<IBuildMetadataProvider, BuildMetadataProvider>();

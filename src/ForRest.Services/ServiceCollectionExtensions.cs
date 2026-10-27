@@ -24,8 +24,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRequestExecutionService, RequestExecutionService>();
         services.AddSingleton<IForRestScriptExecutionService, ForRestScriptExecutionService>();
 
-        // AI provider OAuth sign-in. The in-memory token store is a fallback only; the MAUI app
-        // overrides it with a DPAPI-backed implementation, hence TryAddSingleton.
+        // Application heads can replace the session token store with platform-protected storage.
         services.TryAddSingleton<IProviderTokenStore, InMemoryProviderTokenStore>();
         services.AddSingleton<IProviderOAuthService, ProviderOAuthService>();
 
