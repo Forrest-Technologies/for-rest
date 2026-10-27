@@ -111,6 +111,15 @@ connected, the agent can browse the For-Rest script-language docs, enumerate
 workspaces and requests, and edit/execute the active request through the
 exposed tools.
 
+## Workbench recovery
+
+If MAUI cannot parse its saved workbench, it writes the original bytes beside
+`request-workbench-state.json` as `request-workbench-state.json.corrupt-<id>.bak`
+before loading defaults. Keep that backup for manual recovery; it can contain
+script credentials. If the backup cannot be written, loading fails instead of
+returning defaults. File-access errors also propagate without resetting the
+workbench.
+
 ## Security notes
 
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on

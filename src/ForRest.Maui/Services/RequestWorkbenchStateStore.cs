@@ -19,9 +19,13 @@ public sealed class RequestWorkbenchStateStore
 
     private readonly string stateFilePath;
     private readonly SemaphoreSlim saveGate = new(1, 1);
+    private readonly ILogger<RequestWorkbenchStateStore> logger;
 
-    public RequestWorkbenchStateStore(string? customStateFilePath = null)
+    public RequestWorkbenchStateStore(
+        string? customStateFilePath = null,
+        ILogger<RequestWorkbenchStateStore>? logger = null)
     {
+        this.logger = logger ?? NullLogger<RequestWorkbenchStateStore>.Instance;
         stateFilePath = string.IsNullOrWhiteSpace(customStateFilePath)
             ? ResolveDefaultStateFilePath()
             : customStateFilePath;
@@ -80,30 +84,56 @@ public sealed class RequestWorkbenchStateStore
         IReadOnlyList<RequestWorkbenchWorkspaceState> defaults,
         CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(stateFilePath))
+        cancellationToken.ThrowIfCancellationRequested();
+        byte[] contents;
+        try
+        {
+            contents = await File.ReadAllBytesAsync(stateFilePath, cancellationToken);
+        }
+        catch (FileNotFoundException)
+        {
+            return CreateDefaultState(defaults);
+        }
+        catch (DirectoryNotFoundException)
         {
             return CreateDefaultState(defaults);
         }
 
         try
         {
-            string json = await File.ReadAllTextAsync(stateFilePath, cancellationToken);
+            using var reader = new StreamReader(new MemoryStream(contents), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var json = await reader.ReadToEndAsync(cancellationToken);
             var loaded = JsonSerializer.Deserialize<RequestWorkbenchState>(json, SerializerOptions);
-            if (loaded is not null && loaded.Workspaces.Count > 0)
+            if (loaded is null || loaded.Workspaces is null || loaded.Workspaces.Any(workspace =>
+                workspace is null || workspace.Documents is null || workspace.Documents.Any(document => document is null)))
+            {
+                throw new JsonException("Workbench state contains null workspace or document collections.");
+            }
+
+            if (loaded.Workspaces.Count > 0)
             {
                 return MergeWithDefaults(loaded, defaults);
             }
 
             var legacy = JsonSerializer.Deserialize<LegacyRequestWorkbenchState>(json, SerializerOptions);
-            if (legacy is not null)
+            if (legacy is null || legacy.Documents is null || legacy.Documents.Any(document => document is null))
             {
-                return ConvertLegacyState(legacy, defaults);
+                throw new JsonException("Legacy workbench state contains null documents.");
             }
 
-            return CreateDefaultState(defaults);
+            return ConvertLegacyState(legacy, defaults);
         }
-        catch
+        catch (JsonException)
         {
+            var backupPath = $"{stateFilePath}.corrupt-{Guid.NewGuid():N}.bak";
+            await using (var backup = new FileStream(backupPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await backup.WriteAsync(contents, cancellationToken);
+                await backup.FlushAsync(cancellationToken);
+            }
+
+            logger.LogWarning("Invalid workbench state at {StatePath} was preserved at {BackupPath} before loading defaults.",
+                stateFilePath, backupPath);
             return CreateDefaultState(defaults);
         }
     }
