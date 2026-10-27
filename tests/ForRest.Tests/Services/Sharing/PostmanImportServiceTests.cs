@@ -286,13 +286,13 @@ public sealed class PostmanImportServiceTests
 
         Assert.AreEqual(3, documents.Count);
         StringAssert.Contains(documents[0].Source, "mode = bearer");
-        StringAssert.Contains(documents[0].Source, "token = \"tok-1\"");
+        StringAssert.Contains(documents[0].Source, "token = \"{{postman_bearer_token}}\"");
         StringAssert.Contains(documents[1].Source, "mode = basic");
-        StringAssert.Contains(documents[1].Source, "username = \"alice\"");
-        StringAssert.Contains(documents[1].Source, "password = \"pw\"");
+        StringAssert.Contains(documents[1].Source, "username = \"{{postman_basic_username}}\"");
+        StringAssert.Contains(documents[1].Source, "password = \"{{postman_basic_password}}\"");
         StringAssert.Contains(documents[2].Source, "mode = apikey");
         StringAssert.Contains(documents[2].Source, "name = \"X-Api-Key\"");
-        StringAssert.Contains(documents[2].Source, "value = \"k-123\"");
+        StringAssert.Contains(documents[2].Source, "value = \"{{postman_apikey_value}}\"");
         StringAssert.Contains(documents[2].Source, "location = header");
         foreach (PortableWorkspaceDocument document in documents)
         {
@@ -321,7 +321,7 @@ public sealed class PostmanImportServiceTests
 
         IReadOnlyList<PortableWorkspaceDocument> documents = service.Convert(json, out _);
 
-        StringAssert.Contains(documents[0].Source, "token = \"legacy-token\"");
+        StringAssert.Contains(documents[0].Source, "token = \"{{postman_bearer_token}}\"");
         FrsParseAssert.Parses(documents[0].Source);
     }
 
