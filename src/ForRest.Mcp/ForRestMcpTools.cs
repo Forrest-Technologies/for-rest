@@ -565,7 +565,7 @@ public sealed class ForRestMcpTools
                 source,
                 string.IsNullOrWhiteSpace(request_name) ? null : request_name,
                 CancellationToken.None);
-            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
+            return Serialize(MapExecution(result), result.SecretValues);
         });
     }
 
@@ -577,7 +577,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(async host =>
         {
             ForRestMcpExecutionResult result = await host.ExecuteStoredScript(workspace_id, location, CancellationToken.None);
-            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
+            return Serialize(MapExecution(result), result.SecretValues);
         });
     }
 
@@ -616,8 +616,8 @@ public sealed class ForRestMcpTools
                 logs = run.Logs.Select(MapLog),
                 stash = MapStash(run.Stash),
                 rawRequest = McpRawRequestRedactor.Redact(run.RawRequest),
-            });
-            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
+            }, run.SecretValues);
+            return payload;
         });
     }
 
@@ -644,7 +644,7 @@ public sealed class ForRestMcpTools
             {
                 Body = McpSecretValueScrubber.Scrub(run.Response.Body, run.SecretValues),
             };
-            return McpSecretValueScrubber.Scrub(Serialize(MapResponse(response, max_body_chars)!), run.SecretValues);
+            return Serialize(MapResponse(response, max_body_chars)!, run.SecretValues);
         });
     }
 
@@ -681,8 +681,8 @@ public sealed class ForRestMcpTools
                 ? (string.IsNullOrEmpty(run.Response.RawResponse) ? run.Response.Body : run.Response.RawResponse)
                 : run.Response.Body;
 
-            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines));
-            return McpSecretValueScrubber.Scrub(grepResult, run.SecretValues);
+            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines), run.SecretValues);
+            return grepResult;
         });
     }
 
@@ -700,7 +700,7 @@ public sealed class ForRestMcpTools
             }
 
             object? stash = MapStash(run.Stash);
-            return stash is null ? "This run captured no stash rows." : McpSecretValueScrubber.Scrub(Serialize(stash), run.SecretValues);
+            return stash is null ? "This run captured no stash rows." : Serialize(stash, run.SecretValues);
         });
     }
 
@@ -723,8 +723,8 @@ public sealed class ForRestMcpTools
                 errorMessage = run.Summary.ErrorMessage,
                 tests = run.Tests.Select(MapTest),
                 logs = run.Logs.Select(MapLog),
-            });
-            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
+            }, run.SecretValues);
+            return payload;
         });
     }
 
@@ -987,7 +987,8 @@ public sealed class ForRestMcpTools
         });
     }
 
-    private static string GrepText(string haystack, string pattern, bool isRegex, bool ignoreCase, int maxMatches, int contextLines)
+    private static string GrepText(string haystack, string pattern, bool isRegex, bool ignoreCase, int maxMatches, int contextLines,
+        IReadOnlyCollection<string>? secretValues)
     {
         if (string.IsNullOrEmpty(haystack))
         {
@@ -1006,7 +1007,7 @@ public sealed class ForRestMcpTools
             }
             catch (ArgumentException exception)
             {
-                return $"Invalid regular expression: {exception.Message}";
+                return McpSecretValueScrubber.Scrub($"Invalid regular expression: {exception.Message}", secretValues);
             }
 
             isMatch = line => regex.IsMatch(line);
@@ -1046,7 +1047,7 @@ public sealed class ForRestMcpTools
             totalMatches = total,
             truncated = matches.Count >= maxMatches,
             matches,
-        });
+        }, secretValues);
     }
 
     private static string EscapeForRestString(string value)
@@ -1056,9 +1057,16 @@ public sealed class ForRestMcpTools
             .Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
-    private static string Serialize(object value)
+    private static string Serialize(object value, IReadOnlyCollection<string>? secretValues = null)
     {
-        return JsonSerializer.Serialize(value, JsonOptions);
+        if (secretValues is null || secretValues.Count == 0)
+        {
+            return JsonSerializer.Serialize(value, JsonOptions);
+        }
+
+        var options = new JsonSerializerOptions(JsonOptions);
+        options.Converters.Add(new McpSecretJsonConverter(secretValues));
+        return JsonSerializer.Serialize(value, options);
     }
 
     #endregion

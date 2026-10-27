@@ -575,7 +575,7 @@ public sealed class ForRestMcpHost(
         return
         [
             .. variables
-                .Where(static variable => variable.IsSecret && !string.IsNullOrWhiteSpace(variable.Value))
+                .Where(static variable => variable.IsSecret && !string.IsNullOrEmpty(variable.Value))
                 .Select(static variable => variable.Value)
                 .Distinct(StringComparer.Ordinal),
         ];
