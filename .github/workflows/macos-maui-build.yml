@@ -109,34 +109,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          OUTPUT_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/ci/maccatalyst"
-          dotnet build src/ForRest.Maui/ForRest.Maui.csproj \
+          dotnet publish src/ForRest.Maui/ForRest.Maui.csproj \
             -c "${{ needs.prepare.outputs.build_configuration }}" \
             -f "${MACCATALYST_TFM}" \
             -p:ForRestMacOnly="${MAC_ONLY_BUILD}" \
             -p:ForRestMacUnsigned=true \
             -p:ContinuousIntegrationBuild=true \
             -p:CreatePackage=false \
-            -p:EnableCodeSigning=false \
             -p:ApplicationDisplayVersion=${{ needs.prepare.outputs.app_display_version }} \
             -p:ApplicationVersion=${{ needs.prepare.outputs.app_version }} \
             -p:Version="${{ needs.prepare.outputs.version_label }}" \
             -p:InformationalVersion="${{ needs.prepare.outputs.version_label }}" \
             -p:FileVersion=${{ needs.prepare.outputs.file_version }} \
             -p:AssemblyVersion=${{ needs.prepare.outputs.file_version }} \
-            -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }} \
-            -o "${OUTPUT_DIRECTORY}"
+            -p:ForRestBuildDateUtc=${{ needs.prepare.outputs.build_timestamp_utc }}
 
       - name: Package macOS build output
         shell: bash
         run: |
           set -euo pipefail
           ARTIFACT_BASE="for-rest-${{ needs.prepare.outputs.version_label }}-maccatalyst"
-          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/ci/maccatalyst"
+          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/src/ForRest.Maui/bin/${{ needs.prepare.outputs.build_configuration }}/${MACCATALYST_TFM}"
           RELEASE_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release/maccatalyst"
           mkdir -p "${RELEASE_DIRECTORY}"
 
-          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 3 -type d -name '*.app' | head -n 1 || true)
+          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 1 -type d -name '*.app' | head -n 1 || true)
           if [[ -z "${APP_BUNDLE}" ]]; then
             echo "No .app bundle was produced by the Mac Catalyst build." >&2
             ls -R "${BUILD_DIRECTORY}" >&2 || true
@@ -145,6 +142,13 @@ jobs:
 
           ZIP_PATH="${RELEASE_DIRECTORY}/${ARTIFACT_BASE}.zip"
           rm -f "${ZIP_PATH}"
+          APP_EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "${APP_BUNDLE}/Contents/Info.plist")
+          ARCHITECTURES=$(/usr/bin/lipo -archs "${APP_BUNDLE}/Contents/MacOS/${APP_EXECUTABLE}")
+          if [[ " ${ARCHITECTURES} " != *" arm64 "* || " ${ARCHITECTURES} " != *" x86_64 "* ]]; then
+            echo "Expected Intel and Apple Silicon code; found: ${ARCHITECTURES}" >&2
+            exit 1
+          fi
+          /usr/bin/codesign --verify --deep --strict "${APP_BUNDLE}"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"
 
       - name: Upload workflow artifacts
