@@ -243,6 +243,11 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             return SerializeFailure("The editsJson payload must be a JSON array of AiTextEdit objects.");
         }
 
+        if (edits.Any(static edit => edit is null))
+        {
+            return SerializeFailure("Each patch edit must be an object.");
+        }
+
         if (edits.Length > settings.Tools.MaxPatchOperations)
         {
             return SerializeFailure($"The patch contains {edits.Length} edits, which exceeds the configured maximum of {settings.Tools.MaxPatchOperations}.");
