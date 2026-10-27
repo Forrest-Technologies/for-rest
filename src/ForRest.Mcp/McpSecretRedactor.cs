@@ -50,10 +50,36 @@ public static partial class McpSecretRedactor
     /// </summary>
     public static string Restore(string? originalSourceText, string? newSourceText)
     {
+        if (!TryRestore(originalSourceText, newSourceText, out var restored, out var error))
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        return restored;
+    }
+
+    /// <summary>Restores protected source, returning an error when repeated names make an edit ambiguous.</summary>
+    public static bool TryRestore(string? originalSourceText, string? newSourceText, out string restoredSourceText, out string errorMessage)
+    {
+        restoredSourceText = newSourceText ?? string.Empty;
+        errorMessage = string.Empty;
+        if (ForRestSecretDeclarations.HasRepeatedNames(originalSourceText))
+        {
+            if (string.Equals(newSourceText, Redact(originalSourceText), StringComparison.Ordinal))
+            {
+                restoredSourceText = originalSourceText ?? string.Empty;
+                return true;
+            }
+
+            restoredSourceText = string.Empty;
+            errorMessage = "Scripts with repeated secret names can only accept an unchanged redacted copy. Edit these declarations locally to preserve their values.";
+            return false;
+        }
+
         IReadOnlyDictionary<string, string> originals = ExtractDeclarations(originalSourceText);
         if (originals.Count == 0)
         {
-            return newSourceText ?? string.Empty;
+            return true;
         }
 
         string updated = newSourceText ?? string.Empty;
@@ -94,7 +120,8 @@ public static partial class McpSecretRedactor
             updated = string.Join(newline, missing) + newline + updated;
         }
 
-        return updated;
+        restoredSourceText = updated;
+        return true;
     }
 
     #endregion

@@ -155,6 +155,7 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
     };
 
     private const string RedactedSecretMarker = "\"***\"";
+    private const string RepeatedSecretNamesMessage = "Scripts with repeated secret names can only accept an unchanged redacted copy. Edit these declarations locally to preserve their values.";
 
     #endregion
 
@@ -266,7 +267,15 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             });
         }
 
-        string restoredPatchedText = RestoreOriginalSecrets(document.SourceText, patchResult.PatchedText);
+        var hasRepeatedSecrets = ForRestSecretDeclarations.HasRepeatedNames(document.SourceText);
+        if (hasRepeatedSecrets && !string.Equals(patchResult.PatchedText, redactedSource, StringComparison.Ordinal))
+        {
+            return SerializeFailure(RepeatedSecretNamesMessage);
+        }
+
+        string restoredPatchedText = hasRepeatedSecrets
+            ? document.SourceText
+            : RestoreOriginalSecrets(document.SourceText, patchResult.PatchedText);
         AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, restoredPatchedText);
         if (!updateResult.Succeeded)
         {
@@ -326,7 +335,15 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
         // (or it deleted the secret line entirely). Splice the original
         // declarations back in before the host commits the new text so
         // user credentials survive AI rewrites.
-        string restoredSourceText = RestoreOriginalSecrets(document.SourceText, updatedSourceText ?? string.Empty);
+        var hasRepeatedSecrets = ForRestSecretDeclarations.HasRepeatedNames(document.SourceText);
+        if (hasRepeatedSecrets && !string.Equals(updatedSourceText, RedactSecrets(document.SourceText), StringComparison.Ordinal))
+        {
+            return SerializeFailure(RepeatedSecretNamesMessage);
+        }
+
+        string restoredSourceText = hasRepeatedSecrets
+            ? document.SourceText
+            : RestoreOriginalSecrets(document.SourceText, updatedSourceText ?? string.Empty);
 
         AiActiveDocumentUpdateResult updateResult = activeDocumentHost.UpdateActiveDocument(document, restoredSourceText);
         if (!updateResult.Succeeded)

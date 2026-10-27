@@ -428,6 +428,31 @@ public sealed class AiActiveDocumentToolServiceTests
         Assert.AreEqual(original.Replace("public-before", "public-after", StringComparison.Ordinal), host.LastUpdatedText);
     }
 
+    [TestMethod]
+    [DataRow(true, true)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(false, false)]
+    public void Repeated_secret_names_cannot_silently_copy_one_value_to_another_scope(bool patch, bool change)
+    {
+        const string original = "method GET\nurl \"https://fixture.test/\"\nscenario \"alpha\" {\n  secret token = \"fake-alpha-value-1963\"\n}\nscenario \"beta\" {\n  secret token = \"fake-beta-value-2734\"\n}";
+        var host = new FakeActiveDocumentHost(new("fixture", "Example", "forrest", original, []));
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        using var read = JsonDocument.Parse(service.ReadActiveDocument(BuildSettings(), host));
+        var redacted = read.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
+
+        var response = patch
+            ? service.PatchActiveDocument(BuildSettings(), host, change ? "[{\"startIndex\":7,\"length\":3,\"replacement\":\"POST\"}]" : "[]")
+            : service.ReplaceActiveDocument(BuildSettings(), host, change ? redacted.Replace("method GET", "method POST", StringComparison.Ordinal) : redacted);
+
+        using var result = JsonDocument.Parse(response);
+        Assert.AreEqual(!change, result.RootElement.GetProperty("succeeded").GetBoolean());
+        Assert.AreEqual(change ? null : original, host.LastUpdatedText);
+        Assert.AreEqual(original, host.CurrentDocument!.SourceText);
+        Assert.DoesNotContain("fake-alpha-value-1963", response);
+        Assert.DoesNotContain("fake-beta-value-2734", response);
+    }
+
     private static AiSettings BuildSettings()
     {
         return new()

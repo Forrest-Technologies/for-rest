@@ -55,6 +55,12 @@ public static partial class ForRestSecretDeclarations
         return declarations;
     }
 
+    public static bool HasRepeatedNames(string? source)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        return Read(source).Any(declaration => !names.Add(declaration.Name));
+    }
+
     public static string Replace(string? source, Func<ForRestSecretDeclaration, string> replacement)
     {
         if (string.IsNullOrEmpty(source))
