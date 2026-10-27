@@ -192,7 +192,7 @@ public sealed class PostmanImportService : IPostmanImportService
             lines.AddRange(headers.Select(static header => FrsScriptWriter.HeaderLine(header.Name, header.Value)));
         }
 
-        List<string> authLines = BuildAuth(request);
+        List<string> authLines = BuildAuth(request, variableLines);
         if (authLines.Count > 0)
         {
             lines.Add(string.Empty);
@@ -373,35 +373,82 @@ public sealed class PostmanImportService : IPostmanImportService
         }
     }
 
-    private static List<string> BuildAuth(JsonElement request)
+    private static List<string> BuildAuth(JsonElement request, IReadOnlyList<string> variableLines)
     {
         if (!request.TryGetProperty("auth", out JsonElement auth) || auth.ValueKind != JsonValueKind.Object)
         {
             return [];
         }
 
+        var secrets = new AuthImportSecrets(variableLines, request.GetRawText());
+        var lines = BuildAuthLines(auth, secrets);
+        return [.. secrets.Lines, .. lines];
+    }
+
+    private static List<string> BuildAuthLines(JsonElement auth, AuthImportSecrets secrets)
+    {
         string type = ReadString(auth, "type") ?? string.Empty;
         switch (type.ToLowerInvariant())
         {
             case "bearer":
-                return [.. FrsScriptWriter.BearerAuthBlock(ReadAuthParameter(auth, "bearer", "token") ?? string.Empty)];
+                return [.. FrsScriptWriter.BearerAuthBlock(secrets.Protect("postman_bearer_token", ReadAuthParameter(auth, "bearer", "token")))];
             case "basic":
                 return
                 [
                     .. FrsScriptWriter.BasicAuthBlock(
-                        ReadAuthParameter(auth, "basic", "username") ?? string.Empty,
-                        ReadAuthParameter(auth, "basic", "password") ?? string.Empty),
+                        secrets.Protect("postman_basic_username", ReadAuthParameter(auth, "basic", "username")),
+                        secrets.Protect("postman_basic_password", ReadAuthParameter(auth, "basic", "password"))),
                 ];
             case "apikey":
             {
                 string name = ReadAuthParameter(auth, "apikey", "key") ?? string.Empty;
-                string value = ReadAuthParameter(auth, "apikey", "value") ?? string.Empty;
+                var value = secrets.Protect("postman_apikey_value", ReadAuthParameter(auth, "apikey", "value"));
                 bool inQuery = string.Equals(ReadAuthParameter(auth, "apikey", "in"), "query", StringComparison.OrdinalIgnoreCase);
                 return [.. FrsScriptWriter.ApiKeyAuthBlock(name, value, inQuery)];
             }
             default:
                 return [];
         }
+    }
+
+    private sealed class AuthImportSecrets(IReadOnlyList<string> variableLines, string requestText)
+    {
+        #region Private Fields
+
+        private readonly HashSet<string> usedNames = new(
+            variableLines.Select(static line => line.Split(' ', 3)[1]), StringComparer.OrdinalIgnoreCase);
+
+        #endregion
+
+        #region Properties
+
+        public List<string> Lines { get; } = [];
+
+        #endregion
+
+        #region Public Methods
+
+        public string Protect(string baseName, string? value)
+        {
+            value ??= string.Empty;
+            if (value.Contains("{{", StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            var name = baseName;
+            var suffix = 2;
+            while (!usedNames.Add(name)
+                || requestText.Contains("{{" + name + "}}", StringComparison.OrdinalIgnoreCase))
+            {
+                name = $"{baseName}_{suffix++}";
+            }
+
+            Lines.Add($"secret {name} = {JsonSerializer.Serialize(value)}");
+            return "{{" + name + "}}";
+        }
+
+        #endregion
     }
 
     /// <summary>Reads an auth parameter from either the v2.1 array-of-{key,value} shape or the v2.0 object shape.</summary>
