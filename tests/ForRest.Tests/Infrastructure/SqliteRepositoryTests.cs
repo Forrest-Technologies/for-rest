@@ -80,6 +80,75 @@ public sealed class SqliteRepositoryTests
     }
 
     [TestMethod]
+    public async Task Workspace_repository_protects_oauth_client_secrets_and_custom_auth_headers()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Authentication field protection uses Windows DPAPI.");
+            return;
+        }
+
+        var database = new SqliteAppDatabase(NullLogger<SqliteAppDatabase>.Instance);
+        var repository = new SqliteWorkspaceRepository(database, NullLogger<SqliteWorkspaceRepository>.Instance);
+        var auth = new RequestAuthDefinition
+        {
+            ClientSecret = "fake-oauth-client-secret-9381",
+            HeaderName = "X-Custom-Credential",
+            HeaderValue = "fake-custom-auth-credential-7253",
+        };
+        var state = new AppState
+        {
+            Workspaces = [new() { Nodes = [new() { Request = new() { Auth = auth } }] }],
+        };
+
+        await repository.Save(state);
+        var loaded = await repository.Load();
+        var loadedAuth = loaded.Workspaces.Single().Nodes.Single().Request!.Auth;
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT payload_json FROM app_state WHERE id = 1;";
+        var payload = command.ExecuteScalar()?.ToString() ?? string.Empty;
+
+        Assert.AreEqual(auth, loadedAuth);
+        Assert.DoesNotContain(auth.ClientSecret, payload);
+        Assert.DoesNotContain(auth.HeaderValue, payload);
+        StringAssert.Contains(payload, auth.HeaderName);
+        var stored = JsonSerializer.Deserialize<AppState>(payload, database.JsonOptions)!;
+        var storedAuth = stored.Workspaces.Single().Nodes.Single().Request!.Auth;
+        StringAssert.StartsWith(storedAuth.ClientSecret, "dpapi:");
+        StringAssert.StartsWith(storedAuth.HeaderValue, "dpapi:");
+    }
+
+    [TestMethod]
+    public async Task Legacy_plaintext_auth_fields_load_and_are_protected_on_the_next_windows_save()
+    {
+        var database = new SqliteAppDatabase(NullLogger<SqliteAppDatabase>.Instance);
+        var repository = new SqliteWorkspaceRepository(database, NullLogger<SqliteWorkspaceRepository>.Instance);
+        var auth = new RequestAuthDefinition { ClientSecret = "fake-legacy-client-secret", HeaderValue = "fake-legacy-header" };
+        var state = new AppState { Workspaces = [new() { Nodes = [new() { Request = new() { Auth = auth } }] }] };
+        database.Initialize();
+        using var connection = database.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO app_state(id, payload_json) VALUES (1, $payload);";
+        command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(state, database.JsonOptions));
+        command.ExecuteNonQuery();
+
+        var loaded = await repository.Load();
+
+        Assert.AreEqual(auth, loaded.Workspaces.Single().Nodes.Single().Request!.Auth);
+        if (OperatingSystem.IsWindows())
+        {
+            await repository.Save(loaded);
+            command.Parameters.Clear();
+            command.CommandText = "SELECT payload_json FROM app_state WHERE id = 1;";
+            var payload = command.ExecuteScalar()?.ToString() ?? string.Empty;
+            Assert.DoesNotContain(auth.ClientSecret, payload);
+            Assert.DoesNotContain(auth.HeaderValue, payload);
+            Assert.AreEqual(auth, (await repository.Load()).Workspaces.Single().Nodes.Single().Request!.Auth);
+        }
+    }
+
+    [TestMethod]
     public async Task Execution_history_repository_stores_and_loads_runs()
     {
         var workspaceId = Guid.NewGuid();
