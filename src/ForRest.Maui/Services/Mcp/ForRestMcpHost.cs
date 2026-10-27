@@ -537,7 +537,7 @@ public sealed class ForRestMcpHost(
     {
         Guid id = TryParseWorkspaceId(workspaceId);
         List<ExecutionRun> runs = await executionHistoryRepository.Load(id, cancellationToken);
-        return [.. runs.Take(max).Select(MapRunSummary)];
+        return [.. runs.Take(max).Select(McpRunSummaryMapper.Map)];
     }
 
     public async Task<ForRestMcpRunDetail?> GetRun(string workspaceId, string runId, CancellationToken cancellationToken)
@@ -556,7 +556,7 @@ public sealed class ForRestMcpHost(
         }
 
         return new ForRestMcpRunDetail(
-            Summary: MapRunSummary(run),
+            Summary: McpRunSummaryMapper.Map(run),
             Response: MapResponse(run.Response),
             Responses: [.. run.Responses.Select(MapResponse).Where(static response => response is not null).Cast<ForRestMcpResponseView>()],
             Tests: [.. run.Tests.Select(MapTest)],
@@ -891,23 +891,6 @@ public sealed class ForRestMcpHost(
     private static ForRestMcpLogView MapLog(ConsoleEntry entry)
     {
         return new ForRestMcpLogView(entry.Level.ToString(), entry.Message, entry.TimestampUtc);
-    }
-
-    private static ForRestMcpRunSummary MapRunSummary(ExecutionRun run)
-    {
-        return new ForRestMcpRunSummary(
-            Id: run.Id.ToString(),
-            RequestName: run.RequestName,
-            State: run.State.ToString(),
-            Iteration: run.Iteration,
-            StartedUtc: run.StartedUtc,
-            CompletedUtc: run.CompletedUtc,
-            TargetUri: run.TargetUri,
-            Status: run.Response?.StatusCode,
-            DurationMilliseconds: run.Response?.DurationMilliseconds,
-            // Exception text can quote a secret (e.g. a failed auth header value); summaries go
-            // straight to external agents via list_runs, so scrub here rather than in the tools.
-            ErrorMessage: McpSecretValueScrubber.Scrub(run.ErrorMessage, CollectSecretValues(run.RuntimeVariables)));
     }
 
     private static ForRestMcpStashView? MapStash(StashTable? stash)
