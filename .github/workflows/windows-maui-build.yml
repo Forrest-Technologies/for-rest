@@ -122,7 +122,7 @@ jobs:
       - name: Build full solution
         if: matrix.arch == 'win-x64'
         shell: pwsh
-        run: dotnet build ForRest.slnx -p:ForRestWindowsOnly=true -p:RuntimeIdentifier=win-x64
+        run: dotnet build ForRest.slnx -p:ForRestWindowsOnly=true
 
       - name: Restore Windows app (deterministic assets)
         shell: pwsh
