@@ -13,3 +13,4 @@ global using ForRest.Scripting;
 global using ForRest.Services;
 global using Microsoft.Extensions.Logging.Abstractions;
 global using Microsoft.VisualStudio.TestTools.UnitTesting;
+global using System.Globalization;

@@ -40,6 +40,12 @@ public sealed class ForRestMcpTools
     private readonly IAiDocumentationSearchService documentationSearch;
     private readonly Func<IForRestMcpHost?> hostAccessor;
 
+    private const int MaxGrepContextLines = 50;
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan RegexSearchTimeout = TimeSpan.FromSeconds(1);
+    private const string RegexTimeoutMessage =
+        "Regular expression search timed out. Use a simpler pattern or a substring search.";
+
     private const string NoHostMessage =
         "No desktop canvas host is wired to this MCP server. Workbench, execution, and results tools require the For-Rest desktop app to be running.";
 
@@ -652,7 +658,7 @@ public sealed class ForRestMcpTools
         [Description("Treat the pattern as a regular expression. Defaults to false.")] bool is_regex = false,
         [Description("Case-insensitive matching. Defaults to true.")] bool ignore_case = true,
         [Description("Maximum number of matches to return. Defaults to 50, capped at 500.")] int max_matches = 50,
-        [Description("Number of context lines to include before and after each match. Defaults to 0.")] int context_lines = 0,
+        [Description("Number of context lines to include before and after each match. Defaults to 0, capped at 50.")] int context_lines = 0,
         [Description("Also search the raw response (status line + headers + body) instead of just the decoded body. Defaults to false.")] bool include_raw = false)
     {
         if (string.IsNullOrEmpty(pattern))
@@ -677,7 +683,7 @@ public sealed class ForRestMcpTools
                 ? (string.IsNullOrEmpty(run.Response.RawResponse) ? run.Response.Body : run.Response.RawResponse)
                 : run.Response.Body;
 
-            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines));
+            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Clamp(context_lines, 0, MaxGrepContextLines));
             return McpSecretValueScrubber.Scrub(grepResult, run.SecretValues);
         });
     }
@@ -992,57 +998,73 @@ public sealed class ForRestMcpTools
 
         string[] lines = haystack.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
-        Func<string, bool> isMatch;
-        if (isRegex)
+        try
         {
-            Regex regex;
-            try
+            var regex = isRegex
+                ? new Regex(pattern, RegexOptions.CultureInvariant |
+                    (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None), RegexMatchTimeout)
+                : null;
+            var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var timer = Stopwatch.StartNew();
+            List<object> matches = [];
+            var total = 0;
+            for (var index = 0; index < lines.Length; index++)
             {
-                regex = new Regex(pattern, ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
-            }
-            catch (ArgumentException exception)
-            {
-                return $"Invalid regular expression: {exception.Message}";
+                if (isRegex && timer.Elapsed >= RegexSearchTimeout)
+                {
+                    return RegexTimeoutMessage;
+                }
+
+                if (!(regex?.IsMatch(lines[index]) ?? lines[index].Contains(pattern, comparison)))
+                {
+                    continue;
+                }
+
+                total++;
+                if (matches.Count >= maxMatches)
+                {
+                    continue;
+                }
+
+                matches.Add(new
+                {
+                    line = index + 1,
+                    text = lines[index],
+                    context = contextLines > 0 ? BuildGrepContext(lines, index, contextLines) : null,
+                });
             }
 
-            isMatch = line => regex.IsMatch(line);
+            return Serialize(new
+            {
+                pattern,
+                isRegex,
+                ignoreCase,
+                totalMatches = total,
+                truncated = total > matches.Count,
+                matches,
+            });
         }
-        else
+        catch (ArgumentException exception) when (isRegex)
         {
-            StringComparison comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            isMatch = line => line.Contains(pattern, comparison);
+            return $"Invalid regular expression: {exception.Message}";
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return RegexTimeoutMessage;
+        }
+    }
+
+    private static List<object> BuildGrepContext(string[] lines, int matchIndex, int contextLines)
+    {
+        var start = Math.Max(0, matchIndex - contextLines);
+        var end = matchIndex + Math.Min(contextLines, lines.Length - matchIndex - 1);
+        List<object> context = [];
+        for (var index = start; index <= end; index++)
+        {
+            context.Add(new { line = index + 1, text = lines[index], isMatch = index == matchIndex });
         }
 
-        List<object> matches = [];
-        int total = 0;
-        for (int i = 0; i < lines.Length && matches.Count < maxMatches; i++)
-        {
-            if (!isMatch(lines[i]))
-            {
-                continue;
-            }
-
-            total++;
-            int start = Math.Max(0, i - contextLines);
-            int end = Math.Min(lines.Length - 1, i + contextLines);
-            List<object> window = [];
-            for (int j = start; j <= end; j++)
-            {
-                window.Add(new { line = j + 1, text = lines[j], isMatch = j == i });
-            }
-
-            matches.Add(new { line = i + 1, text = lines[i], context = contextLines > 0 ? window : null });
-        }
-
-        return Serialize(new
-        {
-            pattern,
-            isRegex,
-            ignoreCase,
-            totalMatches = total,
-            truncated = matches.Count >= maxMatches,
-            matches,
-        });
+        return context;
     }
 
     private static string EscapeForRestString(string value)
