@@ -32,7 +32,7 @@ public static class ImportContentClassifier
         }
 
         string trimmed = text.Trim();
-        if (LooksLikeCurl(trimmed))
+        if (CurlImportService.HasCurlCommandPrefix(trimmed))
         {
             return ContentKind.CurlCommand;
         }
@@ -72,18 +72,6 @@ public static class ImportContentClassifier
     #endregion
 
     #region Private Methods
-
-    private static bool LooksLikeCurl(string trimmed)
-    {
-        string candidate = trimmed;
-        while (candidate.Length > 0 && (candidate[0] == '$' || candidate[0] == '>'))
-        {
-            candidate = candidate[1..].TrimStart();
-        }
-
-        return candidate.StartsWith("curl ", StringComparison.OrdinalIgnoreCase)
-            || candidate.StartsWith("curl.exe ", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static ContentKind ClassifyJson(string trimmed)
     {
