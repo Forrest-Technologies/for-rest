@@ -52,6 +52,18 @@ public sealed class McpRawRequestRedactorTests
     }
 
     [TestMethod]
+    [DataRow("X-Credential")]
+    [DataRow("x-password")]
+    [DataRow("APIKEY")]
+    public void Credential_header_policy_is_shared_with_imports(string name)
+    {
+        var redacted = McpRawRequestRedactor.Redact($"GET https://fixture.test/\n{name}: fake-private-value");
+
+        StringAssert.Contains(redacted, $"{name}: ***");
+        Assert.DoesNotContain("fake-private-value", redacted);
+    }
+
+    [TestMethod]
     public void Redact_preserves_carriage_returns_and_handles_empty_input()
     {
         string redacted = McpRawRequestRedactor.Redact("GET https://x.test\r\nAuthorization: Bearer abc\r\nAccept: */*");

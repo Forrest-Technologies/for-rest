@@ -113,6 +113,12 @@ exposed tools.
 
 ## Security notes
 
+Curl imports put passwords, bearer tokens, and recognized credential-header
+values in explicit `secret` declarations. Request fields reference those
+variables so shared source and MCP reads can mask their values while request
+preparation resolves the original credentials. This does not encrypt MAUI's
+workbench JSON or detect every credential in arbitrary request text.
+
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.
 - The raw `settings.toml` holds secrets (`auth_token` and the AI `api_key`).
