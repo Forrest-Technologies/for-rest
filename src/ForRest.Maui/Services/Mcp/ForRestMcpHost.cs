@@ -83,7 +83,11 @@ public sealed class ForRestMcpHost(
         if (Live is { } live)
         {
             McpWorkbenchDocument? active = await live.GetActiveDocument();
-            string liveRestored = McpSecretRedactor.Restore(active?.Source, newSource);
+            if (!McpSecretRedactor.TryRestore(active?.Source, newSource, out var liveRestored, out var error))
+            {
+                return ForRestMcpUpdateResult.Failure(error);
+            }
+
             McpWorkbenchResult liveResult = await live.ReplaceActiveDocument(liveRestored);
             return liveResult.Succeeded
                 ? ForRestMcpUpdateResult.Success()
@@ -99,7 +103,11 @@ public sealed class ForRestMcpHost(
                 return (false, ForRestMcpUpdateResult.Failure("No active document is open."), state);
             }
 
-            string restored = McpSecretRedactor.Restore(document.RequestSource, newSource);
+            if (!McpSecretRedactor.TryRestore(document.RequestSource, newSource, out var restored, out var error))
+            {
+                return (false, ForRestMcpUpdateResult.Failure(error), state);
+            }
+
             ReplaceDocument(workspace, document, UpdateSource(workspace.Id, document, restored));
             return (true, ForRestMcpUpdateResult.Success(), state);
         });
@@ -319,7 +327,11 @@ public sealed class ForRestMcpHost(
         if (Live is { } live)
         {
             McpWorkbenchScriptDetail? detail = await live.GetScript(workspaceId, location);
-            string liveRestored = McpSecretRedactor.Restore(detail?.Source, newSource);
+            if (!McpSecretRedactor.TryRestore(detail?.Source, newSource, out var liveRestored, out var error))
+            {
+                return ForRestMcpMutationResult.Fail(error);
+            }
+
             return MapLive(await live.UpdateScript(workspaceId, location, liveRestored));
         }
 
@@ -332,7 +344,11 @@ public sealed class ForRestMcpHost(
                 return (false, ForRestMcpMutationResult.Fail($"No script found at '{location}' in workspace '{workspaceId}'."), state);
             }
 
-            string restored = McpSecretRedactor.Restore(document.RequestSource, newSource);
+            if (!McpSecretRedactor.TryRestore(document.RequestSource, newSource, out var restored, out var error))
+            {
+                return (false, ForRestMcpMutationResult.Fail(error), state);
+            }
+
             ReplaceDocument(workspace, document, UpdateSource(workspace.Id, document, restored));
             return (true, ForRestMcpMutationResult.Ok("Script updated.", document.Location), state);
         });

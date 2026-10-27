@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using ForRest.Scripting;
 
 namespace ForRest.Services.Sharing;
 
@@ -13,11 +13,6 @@ public static partial class FrsSecretRedactor
 
     private const string RedactedSecretMarker = "\"***\"";
 
-    [GeneratedRegex(
-        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
-        RegexOptions.IgnoreCase | RegexOptions.Multiline)]
-    private static partial Regex SecretDeclarationPattern();
-
     #endregion
 
     #region Public Methods
@@ -30,10 +25,10 @@ public static partial class FrsSecretRedactor
             return source ?? string.Empty;
         }
 
-        return SecretDeclarationPattern().Replace(source, static match =>
+        return ForRestSecretDeclarations.Replace(source, static match =>
         {
-            string indent = match.Groups["indent"].Value;
-            string name = match.Groups["name"].Value;
+            string indent = match.Indent;
+            string name = match.Name;
             return $"{indent}secret {name} = {RedactedSecretMarker}";
         });
     }
@@ -46,7 +41,7 @@ public static partial class FrsSecretRedactor
             return false;
         }
 
-        return SecretDeclarationPattern().IsMatch(source);
+        return ForRestSecretDeclarations.Read(source).Count > 0;
     }
 
     #endregion
