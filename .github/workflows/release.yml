@@ -127,6 +127,7 @@ jobs:
           # for direct downloads.
           STABLE_ZIP="${ASSET_DIRECTORY}/For-Rest-macos.zip"
           VERSIONED_ZIP="${ASSET_DIRECTORY}/For-Rest-${VERSION}-macos.zip"
+          /usr/bin/codesign --verify --deep --strict "${APP_BUNDLE}"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${STABLE_ZIP}"
           cp "${STABLE_ZIP}" "${VERSIONED_ZIP}"
 
@@ -146,10 +147,10 @@ jobs:
             ```
             brew install --cask forrest-technologies/tap/for-rest
             ```
-            The cask clears the Gatekeeper quarantine flag automatically, so this just works.
+            The cask removes the download quarantine attribute.
 
             **Direct download:** grab `For-Rest-${{ steps.version.outputs.version }}-macos.zip` below, unzip, and move `For-Rest.app` to Applications.
 
-            The app is unsigned, so a direct download (not via Homebrew) still needs one manual approval: `xattr -dr com.apple.quarantine /Applications/For-Rest.app`, or right-click → Open on first launch.
+            The app is ad-hoc signed and not notarized, so a direct download may require approval in macOS Privacy & Security. Existing quarantine can also be cleared with: `xattr -dr com.apple.quarantine /Applications/For-Rest.app`.
 
             `For-Rest-macos.zip` SHA-256: `${{ steps.package.outputs.sha256 }}`

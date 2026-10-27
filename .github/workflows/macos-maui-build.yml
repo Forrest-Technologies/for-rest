@@ -145,6 +145,7 @@ jobs:
 
           ZIP_PATH="${RELEASE_DIRECTORY}/${ARTIFACT_BASE}.zip"
           rm -f "${ZIP_PATH}"
+          /usr/bin/codesign --verify --deep --strict "${APP_BUNDLE}"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${ZIP_PATH}"
 
       - name: Upload workflow artifacts

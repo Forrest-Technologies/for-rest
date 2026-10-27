@@ -20,8 +20,12 @@ dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj
 
 - **Windows MAUI:** `dotnet build ForRest.slnx -p:ForRestWindowsOnly=true`, then `dotnet run --project src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-windows10.0.19041.0 -p:ForRestWindowsOnly=true`. The solution builds the MAUI head; the separate `src/ForRest.App` WinUI project is not included in it.
 - **Android:** `dotnet build src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-android` (on a macOS host, add `-p:TargetFrameworks=net10.0-android` and install the Android SDK — macOS hosts default to the Mac Catalyst head)
-- **Mac Catalyst (unsigned, no Apple Developer license needed):**
+- **Mac Catalyst (ad-hoc signed, no Apple Developer account needed):**
   `dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true`
+
+The legacy `ForRestMacUnsigned` flag creates a local ad-hoc signature so the app
+bundle passes integrity verification. It does not use a Developer ID or notarize
+the app; downloaded builds may require approval in macOS Privacy & Security.
 
 If you only have one platform available, that's fine — say which one you tested on in your PR.
 

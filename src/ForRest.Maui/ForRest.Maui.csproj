@@ -116,11 +116,14 @@
 		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
 	</PropertyGroup>
 
-	<!-- Unsigned macOS build: users can run via right-click Open or Security & Privacy settings.
-	     Pass -p:ForRestMacUnsigned=true to produce an unsigned .app bundle for testing. -->
+	<!-- Build without a Developer ID using a local ad-hoc signature. The legacy
+	     ForRestMacUnsigned flag avoids certificates, provisioning profiles, and notarization. -->
 	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' and '$(ForRestMacUnsigned)' == 'true'">
 		<UseInterpreter>true</UseInterpreter>
-		<EnableCodeSigning>false</EnableCodeSigning>
+		<EnableCodeSigning>true</EnableCodeSigning>
+		<CodesignKey>-</CodesignKey>
+		<CodesignRequireProvisioningProfile>false</CodesignRequireProvisioningProfile>
+		<EnablePackageSigning>false</EnablePackageSigning>
 		<UseHardenedRuntime>false</UseHardenedRuntime>
 	</PropertyGroup>
 
