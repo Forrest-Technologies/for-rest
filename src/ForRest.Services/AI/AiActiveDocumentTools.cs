@@ -348,7 +348,9 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             {
                 succeeded = false,
                 documentId = document.DocumentId,
-                patchedText = string.IsNullOrWhiteSpace(updateResult.UpdatedText) ? updatedSourceText ?? string.Empty : updateResult.UpdatedText,
+                patchedText = RedactSecrets(string.IsNullOrWhiteSpace(updateResult.UpdatedText)
+                    ? updatedSourceText ?? string.Empty
+                    : updateResult.UpdatedText),
                 retryWithRead = true,
                 retryWithReplace = updateResult.RetryWithReplace,
                 docHints = BuildDocHints(updateResult.Message, updateResult.Diagnostics, updatedSourceText),
