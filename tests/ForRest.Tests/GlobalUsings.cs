@@ -19,3 +19,6 @@ global using System.Reflection;
 global using ForRest.Mcp;
 global using ModelContextProtocol.Client;
 global using ModelContextProtocol.Server;
+global using System.Net.Http;
+global using System.Text;
+global using ForRest.Services.AI;

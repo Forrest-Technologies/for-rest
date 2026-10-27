@@ -224,14 +224,22 @@ public sealed class ForRestMcpServer : IAsyncDisposable
     private async Task HandleContextAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
         HttpListenerResponse response = context.Response;
-        if (!await requestGate.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken))
-        {
-            WriteStatus(response, 503, "ForRest MCP server is busy (max concurrent sessions reached).");
-            return;
-        }
-
+        var enteredGate = false;
         try
         {
+            if (!IsAllowedOrigin(context.Request))
+            {
+                WriteStatus(response, 403, "Forbidden: request origin is not allowed.");
+                return;
+            }
+
+            if (!await requestGate.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken))
+            {
+                WriteStatus(response, 503, "ForRest MCP server is busy (max concurrent sessions reached).");
+                return;
+            }
+
+            enteredGate = true;
             if (settings.HasAuthToken && !IsAuthorized(context.Request))
             {
                 response.AddHeader("WWW-Authenticate", "Bearer");
@@ -280,7 +288,11 @@ public sealed class ForRestMcpServer : IAsyncDisposable
         }
         finally
         {
-            requestGate.Release();
+            if (enteredGate)
+            {
+                requestGate.Release();
+            }
+
             try
             {
                 response.Close();
@@ -348,6 +360,31 @@ public sealed class ForRestMcpServer : IAsyncDisposable
 
             await server.DisposeAsync();
         }
+    }
+
+    private bool IsAllowedOrigin(HttpListenerRequest request)
+    {
+        var origins = request.Headers.GetValues("Origin");
+        if (origins is null)
+        {
+            return true;
+        }
+
+        if (origins.Length != 1 ||
+            !Uri.TryCreate(origins[0], UriKind.Absolute, out var origin) ||
+            !string.IsNullOrEmpty(origin.UserInfo) ||
+            origin.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(origin.Query) ||
+            !string.IsNullOrEmpty(origin.Fragment) ||
+            settings.BindAddress is "" or "*" or "+" or "0.0.0.0" or "::" or "[::]" ||
+            !Uri.TryCreate(endpoint, UriKind.Absolute, out var configured))
+        {
+            return false;
+        }
+
+        return string.Equals(origin.Scheme, configured.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(origin.IdnHost, configured.IdnHost, StringComparison.OrdinalIgnoreCase)
+            && origin.Port == configured.Port;
     }
 
     private bool IsAuthorized(HttpListenerRequest request)
