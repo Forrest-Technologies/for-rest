@@ -54,6 +54,34 @@ public sealed class CurlCredentialImportTests
     }
 
     [TestMethod]
+    [DataRow("--user 'fake-api-key-4321:'", "fake-api-key-4321", "")]
+    [DataRow("-u $'fake\\tuser:fake-password'", "fake\tuser", "fake-password")]
+    [DataRow("--user 'fake-üser:fake:password'", "fake-üser", "fake:password")]
+    [DataRow("--user ':fake-password'", "", "fake-password")]
+    public void Both_basic_authentication_fields_are_protected_and_preserved(
+        string options, string username, string password)
+    {
+        var source = new CurlImportService().ConvertToScript($"curl {options} https://fixture.test/", out _);
+        var compilation = new ForRestScriptCompiler(new()).Compile(source, new());
+        Assert.IsTrue(compilation.Succeeded, string.Join("; ", compilation.Diagnostics.Select(item => item.Message)));
+        var payload = compilation.Payload!;
+        var runtime = new ForRestRuntimeVariableSeedEvaluator().Evaluate(payload.RuntimeSeeds);
+
+        var prepared = new RequestCompiler(new VariableResolver()).Prepare(payload.Request, [], [], [], [], runtime);
+
+        Assert.IsTrue(prepared.Succeeded, prepared.ErrorMessage);
+        Assert.AreEqual("Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}")),
+            prepared.Value!.Headers.Single(item => item.Key == "Authorization").Value);
+        Assert.AreEqual(username, runtime.Single(variable => variable.Key == "curl_username" && variable.IsSecret).Value);
+        Assert.AreEqual(password, runtime.Single(variable => variable.Key == "curl_password" && variable.IsSecret).Value);
+        foreach (var credential in new[] { username, password }.Where(value => value.Length > 0))
+        {
+            Assert.DoesNotContain(credential, McpSecretRedactor.Redact(source));
+            Assert.DoesNotContain(credential, FrsSecretRedactor.Redact(source));
+        }
+    }
+
+    [TestMethod]
     public void Secret_passwords_preserve_shell_decoded_control_characters()
     {
         var source = new CurlImportService().ConvertToScript("curl -u $'reader:fake\\tpassword' https://fixture.test/", out _);
@@ -67,7 +95,7 @@ public sealed class CurlCredentialImportTests
         Assert.IsTrue(prepared.Succeeded);
         Assert.AreEqual("Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("reader:fake\tpassword")),
             prepared.Value!.Headers.Single(item => item.Key == "Authorization").Value);
-        StringAssert.Contains(runtime.Single(variable => variable.IsSecret).Value, "\t");
+        StringAssert.Contains(runtime.Single(variable => variable.Key == "curl_password").Value, "\t");
     }
 
     #endregion

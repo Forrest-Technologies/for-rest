@@ -641,7 +641,7 @@ public sealed class CurlImportService : ICurlImportService
         if (parsed.Username is not null)
         {
             lines.Add(string.Empty);
-            lines.AddRange(FrsScriptWriter.BasicAuthBlock(parsed.Username,
+            lines.AddRange(FrsScriptWriter.BasicAuthBlock(AddSecret(lines, "curl_username", parsed.Username),
                 AddSecret(lines, "curl_password", parsed.Password ?? string.Empty)));
         }
         else if (parsed.BearerToken is not null)
