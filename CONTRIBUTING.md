@@ -32,7 +32,7 @@ Platform workflows use the existing `ft-windows` Windows x64 runner and `ft-mac-
 
 The platform workflows skip fork pull requests. Repository settings also require maintainer approval for every external contributor's workflow run. Review workflow changes and build scripts before approving a run; an untrusted fork can edit its own job conditions. To run the platform checks, review the patch and use a trusted repository branch. Same-repository pull requests run the platform checks automatically.
 
-CodeQL default setup uses the `ft-windows` label for Actions, C#, and Java/Kotlin analysis. It retains its weekly schedule and default query suite. The org runner group permits For-Rest within an explicit repository allowlist.
+CodeQL default setup uses the `ft-mac-mini` label for Actions, C#, and Java/Kotlin analysis. It retains its weekly schedule and default query suite. The org runner group permits For-Rest within an explicit repository allowlist.
 
 Each platform workflow uses a writable SDK directory and a separate For-Rest NuGet package cache in the runner tool cache. CLI state stays in the job's temporary directory, while downloaded packages can be reused by later jobs.
 
