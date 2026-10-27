@@ -4,7 +4,8 @@ Thanks for wanting to make For-Rest better. Contributions from humans and AI age
 
 ## Getting started
 
-For-Rest is a .NET 10 MAUI app. The SDK version is pinned — install `.NET 10.0.200-preview.0.26103.119` (or let `global.json` resolve it) before anything else.
+For-Rest is a .NET 10 MAUI app. Install the .NET `10.0.302` SDK used by CI.
+`global.json` selects that stable baseline and allows newer stable feature bands.
 
 ```bash
 # Build the whole solution (ForRest.slnx is the solution file)
