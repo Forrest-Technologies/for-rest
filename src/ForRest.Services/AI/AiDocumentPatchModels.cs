@@ -47,6 +47,11 @@ public sealed class AiDocumentPatchService : IAiDocumentPatchService
             return AiDocumentPatchResult.Success(request.SourceText);
         }
 
+        if (request.Edits.Any(static edit => edit is null))
+        {
+            return AiDocumentPatchResult.Failure(request.SourceText, "Each patch edit must be an object.");
+        }
+
         List<string> errors = [];
         List<AiTextEdit> edits = [.. request.Edits];
         for (int index = 0; index < edits.Count; index++)
@@ -67,14 +72,14 @@ public sealed class AiDocumentPatchService : IAiDocumentPatchService
                 errors.Add($"Edit {index + 1} starts beyond the end of the source text.");
             }
 
-            if (edit.StartIndex + edit.Length > request.SourceText.Length)
+            if ((long)edit.StartIndex + edit.Length > request.SourceText.Length)
             {
                 errors.Add($"Edit {index + 1} extends beyond the end of the source text.");
             }
         }
 
-        List<(int Start, int End)> ranges = edits
-            .Select(static edit => (Start: edit.StartIndex, End: edit.StartIndex + edit.Length))
+        List<(int Start, long End)> ranges = edits
+            .Select(static edit => (Start: edit.StartIndex, End: (long)edit.StartIndex + edit.Length))
             .OrderBy(static range => range.Start)
             .ToList();
 
