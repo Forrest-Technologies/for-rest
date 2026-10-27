@@ -4,7 +4,8 @@ Thanks for wanting to make For-Rest better. Contributions from humans and AI age
 
 ## Getting started
 
-For-Rest is a .NET 10 MAUI app. The SDK version is pinned — install `.NET 10.0.200-preview.0.26103.119` (or let `global.json` resolve it) before anything else.
+For-Rest is a .NET 10 MAUI app. Install the .NET `10.0.302` SDK used by CI.
+`global.json` selects that stable baseline and allows newer stable feature bands.
 
 ```bash
 # Build the whole solution (ForRest.slnx is the solution file)
@@ -17,12 +18,30 @@ dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj
 
 ### Platform heads
 
-- **Windows:** `dotnet build ForRest.slnx`, then `Start-Process .\src\ForRest.App\bin\Debug\net10.0-windows10.0.19041.0\ForRest.App.exe`
+- **Windows MAUI:** `dotnet build ForRest.slnx -p:ForRestWindowsOnly=true`, then `dotnet run --project src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-windows10.0.19041.0 -p:ForRestWindowsOnly=true`. The solution builds the MAUI head; the separate `src/ForRest.App` WinUI project is not included in it.
 - **Android:** `dotnet build src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-android` (on a macOS host, add `-p:TargetFrameworks=net10.0-android` and install the Android SDK — macOS hosts default to the Mac Catalyst head)
-- **Mac Catalyst (unsigned, no Apple Developer license needed):**
+- **Mac Catalyst (ad-hoc signed, no Apple Developer account needed):**
   `dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true`
 
+The legacy `ForRestMacUnsigned` flag creates an ad-hoc signed, non-sandboxed
+app without a certificate or notarization. The bundle passes integrity checks;
+certificate-signed mode uses the existing sandbox profile. Downloaded builds
+may require approval in macOS Privacy & Security.
+
 If you only have one platform available, that's fine — say which one you tested on in your PR.
+
+Both unit-test projects target `net10.0`, so you can run them on Windows, macOS, or Linux without installing a MAUI workload. Building the app still requires the workload and native toolchain for the platform you select.
+
+### CI runners
+
+Platform workflows use the existing `ft-windows` Windows x64 runner and `ft-mac-mini` macOS ARM64 runner. Windows ARM64 packages are cross-built on x64; these jobs do not test on ARM64 hardware. Mac packages are published for Intel and Apple Silicon and checked for both
+architectures and signature integrity before archiving. The Mac workflows install workload set `10.0.103` for the runner's Xcode 26.2. Android builds install JDK 21 and their Android SDK dependencies.
+
+The platform workflows skip fork pull requests. Repository settings also require maintainer approval for every external contributor's workflow run. Review workflow changes and build scripts before approving a run; an untrusted fork can edit its own job conditions. To run the platform checks, review the patch and use a trusted repository branch. Same-repository pull requests run the platform checks automatically.
+
+CodeQL default setup uses the `ft-mac-mini` label for Actions, C#, and Java/Kotlin analysis. It retains its weekly schedule and default query suite. The org runner group permits For-Rest within an explicit repository allowlist.
+
+Each platform workflow uses a writable SDK directory and a separate For-Rest NuGet package cache in the runner tool cache. CLI state stays in the job's temporary directory, while downloaded packages can be reused by later jobs.
 
 ## Code style
 
