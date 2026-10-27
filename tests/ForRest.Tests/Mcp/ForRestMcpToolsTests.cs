@@ -614,6 +614,98 @@ public sealed class ForRestMcpToolsTests
 
     #endregion
 
+    #region Cancellation
+
+    [TestMethod]
+    public void Cancellation_tokens_do_not_change_the_advertised_tool_arguments()
+    {
+        var tools = CreateTools(new FakeHost());
+        var methods = typeof(ForRestMcpTools).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(method => method.ReturnType == typeof(Task<string>));
+        foreach (var method in methods)
+        {
+            var tool = McpServerTool.Create(method, tools);
+            var properties = tool.ProtocolTool.InputSchema.GetProperty("properties");
+            Assert.IsFalse(properties.TryGetProperty("cancellationToken", out _), method.Name);
+        }
+    }
+
+    [TestMethod]
+    public async Task Already_cancelled_workspace_creation_does_not_mutate_the_host()
+    {
+        var host = new FakeHost();
+        var tools = CreateTools(host);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            tools.create_workspace("Do not create", cancellation.Token));
+
+        Assert.IsNull(host.LastCreatedWorkspaceName);
+    }
+
+    [TestMethod]
+    public async Task Server_shutdown_cancels_in_flight_script_execution()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cleanup = new CancellationTokenSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new FakeHost
+        {
+            ExecutionHandler = async cancellationToken =>
+            {
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cleanup.Token);
+                started.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, linked.Token);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    stopped.TrySetResult();
+                    throw;
+                }
+
+                throw new InvalidOperationException("The execution should only end through cancellation.");
+            },
+        };
+        using var portReservation = new TcpListener(IPAddress.Loopback, 0);
+        portReservation.Start();
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+        portReservation.Stop();
+        await using var server = new ForRestMcpServer(new()
+        {
+            Enabled = true,
+            Port = port,
+        }, CreateTools(host));
+        await server.StartAsync(deadline.Token);
+        await using var client = await McpClient.CreateAsync(new HttpClientTransport(new()
+        {
+            Endpoint = new Uri($"http://127.0.0.1:{port}/"),
+            TransportMode = HttpTransportMode.StreamableHttp,
+        }), cancellationToken: deadline.Token);
+        var request = client.CallToolAsync("execute_script", new Dictionary<string, object?>
+        {
+            ["workspace_id"] = "workspace",
+            ["source"] = "method GET\nurl \"https://example.test\"",
+        }, cancellationToken: deadline.Token).AsTask();
+        try
+        {
+            await started.Task.WaitAsync(deadline.Token);
+            await server.StopAsync(deadline.Token);
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(1), deadline.Token);
+        }
+        finally
+        {
+            await cleanup.CancelAsync();
+            await ((Task)request).WaitAsync(TimeSpan.FromSeconds(3))
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    #endregion
+
     #region Helpers
 
     private static ForRestMcpTools CreateTools(IForRestMcpHost? host)
@@ -666,6 +758,8 @@ public sealed class ForRestMcpToolsTests
         public List<ForRestMcpWorkspaceSummary> Workspaces { get; set; } = [];
 
         public ForRestMcpExecutionResult? Execution { get; set; }
+
+        public Func<CancellationToken, Task<ForRestMcpExecutionResult>>? ExecutionHandler { get; set; }
 
         public ForRestMcpRunDetail? Run { get; set; }
 
@@ -730,7 +824,8 @@ public sealed class ForRestMcpToolsTests
             => new(true, [], "GET", "https://x.test", "Sample");
 
         public Task<ForRestMcpExecutionResult> ExecuteScript(string workspaceId, string source, string? requestName, CancellationToken cancellationToken)
-            => Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));
+            => ExecutionHandler?.Invoke(cancellationToken)
+                ?? Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));
 
         public Task<ForRestMcpExecutionResult> ExecuteStoredScript(string workspaceId, string location, CancellationToken cancellationToken)
             => Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));
