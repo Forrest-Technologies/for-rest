@@ -206,7 +206,7 @@ Why that middle artifact being *text* changes everything:
 - **The AI edits the request, not a chat log.** Type a line beginning with `##` and you've started a conversation inside the document; the model streams its answer inline **and rewrites the script back**. You review a diff, not a paragraph describing a diff.
 - **It's a deterministic replay, not a prompt at run time.** The model helps you *author* the script; once written, the runtime executes it with **no LLM in the loop**. A recorded `browser` flow replays the same way every time. That's the difference between "AI that helps you build a test" and "AI you have to trust on every run."
 - **Agents drive the real workbench over MCP.** Flip one setting and For-Rest is a **Model Context Protocol** server. Claude (or any MCP client) can `list_workspaces`, `compile_script` to validate an edit *before* running it, `execute_script` against the live pipeline, then `list_runs` / `get_run` / `grep_run_response` to read what came back — the same history you see. The agent isn't simulating your tool; it's using it.
-- **Secrets stay yours.** `secret` values are encrypted at the storage boundary and **redacted before any AI provider or MCP client receives the script**. The host restores them only at save/run time. The model can edit a request that *uses* a token without ever seeing the token.
+- **Explicit source redaction.** The source-sharing helpers mask `secret` declaration lines. Storage protection depends on the app head; see the storage details below before putting credentials in scripts or settings.
 - **The docs are part of the loop.** The same canonical language reference that powers in-editor help is exposed to the AI (`get_instructions`, `search_docs`), with built-in guidance on *how* to wield the language — so the model writes idiomatic `.frs`, not a transliteration of Python.
 
 The future of API testing isn't a human clicking **Send** 200 times — it's an agent running your flows while you read the results. For-Rest is built so the thing in the middle is something you can both understand.
@@ -215,8 +215,19 @@ The future of API testing isn't a human clicking **Send** 200 times — it's an 
 
 ## The four pillars
 
-### 🔒 Local-first — your secrets never leave the machine
-There's no cloud backend to opt out of, because there isn't one. Workspaces and full execution history persist to local **SQLite**. Secret values are encrypted at the **storage boundary (DPAPI on Windows)** — not hidden behind a UI asterisk — and are **redacted before any AI provider or MCP client ever sees them**. For anyone touching internal or regulated APIs, "the tool physically cannot phone home your tokens" isn't a feature, it's a procurement requirement.
+### 🔒 Local-first storage
+For-Rest runs request scripts locally. HTTP requests go to the endpoints in those scripts. AI features send context to the configured provider, and enabling MCP gives connected clients access to the workbench.
+
+Storage currently depends on the app head:
+
+| App head | Workspace and history storage | Credential handling |
+| --- | --- | --- |
+| Windows WinUI (`src/ForRest.App`) | Local SQLite | DPAPI protects marked variable values and authentication password, bearer-token, and API-key fields. This does not encrypt the whole database or script text. |
+| MAUI (`src/ForRest.Maui`) | Workbench JSON; execution history is held in memory for the app session | Provider OAuth tokens use MAUI SecureStorage. Workbench script text and `settings.toml` can contain plaintext credentials. |
+
+Treat imported scripts and configuration files as sensitive when they contain inline credentials. Source redaction covers explicit `secret` declarations; it is not a guarantee that every credential in arbitrary text is detected. Scripts execute .NET code inside the app process, so run scripts from sources you trust.
+
+The storage implementations are in [the SQLite repositories](src/ForRest.Infrastructure.Sqlite/SqliteWorkspaceRepository.cs), [the MAUI workbench state store](src/ForRest.Maui/Services/RequestWorkbenchStateStore.cs), and [the MAUI history repository](src/ForRest.Maui/Services/InMemoryExecutionHistoryRepository.cs).
 
 ### ⌨️ Code-first — a real scripting language, not a JS escape hatch
 The `.frs` language is a first-class DSL compiled through a **Roslyn** host, not a sandbox afterthought. Directives, `auth` blocks, `{{variable}}` interpolation, `let`/`if`/`foreach`/`while`/`switch`, string interpolation, ranges, LINQ-style collection operators, `retry … with backoff`, `on error`/`on status` handlers, `parallel`/`pipe`, `define`/`call`, regex/JSON-path extraction, and helper namespaces for `crypto`, `time`, `encoding`, `strings`, `json`, and `regex`.
@@ -363,7 +374,7 @@ Secret values are redacted on read and restored by the host on write, so an agen
 ```bash
 brew install --cask forrest-technologies/tap/for-rest
 ```
-The app is currently unsigned (no Apple Developer certificate), but the cask clears the Gatekeeper quarantine flag automatically on install, so the first launch just works. Windows and Android builds are attached to each [GitHub release](https://github.com/Forrest-Technologies/for-rest/releases), or build from source below.
+Mac builds are not notarized. The cask removes the download quarantine attribute; direct downloads may require approval in macOS Privacy & Security. Windows and Android builds are attached to each [GitHub release](https://github.com/Forrest-Technologies/for-rest/releases), or build from source below.
 
 ---
 
@@ -392,7 +403,7 @@ On a macOS host the app project defaults to the Mac Catalyst head, so add
 `-p:TargetFrameworks=net10.0-android` to the commands above (and install the
 Android SDK) to build the Android head from a Mac.
 
-**Build for macOS** (unsigned — no Apple Developer license required)
+**Build for macOS** (ad-hoc signed — no Apple Developer account required)
 ```bash
 dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true
 # Launch via right-click → Open the first time to get past Gatekeeper.
