@@ -11,17 +11,20 @@ permissions:
 
 jobs:
   prune-actions-storage:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, ft-mac-mini]
+    timeout-minutes: 10
     steps:
       - name: Delete caches older than 7 days
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          cutoff="$(date -u -d '7 days ago' +%s)"
-          gh cache list --repo ${{ github.repository }} --json id,key,createdAt --limit 100 | \
+          set -euo pipefail
+          cutoff="$(date -u -v-7d +%s)"
+          gh cache list --repo "$GITHUB_REPOSITORY" --json id,key,createdAt --limit 100 | \
             jq -r --argjson cutoff "$cutoff" \
               '.[] | select((.createdAt | fromdateiso8601) < $cutoff) | .id' | \
             while read -r id; do
               echo "Deleting cache $id"
-              gh cache delete "$id" --repo ${{ github.repository }} || true
+              gh cache delete "$id" --repo "$GITHUB_REPOSITORY" || true
             done
