@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using ForRest.Scripting;
 
 namespace ForRest.Mcp;
 
@@ -21,11 +21,6 @@ public static partial class McpSecretRedactor
 
     private const string RedactedSecretMarker = "\"***\"";
 
-    [GeneratedRegex(
-        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
-        RegexOptions.IgnoreCase | RegexOptions.Multiline)]
-    private static partial Regex SecretDeclarationPattern();
-
     #endregion
 
     #region Public Methods
@@ -38,10 +33,10 @@ public static partial class McpSecretRedactor
             return sourceText ?? string.Empty;
         }
 
-        return SecretDeclarationPattern().Replace(sourceText, static match =>
+        return ForRestSecretDeclarations.Replace(sourceText, static match =>
         {
-            string indent = match.Groups["indent"].Value;
-            string name = match.Groups["name"].Value;
+            string indent = match.Indent;
+            string name = match.Name;
             return $"{indent}secret {name} = {RedactedSecretMarker}";
         });
     }
@@ -64,16 +59,16 @@ public static partial class McpSecretRedactor
         string updated = newSourceText ?? string.Empty;
         HashSet<string> seen = new(StringComparer.Ordinal);
 
-        updated = SecretDeclarationPattern().Replace(updated, match =>
+        updated = ForRestSecretDeclarations.Replace(updated, match =>
         {
-            string name = match.Groups["name"].Value;
+            string name = match.Name;
             if (!originals.TryGetValue(name, out string? originalLine))
             {
-                return match.Value;
+                return match.Text;
             }
 
             seen.Add(name);
-            string indent = match.Groups["indent"].Value;
+            string indent = match.Indent;
             int firstNonWhitespace = 0;
             while (firstNonWhitespace < originalLine.Length &&
                 (originalLine[firstNonWhitespace] == ' ' || originalLine[firstNonWhitespace] == '\t'))
@@ -114,15 +109,15 @@ public static partial class McpSecretRedactor
             return declarations;
         }
 
-        foreach (Match match in SecretDeclarationPattern().Matches(sourceText))
+        foreach (var match in ForRestSecretDeclarations.Read(sourceText))
         {
-            string name = match.Groups["name"].Value;
+            string name = match.Name;
             if (string.IsNullOrEmpty(name) || declarations.ContainsKey(name))
             {
                 continue;
             }
 
-            declarations[name] = match.Value.TrimEnd();
+            declarations[name] = match.Text.TrimEnd();
         }
 
         return declarations;

@@ -332,15 +332,9 @@ public sealed class AiActiveDocumentToolServiceTests
         FakeActiveDocumentHost host = new(
             new AiActiveDocumentSnapshot("request-1", "Example", "forrest", original, []));
 
-        // The AI sees the redacted form (...***...) and crafts a patch
-        // that flips method GET → method POST. The patch start index
-        // matches the redacted text length, not the real source — the
-        // tool service must apply the patch against the redacted view
-        // and then splice the original secret back in. Compute the
-        // redacted view inline (rather than reaching into the internal
-        // RedactSecrets helper) so the test stays decoupled from the
-        // implementation surface.
-        const string redactedView = "secret api_key = \"***\"\nmethod GET\n";
+        // Calculate offsets from the public read response, including its line endings.
+        using var read = JsonDocument.Parse(service.ReadActiveDocument(BuildSettings(), host));
+        var redactedView = read.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
         int methodIndex = redactedView.IndexOf("method GET", StringComparison.Ordinal);
         Assert.IsTrue(methodIndex >= 0);
 
@@ -356,6 +350,82 @@ public sealed class AiActiveDocumentToolServiceTests
         StringAssert.Contains(host.LastUpdatedText!, "method POST");
         // patchedText echoed to the AI must keep the redaction marker.
         Assert.IsFalse(response.Contains("real-secret", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow("clé")]
+    [DataRow("ключ")]
+    [DataRow("令牌")]
+    [DataRow("api-token")]
+    [DataRow("token.v2")]
+    [DataRow("api_key")]
+    public void Ai_tools_redact_and_restore_secret_declarations_while_editing(string name)
+    {
+        var original = $"secret {name} = \"fake-unicode-private-value\"\nmethod GET";
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        var host = new FakeActiveDocumentHost(new("unicode", "Example", "forrest", original, []));
+        var read = service.ReadActiveDocument(BuildSettings(), host);
+
+        Assert.DoesNotContain("fake-unicode-private-value", read);
+        using var parsed = JsonDocument.Parse(read);
+        var source = parsed.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
+        var updated = service.ReplaceActiveDocument(BuildSettings(), host, source.Replace("GET", "POST", StringComparison.Ordinal));
+
+        Assert.DoesNotContain("fake-unicode-private-value", updated);
+        StringAssert.Contains(host.LastUpdatedText!, $"secret {name} = \"fake-unicode-private-value\"");
+        StringAssert.Contains(host.LastUpdatedText!, "method POST");
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void Rejected_replacements_keep_returned_source_redacted(bool echoSource)
+    {
+        const string original = "secret api_key = \"fake-existing-private-4928\"\nmethod GET";
+        const string replacement = "secret api_key = \"***\"\nsecret new_token = \"fake-new-private-8429\"\nmethod POST";
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        var host = new RejectingActiveDocumentHost(new("rejected", "Example", "forrest", original, []), echoSource);
+
+        var response = service.ReplaceActiveDocument(BuildSettings(), host, replacement);
+
+        Assert.DoesNotContain("fake-existing-private-4928", response);
+        Assert.DoesNotContain("fake-new-private-8429", response);
+        Assert.AreEqual(original, host.CurrentDocument!.SourceText);
+        using var parsed = JsonDocument.Parse(response);
+        Assert.IsFalse(parsed.RootElement.GetProperty("succeeded").GetBoolean());
+        Assert.IsTrue(parsed.RootElement.GetProperty("retryWithReplace").GetBoolean());
+        var returnedSource = parsed.RootElement.GetProperty("patchedText").GetString()!;
+        StringAssert.Contains(returnedSource, "secret api_key = \"***\"");
+        StringAssert.Contains(returnedSource, "secret new_token = \"***\"");
+    }
+
+    [TestMethod]
+    [DataRow("\n", true)]
+    [DataRow("\r\n", true)]
+    [DataRow("\n", false)]
+    [DataRow("\r\n", false)]
+    public void Multiline_secrets_remain_private_and_survive_edits(string newline, bool patch)
+    {
+        var original = "method GET\nurl \"https://fixture.test/\"\nflow {\n  secret vault = string.Concat(\n    \"fake-private-credential-6723\",\n    \"suffix\")\n  runtime after = \"public-before\"\n}".Replace("\n", newline, StringComparison.Ordinal);
+        var host = new FakeActiveDocumentHost(new("multiline", "Example", "forrest", original, []));
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        var response = service.ReadActiveDocument(BuildSettings(), host);
+        Assert.DoesNotContain("fake-private-credential-6723", response);
+        using var read = JsonDocument.Parse(response);
+        var redacted = read.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
+
+        if (patch)
+        {
+            var edits = JsonSerializer.Serialize(new[] { new { startIndex = redacted.IndexOf("public-before", StringComparison.Ordinal), length = 13, replacement = "public-after" } });
+            response = service.PatchActiveDocument(BuildSettings(), host, edits);
+        }
+        else
+        {
+            response = service.ReplaceActiveDocument(BuildSettings(), host, redacted.Replace("public-before", "public-after", StringComparison.Ordinal));
+        }
+
+        Assert.DoesNotContain("fake-private-credential-6723", response);
+        Assert.AreEqual(original.Replace("public-before", "public-after", StringComparison.Ordinal), host.LastUpdatedText);
     }
 
     private static AiSettings BuildSettings()
@@ -399,7 +469,7 @@ public sealed class AiActiveDocumentToolServiceTests
         public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
     }
 
-    private sealed class RejectingActiveDocumentHost(AiActiveDocumentSnapshot? snapshot) : IAiActiveDocumentHost
+    private sealed class RejectingActiveDocumentHost(AiActiveDocumentSnapshot? snapshot, bool echoSource = true) : IAiActiveDocumentHost
     {
         public AiActiveDocumentSnapshot? CurrentDocument { get; private set; } = snapshot;
 
@@ -409,7 +479,7 @@ public sealed class AiActiveDocumentToolServiceTests
         {
             return AiActiveDocumentUpdateResult.Failure(
                 "The AI edit was rejected because it left the request invalid.",
-                updatedText,
+                echoSource ? updatedText : string.Empty,
                 [
                     new("error", "Unexpected token 'expect'.", 4, 1),
                 ],
