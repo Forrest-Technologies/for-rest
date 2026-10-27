@@ -640,7 +640,11 @@ public sealed class ForRestMcpTools
                 return "This run produced no response.";
             }
 
-            return McpSecretValueScrubber.Scrub(Serialize(MapResponse(run.Response, max_body_chars)!), run.SecretValues);
+            var response = run.Response with
+            {
+                Body = McpSecretValueScrubber.Scrub(run.Response.Body, run.SecretValues),
+            };
+            return McpSecretValueScrubber.Scrub(Serialize(MapResponse(response, max_body_chars)!), run.SecretValues);
         });
     }
 
