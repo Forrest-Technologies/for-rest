@@ -18,7 +18,10 @@ public sealed class CurlImportService : ICurlImportService
         "-X", "--request", "-H", "--header", "-d", "--data", "--data-raw", "--data-binary", "--data-ascii",
         "--data-urlencode", "--json", "-u", "--user", "--oauth2-bearer", "-A", "--user-agent", "-e", "--referer",
         "-b", "--cookie", "-m", "--max-time", "--url",
+        "-F", "--form", "--form-string", "-T", "--upload-file",
     ], StringComparer.Ordinal);
+
+    private const string UnsupportedFileInputMessage = "Curl file and stdin inputs cannot be imported. Paste the input contents directly instead.";
 
     private const string ShortSwitches = "GILksSvifg#";
 
@@ -29,8 +32,6 @@ public sealed class CurlImportService : ICurlImportService
         "-w", "--write-out",
         "-c", "--cookie-jar",
         "-x", "--proxy",
-        "-F", "--form",
-        "-T", "--upload-file",
         "--connect-timeout",
         "--retry",
         "--retry-delay",
@@ -359,7 +360,10 @@ public sealed class CurlImportService : ICurlImportService
                 case "-H" or "--header":
                     AddHeader(parsed, NextValue(tokens, ref index, pending));
                     break;
-                case "-d" or "--data" or "--data-raw" or "--data-binary" or "--data-ascii":
+                case "--data-raw":
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: false, interpretFilePrefix: false);
+                    break;
+                case "-d" or "--data" or "--data-binary" or "--data-ascii":
                     AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: false);
                     break;
                 case "--data-urlencode":
@@ -382,8 +386,10 @@ public sealed class CurlImportService : ICurlImportService
                     parsed.Headers.Add(("Referer", NextValue(tokens, ref index, pending) ?? string.Empty));
                     break;
                 case "-b" or "--cookie":
-                    parsed.Headers.Add(("Cookie", NextValue(tokens, ref index, pending) ?? string.Empty));
+                    AddCookie(parsed, NextValue(tokens, ref index, pending));
                     break;
+                case "-F" or "--form" or "--form-string" or "-T" or "--upload-file":
+                    throw new FormatException("Curl multipart forms and file uploads cannot be imported. Paste the request body directly instead.");
                 case "-L" or "--location":
                     parsed.FollowRedirects = true;
                     break;
@@ -456,6 +462,11 @@ public sealed class CurlImportService : ICurlImportService
             return;
         }
 
+        if (header.StartsWith('@'))
+        {
+            throw new FormatException(UnsupportedFileInputMessage);
+        }
+
         int separatorIndex = header.IndexOf(':');
         string name = separatorIndex < 0 ? header.Trim() : header[..separatorIndex].Trim();
         string value = separatorIndex < 0 ? string.Empty : header[(separatorIndex + 1)..].Trim();
@@ -468,7 +479,17 @@ public sealed class CurlImportService : ICurlImportService
         parsed.Headers.Add((name, value));
     }
 
-    private static void AddData(ParsedCurl parsed, string? data, bool urlEncode)
+    private static void AddCookie(ParsedCurl parsed, string? cookie)
+    {
+        if (!string.IsNullOrEmpty(cookie) && !cookie.Contains('='))
+        {
+            throw new FormatException(UnsupportedFileInputMessage);
+        }
+
+        parsed.Headers.Add(("Cookie", cookie ?? string.Empty));
+    }
+
+    private static void AddData(ParsedCurl parsed, string? data, bool urlEncode, bool interpretFilePrefix = true)
     {
         if (data is null)
         {
@@ -479,9 +500,21 @@ public sealed class CurlImportService : ICurlImportService
         if (urlEncode)
         {
             int separatorIndex = data.IndexOf('=');
-            value = separatorIndex < 0
-                ? Uri.EscapeDataString(data)
-                : $"{data[..separatorIndex]}={Uri.EscapeDataString(data[(separatorIndex + 1)..])}";
+            if (separatorIndex < 0 && data.Contains('@'))
+            {
+                throw new FormatException(UnsupportedFileInputMessage);
+            }
+
+            value = separatorIndex switch
+            {
+                < 0 => Uri.EscapeDataString(data),
+                0 => Uri.EscapeDataString(data[1..]),
+                _ => $"{data[..separatorIndex]}={Uri.EscapeDataString(data[(separatorIndex + 1)..])}",
+            };
+        }
+        else if (interpretFilePrefix && data.StartsWith('@'))
+        {
+            throw new FormatException(UnsupportedFileInputMessage);
         }
 
         parsed.DataSegments.Add(value);

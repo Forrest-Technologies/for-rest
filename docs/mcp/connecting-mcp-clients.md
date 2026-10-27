@@ -111,6 +111,13 @@ connected, the agent can browse the For-Rest script-language docs, enumerate
 workspaces and requests, and edit/execute the active request through the
 exposed tools.
 
+## Curl input limits
+
+Curl imports accept inline input. File and stdin inputs, multipart forms, and
+file uploads return an import error so they cannot silently become a different
+request. Paste input contents directly; use `--data-raw` when a body starts with
+a literal `@`.
+
 ## Security notes
 
 Curl imports put passwords, bearer tokens, and recognized credential-header
