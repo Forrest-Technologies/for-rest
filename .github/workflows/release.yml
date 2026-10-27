@@ -125,7 +125,11 @@ jobs:
           STABLE_ZIP="${ASSET_DIRECTORY}/For-Rest-macos.zip"
           VERSIONED_ZIP="${ASSET_DIRECTORY}/For-Rest-${VERSION}-macos.zip"
           APP_EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "${APP_BUNDLE}/Contents/Info.plist")
-          /usr/bin/lipo "${APP_BUNDLE}/Contents/MacOS/${APP_EXECUTABLE}" -verify_arch arm64 x86_64
+          ARCHITECTURES=$(/usr/bin/lipo -archs "${APP_BUNDLE}/Contents/MacOS/${APP_EXECUTABLE}")
+          if [[ " ${ARCHITECTURES} " != *" arm64 "* || " ${ARCHITECTURES} " != *" x86_64 "* ]]; then
+            echo "Expected Intel and Apple Silicon code; found: ${ARCHITECTURES}" >&2
+            exit 1
+          fi
           /usr/bin/codesign --verify --deep --strict "${APP_BUNDLE}"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${STABLE_ZIP}"
           cp "${STABLE_ZIP}" "${VERSIONED_ZIP}"
