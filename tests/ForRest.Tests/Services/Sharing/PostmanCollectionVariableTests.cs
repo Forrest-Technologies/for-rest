@@ -56,7 +56,10 @@ public sealed class PostmanCollectionVariableTests
     }
 
     [TestMethod]
-    public void Sensitive_collection_values_are_redacted_in_both_reference_and_request_copies()
+    [DataRow("apiToken")]
+    [DataRow("api_key")]
+    [DataRow("X_API_KEY")]
+    public void Sensitive_collection_values_are_redacted_in_both_reference_and_request_copies(string key)
     {
         const string collection = """
             {
@@ -72,7 +75,7 @@ public sealed class PostmanCollectionVariableTests
               }}]
             }
             """;
-        var documents = new PostmanImportService().Convert(collection, out _);
+        var documents = new PostmanImportService().Convert(collection.Replace("apiToken", key, StringComparison.Ordinal), out _);
         foreach (var document in documents)
         {
             var redacted = McpSecretRedactor.Redact(document.Source);
