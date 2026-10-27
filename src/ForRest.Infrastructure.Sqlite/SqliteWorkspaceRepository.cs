@@ -100,6 +100,8 @@ public sealed class SqliteWorkspaceRepository(SqliteAppDatabase database, ILogge
                 Password = SecretProtector.Protect(request.Auth.Password),
                 BearerToken = SecretProtector.Protect(request.Auth.BearerToken),
                 ApiKeyValue = SecretProtector.Protect(request.Auth.ApiKeyValue),
+                ClientSecret = SecretProtector.Protect(request.Auth.ClientSecret),
+                HeaderValue = SecretProtector.Protect(request.Auth.HeaderValue),
             },
         };
     }
@@ -160,6 +162,8 @@ public sealed class SqliteWorkspaceRepository(SqliteAppDatabase database, ILogge
                 Password = SecretProtector.Unprotect(request.Auth.Password),
                 BearerToken = SecretProtector.Unprotect(request.Auth.BearerToken),
                 ApiKeyValue = SecretProtector.Unprotect(request.Auth.ApiKeyValue),
+                ClientSecret = SecretProtector.Unprotect(request.Auth.ClientSecret),
+                HeaderValue = SecretProtector.Unprotect(request.Auth.HeaderValue),
             },
         };
     }
