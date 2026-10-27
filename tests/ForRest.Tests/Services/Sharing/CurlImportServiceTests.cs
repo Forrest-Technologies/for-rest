@@ -72,6 +72,105 @@ public sealed class CurlImportServiceTests
     }
 
     [TestMethod]
+    [DataRow("-XPUT", "method PUT")]
+    [DataRow("-H'X-Test: hello world'", "header \"X-Test\" = \"hello world\"")]
+    [DataRow("-d'a=1'", "body text")]
+    [DataRow("-ureader:fake-value", "username = \"reader\"")]
+    [DataRow("-A'Test Agent'", "header \"User-Agent\" = \"Test Agent\"")]
+    [DataRow("-ehttps://ref.example.test/", "header \"Referer\" = \"https://ref.example.test/\"")]
+    [DataRow("-bsession=fake", "header \"Cookie\" = \"session=fake\"")]
+    [DataRow("-m0.5", "timeout 500")]
+    public void Short_option_values_can_be_attached_without_a_space(string option, string expected)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, expected);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("--request=PUT", "method PUT")]
+    [DataRow("--header='X-Test: hello world'", "header \"X-Test\" = \"hello world\"")]
+    [DataRow("--data=a=1", "body text")]
+    [DataRow("--data-urlencode='q=hello world'", "q=hello%20world")]
+    [DataRow("--json='{}'", "body json")]
+    [DataRow("--user=reader:fake-value", "username = \"reader\"")]
+    [DataRow("--oauth2-bearer=fake-token", "token = \"fake-token\"")]
+    [DataRow("--max-time=0.5", "timeout 500")]
+    public void Long_option_values_accept_an_equals_separator(string option, string expected)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, expected);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Combined_short_flags_keep_redirects_and_a_following_attached_value()
+    {
+        var script = service.ConvertToScript("curl -sSLkXPUT https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "redirects true");
+        StringAssert.Contains(script, "ssl false");
+        StringAssert.Contains(script, "method PUT");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void A_cluster_can_take_its_final_option_value_from_the_next_token()
+    {
+        var script = service.ConvertToScript("curl -sSX PUT https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "method PUT");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Clustered_data_options_do_not_expand_their_attached_body_text()
+    {
+        var script = service.ConvertToScript("curl -sSLd'--request=DELETE' https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "method POST");
+        StringAssert.Contains(script, "redirects true");
+        StringAssert.Contains(script, "--request=DELETE");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Inline_URL_and_empty_data_values_are_preserved()
+    {
+        var script = service.ConvertToScript("curl --url=https://api.example.test/items --data=", out _);
+
+        StringAssert.Contains(script, "url \"https://api.example.test/items\"");
+        StringAssert.Contains(script, "method POST");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("-d '--request=DELETE'")]
+    [DataRow("--data=--request=DELETE")]
+    public void Option_like_data_values_are_not_reinterpreted_as_options(string option)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "method POST");
+        StringAssert.Contains(script, "--request=DELETE");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("-oout.json")]
+    [DataRow("--output=out.json")]
+    public void Attached_ignored_option_values_are_consumed(string option)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "url \"https://api.example.test/items\"");
+        Assert.DoesNotContain("out.json", script);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
     public void Simple_get_produces_parsable_script_with_url_and_name()
     {
         string script = service.ConvertToScript("curl https://api.example.com/users", out string suggestedName);
