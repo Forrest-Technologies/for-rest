@@ -52,9 +52,7 @@ public sealed class CurlImportService : ICurlImportService
             return false;
         }
 
-        string trimmed = StripPromptPrefix(text.Trim());
-        return trimmed.StartsWith("curl ", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("curl.exe ", StringComparison.OrdinalIgnoreCase);
+        return HasCurlCommandPrefix(text.Trim());
     }
 
     public string ConvertToScript(string curlCommand, out string suggestedName)
@@ -63,8 +61,26 @@ public sealed class CurlImportService : ICurlImportService
 
         List<string> tokens = Tokenize(JoinContinuations(StripPromptPrefix(curlCommand.Trim())));
         ParsedCurl parsed = ParseTokens(tokens);
+        if (string.IsNullOrWhiteSpace(parsed.Url))
+        {
+            throw new FormatException("The curl command must include a URL.");
+        }
+
         suggestedName = BuildSuggestedName(parsed);
         return Render(parsed, suggestedName);
+    }
+
+    #endregion
+
+    #region Internal Methods
+
+    internal static bool HasCurlCommandPrefix(string text)
+    {
+        var candidate = StripPromptPrefix(text);
+        var commandLength = candidate.StartsWith("curl.exe", StringComparison.OrdinalIgnoreCase) ? 8 : 4;
+        return candidate.Length > commandLength
+            && candidate.StartsWith("curl", StringComparison.OrdinalIgnoreCase)
+            && char.IsWhiteSpace(candidate[commandLength]);
     }
 
     #endregion
@@ -133,8 +149,13 @@ public sealed class CurlImportService : ICurlImportService
                 continue;
             }
 
-            if (character == '\\' && index + 1 < text.Length)
+            if (character == '\\')
             {
+                if (index + 1 >= text.Length)
+                {
+                    throw new FormatException("The curl command ends with an incomplete escape sequence.");
+                }
+
                 current.Append(text[index + 1]);
                 index += 2;
                 continue;
@@ -160,6 +181,11 @@ public sealed class CurlImportService : ICurlImportService
             index++;
         }
 
+        if (index >= text.Length)
+        {
+            throw new FormatException("The curl command contains an unterminated quoted value.");
+        }
+
         return index + 1;
     }
 
@@ -177,6 +203,11 @@ public sealed class CurlImportService : ICurlImportService
 
             current.Append(character);
             index++;
+        }
+
+        if (index >= text.Length)
+        {
+            throw new FormatException("The curl command contains an unterminated quoted value.");
         }
 
         return index + 1;
@@ -211,6 +242,11 @@ public sealed class CurlImportService : ICurlImportService
                 _ => text[index],
             });
             index++;
+        }
+
+        if (index >= text.Length)
+        {
+            throw new FormatException("The curl command contains an unterminated quoted value.");
         }
 
         return index + 1;
@@ -328,7 +364,7 @@ public sealed class CurlImportService : ICurlImportService
     {
         if (index >= tokens.Count)
         {
-            return null;
+            throw new FormatException($"The curl option '{tokens[index - 1]}' requires a value.");
         }
 
         string value = tokens[index];
