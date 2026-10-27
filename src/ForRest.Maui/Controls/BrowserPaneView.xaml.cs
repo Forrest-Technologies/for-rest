@@ -18,8 +18,8 @@ namespace ForRest.Maui.Controls;
 /// On Windows it publishes the WebView2 (via CDP) to the app's <see cref="BrowserAutomationProvider"/>
 /// and on Android it publishes a JavaScript-bridge driver, so the scripting <c>browser.*</c> API and MCP
 /// <c>browser_*</c> tools drive the visible page on both; on Windows it also records the user's actions
-/// into a runnable <c>.frs</c> document. Other platforms stay on the no-op bridge (see the platform
-/// guards below).
+/// into a runnable <c>.frs</c> document. Mac Catalyst uses the same JavaScript driver as Android
+/// through a WebView transport.
 /// </summary>
 public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
 {
@@ -30,6 +30,10 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
     private readonly BrowserAutomationProvider? provider;
     private readonly InAppOAuthBrowserProvider? oauthBrowserProvider;
     private readonly ILogger<BrowserPaneView>? logger;
+#if MACCATALYST
+    private readonly ILoggerFactory? loggerFactory;
+    private WKWebView? connectedMacWebView;
+#endif
     private readonly BrowserRecordingScriptBuilder recordingBuilder = new();
     private OAuthInterception? oauthInterception;
     private bool isRecording;
@@ -56,6 +60,9 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
         provider = services?.GetService(typeof(BrowserAutomationProvider)) as BrowserAutomationProvider;
         oauthBrowserProvider = services?.GetService(typeof(InAppOAuthBrowserProvider)) as InAppOAuthBrowserProvider;
         logger = services?.GetService(typeof(ILogger<BrowserPaneView>)) as ILogger<BrowserPaneView>;
+#if MACCATALYST
+        loggerFactory = services?.GetService(typeof(ILoggerFactory)) as ILoggerFactory;
+#endif
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -82,10 +89,9 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
 #elif ANDROID
         PageWebView.HandlerChanged += OnAndroidWebViewHandlerChanged;
         TryConnectAndroidBridge();
-#else
-        // TODO: connect a JavaScript-bridge browser bridge on macCatalyst so scripts and MCP can drive
-        // the embedded WebView there too. Until then the provider stays on its no-op bridge.
-        logger?.LogInformation("Browser pane live bridge is wired on Windows and Android; provider remains on the null bridge for this platform.");
+#elif MACCATALYST
+        PageWebView.HandlerChanged += OnMacWebViewHandlerChanged;
+        TryConnectMacBridge();
 #endif
     }
 
@@ -101,6 +107,8 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
         PageWebView.HandlerChanged -= OnWebViewHandlerChanged;
 #elif ANDROID
         PageWebView.HandlerChanged -= OnAndroidWebViewHandlerChanged;
+#elif MACCATALYST
+        PageWebView.HandlerChanged -= OnMacWebViewHandlerChanged;
 #endif
     }
 
@@ -378,6 +386,8 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
         _ = ConnectBridgeAsync();
 #elif ANDROID
         TryConnectAndroidBridge();
+#elif MACCATALYST
+        TryConnectMacBridge();
 #endif
     }
 
@@ -405,6 +415,9 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
             provider?.Disconnect();
             isBridgeConnected = false;
         }
+#if MACCATALYST
+        connectedMacWebView = null;
+#endif
     }
 
     private void SetStatus(string text)
@@ -577,6 +590,37 @@ public partial class BrowserPaneView : ContentView, IInAppOAuthBrowser
         {
             logger?.LogError(exception, "Failed to connect the Android browser automation bridge.");
         }
+    }
+#endif
+
+#if MACCATALYST
+    private void OnMacWebViewHandlerChanged(object? sender, EventArgs e)
+    {
+        TryConnectMacBridge();
+    }
+
+    private void TryConnectMacBridge()
+    {
+        if (provider is null || isTakenOver)
+        {
+            return;
+        }
+
+        if (PageWebView.Handler?.PlatformView is not WKWebView platformWebView)
+        {
+            DisconnectBridge();
+            return;
+        }
+
+        if (isBridgeConnected && ReferenceEquals(connectedMacWebView, platformWebView))
+        {
+            return;
+        }
+
+        MacCatalystBrowserConnector.Connect(PageWebView, provider, loggerFactory);
+        connectedMacWebView = platformWebView;
+        isBridgeConnected = true;
+        RefreshStatus();
     }
 #endif
 

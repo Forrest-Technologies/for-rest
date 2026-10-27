@@ -111,6 +111,17 @@ connected, the agent can browse the For-Rest script-language docs, enumerate
 workspaces and requests, and edit/execute the active request through the
 exposed tools.
 
+## Browser automation
+
+Open the visible browser pane with `show_in_app` using `target: "browser"`, then
+call `browser_snapshot` to inspect the page and choose targets. Windows and Mac
+Catalyst connect this pane to the desktop MCP tools. A snapshot reports
+`Available: false` while the pane is unavailable or human takeover is active.
+
+Use the pane's takeover control to suspend synthetic input and resume it when
+ready. Mac Catalyst uses JavaScript events; websites that require trusted OS
+input can reject those events.
+
 ## Security notes
 
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
