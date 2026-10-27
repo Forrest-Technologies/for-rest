@@ -13,3 +13,6 @@ global using ForRest.Scripting;
 global using ForRest.Services;
 global using Microsoft.Extensions.Logging.Abstractions;
 global using Microsoft.VisualStudio.TestTools.UnitTesting;
+global using System.Text;
+global using System.Net;
+global using ForRest.Mcp;

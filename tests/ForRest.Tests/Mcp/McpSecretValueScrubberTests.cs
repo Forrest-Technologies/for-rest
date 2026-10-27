@@ -44,11 +44,49 @@ public sealed class McpSecretValueScrubberTests
     }
 
     [TestMethod]
-    public void Scrub_skips_trivially_short_values()
+    public void Scrub_redacts_short_values_explicitly_marked_secret()
     {
         string scrubbed = McpSecretValueScrubber.Scrub("status is true, id is 12345", ["true", "12345"]);
 
-        Assert.AreEqual("status is true, id is 12345", scrubbed);
+        Assert.AreEqual("status is ***, id is ***", scrubbed);
+    }
+
+    [TestMethod]
+    public void Scrub_replaces_form_url_encoded_values()
+    {
+        const string secret = "p@ss word+1";
+        var encoded = WebUtility.UrlEncode(secret);
+
+        Assert.AreEqual("value=***", McpSecretValueScrubber.Scrub("value=" + encoded, [secret]));
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void Scrub_replaces_unpadded_and_URL_safe_base64(bool urlSafe)
+    {
+        const string secret = "???????";
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)).TrimEnd('=');
+        if (urlSafe)
+        {
+            encoded = encoded.Replace('+', '-').Replace('/', '_');
+        }
+
+        Assert.AreEqual("value=***", McpSecretValueScrubber.Scrub("value=" + encoded, [secret]));
+    }
+
+    [TestMethod]
+    public void Scrub_replaces_lowercase_percent_escapes()
+    {
+        const string secret = "abc/def+ghi";
+
+        Assert.AreEqual("***", McpSecretValueScrubber.Scrub("abc%2fdef%2bghi", [secret]));
+    }
+
+    [TestMethod]
+    public void Scrub_redacts_nonempty_whitespace_marked_secret()
+    {
+        Assert.AreEqual("value=***", McpSecretValueScrubber.Scrub("value= ", [" "]));
     }
 
     [TestMethod]
