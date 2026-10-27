@@ -374,7 +374,7 @@ Secret values are redacted on read and restored by the host on write, so an agen
 ```bash
 brew install --cask forrest-technologies/tap/for-rest
 ```
-The app is currently unsigned (no Apple Developer certificate), but the cask clears the Gatekeeper quarantine flag automatically on install, so the first launch just works. Windows and Android builds are attached to each [GitHub release](https://github.com/Forrest-Technologies/for-rest/releases), or build from source below.
+Mac builds are not notarized. The cask removes the download quarantine attribute; direct downloads may require approval in macOS Privacy & Security. Windows and Android builds are attached to each [GitHub release](https://github.com/Forrest-Technologies/for-rest/releases), or build from source below.
 
 ---
 
@@ -403,7 +403,7 @@ On a macOS host the app project defaults to the Mac Catalyst head, so add
 `-p:TargetFrameworks=net10.0-android` to the commands above (and install the
 Android SDK) to build the Android head from a Mac.
 
-**Build for macOS** (unsigned — no Apple Developer license required)
+**Build for macOS** (ad-hoc signed — no Apple Developer account required)
 ```bash
 dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true
 # Launch via right-click → Open the first time to get past Gatekeeper.
