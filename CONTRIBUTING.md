@@ -17,7 +17,7 @@ dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj
 
 ### Platform heads
 
-- **Windows:** `dotnet build ForRest.slnx`, then `Start-Process .\src\ForRest.App\bin\Debug\net10.0-windows10.0.19041.0\ForRest.App.exe`
+- **Windows MAUI:** `dotnet build ForRest.slnx -p:ForRestWindowsOnly=true`, then `dotnet run --project src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-windows10.0.19041.0 -p:ForRestWindowsOnly=true`. The solution builds the MAUI head; the separate `src/ForRest.App` WinUI project is not included in it.
 - **Android:** `dotnet build src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-android` (on a macOS host, add `-p:TargetFrameworks=net10.0-android` and install the Android SDK — macOS hosts default to the Mac Catalyst head)
 - **Mac Catalyst (unsigned, no Apple Developer license needed):**
   `dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true`
@@ -30,7 +30,11 @@ Both unit-test projects target `net10.0`, so you can run them on Windows, macOS,
 
 Platform workflows use the existing `ft-windows` Windows x64 runner and `ft-mac-mini` macOS ARM64 runner. Windows ARM64 packages are cross-built on x64; these jobs do not test on ARM64 hardware. The Mac workflows install workload set `10.0.103` for the runner's Xcode 26.2. Android builds install JDK 21 and their Android SDK dependencies.
 
-Fork pull requests do not execute on these shared hosts. Maintainers review the patch before running the platform workflows from a trusted repository branch. Same-repository pull requests run the platform checks automatically.
+The platform workflows skip fork pull requests. Repository settings also require maintainer approval for every external contributor's workflow run. Review workflow changes and build scripts before approving a run; an untrusted fork can edit its own job conditions. To run the platform checks, review the patch and use a trusted repository branch. Same-repository pull requests run the platform checks automatically.
+
+CodeQL default setup uses the `ft-mac-mini` label for Actions, C#, and Java/Kotlin analysis. It retains its weekly schedule and default query suite. The org runner group permits For-Rest within an explicit repository allowlist.
+
+Each platform workflow uses a writable SDK directory and a separate For-Rest NuGet package cache in the runner tool cache. CLI state stays in the job's temporary directory, while downloaded packages can be reused by later jobs.
 
 ## Code style
 
