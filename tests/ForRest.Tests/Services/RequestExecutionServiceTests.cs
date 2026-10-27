@@ -432,6 +432,75 @@ public sealed class RequestExecutionServiceTests
         }
     }
 
+    [TestMethod]
+    public async Task Parallel_branches_do_not_trigger_an_extra_fallback_HTTP_request()
+    {
+        var history = new RecordingExecutionHistoryRepository();
+        var service = CreateScriptEnabledService(history);
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var serverTask = CaptureUntilCancelled();
+
+        async Task<List<CapturedRequest>> CaptureUntilCancelled()
+        {
+            List<CapturedRequest> captured = [];
+            try
+            {
+                while (true)
+                {
+                    captured.Add(await CaptureSingleRequest(listener, timeout.Token));
+                }
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                return captured;
+            }
+        }
+
+        try
+        {
+            List<ForRestScriptDiagnostic> diagnostics = [];
+            var flow = ForRestFlowScriptCompiler.Compile($$"""
+                parallel {
+                    GET "http://127.0.0.1:{{port}}/one"
+                    GET "http://127.0.0.1:{{port}}/two"
+                }
+                """, [], [], diagnostics);
+            Assert.IsEmpty(diagnostics);
+            var request = new RequestDefinition
+            {
+                Name = "Parallel loopback",
+                UrlTemplate = $"http://127.0.0.1:{port}/should-not-send",
+                PreRequestScript = flow,
+                MaxSendIterations = 2,
+                TimeoutMilliseconds = 2000,
+            };
+
+            var result = await service.Execute(new(), new(), request, null, timeout.Token);
+            timeout.Cancel();
+            var captured = await serverTask;
+
+            Assert.AreEqual(ExecutionState.Completed, result.State);
+            Assert.HasCount(2, captured);
+            Assert.HasCount(2, result.Runs.Single().Responses);
+            Assert.DoesNotContain(item => item.PathAndQuery == "/should-not-send", captured);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try
+            {
+                await serverTask;
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+    }
+
     #endregion
 
     #region Private Methods
