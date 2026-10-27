@@ -113,6 +113,12 @@ exposed tools.
 
 ## Security notes
 
+Script reads mask `secret` declarations in the editable `.frs` source. The
+`get_script` response represents nonempty cached pre-request code with
+`preRequestScript: "***"` and `preRequestScriptRedacted: true`. Cached code can
+contain credentials from compilation or earlier edits. The editable source
+remains available in `source`.
+
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.
 - The raw `settings.toml` holds secrets (`auth_token` and the AI `api_key`).

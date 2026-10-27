@@ -452,7 +452,7 @@ public sealed class ForRestMcpTools
 
     #region Script CRUD
 
-    [Description("Returns a single script's full detail (name, method, summary, source, pre-request script). Secret values in the source are redacted.")]
+    [Description("Returns a script's name, method, summary, and ForRest source with secret declarations redacted. Cached pre-request code is withheld because it can contain credentials.")]
     public Task<string> get_script(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Script location/path from list_workspaces.")] string location)
@@ -474,7 +474,8 @@ public sealed class ForRestMcpTools
                 method = script.Method,
                 summary = script.Summary,
                 source = McpSecretRedactor.Redact(script.Source),
-                preRequestScript = script.PreRequestScript,
+                preRequestScript = string.IsNullOrEmpty(script.PreRequestScript) ? string.Empty : "***",
+                preRequestScriptRedacted = !string.IsNullOrEmpty(script.PreRequestScript),
             });
         });
     }
@@ -565,7 +566,7 @@ public sealed class ForRestMcpTools
                 source,
                 string.IsNullOrWhiteSpace(request_name) ? null : request_name,
                 CancellationToken.None);
-            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
+            return Serialize(MapExecution(result), result.SecretValues);
         });
     }
 
@@ -577,7 +578,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(async host =>
         {
             ForRestMcpExecutionResult result = await host.ExecuteStoredScript(workspace_id, location, CancellationToken.None);
-            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
+            return Serialize(MapExecution(result), result.SecretValues);
         });
     }
 
@@ -616,8 +617,8 @@ public sealed class ForRestMcpTools
                 logs = run.Logs.Select(MapLog),
                 stash = MapStash(run.Stash),
                 rawRequest = McpRawRequestRedactor.Redact(run.RawRequest),
-            });
-            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
+            }, run.SecretValues);
+            return payload;
         });
     }
 
@@ -640,7 +641,11 @@ public sealed class ForRestMcpTools
                 return "This run produced no response.";
             }
 
-            return McpSecretValueScrubber.Scrub(Serialize(MapResponse(run.Response, max_body_chars)!), run.SecretValues);
+            var response = run.Response with
+            {
+                Body = McpSecretValueScrubber.Scrub(run.Response.Body, run.SecretValues),
+            };
+            return Serialize(MapResponse(response, max_body_chars)!, run.SecretValues);
         });
     }
 
@@ -677,8 +682,8 @@ public sealed class ForRestMcpTools
                 ? (string.IsNullOrEmpty(run.Response.RawResponse) ? run.Response.Body : run.Response.RawResponse)
                 : run.Response.Body;
 
-            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines));
-            return McpSecretValueScrubber.Scrub(grepResult, run.SecretValues);
+            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines), run.SecretValues);
+            return grepResult;
         });
     }
 
@@ -696,7 +701,7 @@ public sealed class ForRestMcpTools
             }
 
             object? stash = MapStash(run.Stash);
-            return stash is null ? "This run captured no stash rows." : McpSecretValueScrubber.Scrub(Serialize(stash), run.SecretValues);
+            return stash is null ? "This run captured no stash rows." : Serialize(stash, run.SecretValues);
         });
     }
 
@@ -719,8 +724,8 @@ public sealed class ForRestMcpTools
                 errorMessage = run.Summary.ErrorMessage,
                 tests = run.Tests.Select(MapTest),
                 logs = run.Logs.Select(MapLog),
-            });
-            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
+            }, run.SecretValues);
+            return payload;
         });
     }
 
@@ -983,7 +988,8 @@ public sealed class ForRestMcpTools
         });
     }
 
-    private static string GrepText(string haystack, string pattern, bool isRegex, bool ignoreCase, int maxMatches, int contextLines)
+    private static string GrepText(string haystack, string pattern, bool isRegex, bool ignoreCase, int maxMatches, int contextLines,
+        IReadOnlyCollection<string>? secretValues)
     {
         if (string.IsNullOrEmpty(haystack))
         {
@@ -1002,7 +1008,7 @@ public sealed class ForRestMcpTools
             }
             catch (ArgumentException exception)
             {
-                return $"Invalid regular expression: {exception.Message}";
+                return McpSecretValueScrubber.Scrub($"Invalid regular expression: {exception.Message}", secretValues);
             }
 
             isMatch = line => regex.IsMatch(line);
@@ -1042,7 +1048,7 @@ public sealed class ForRestMcpTools
             totalMatches = total,
             truncated = matches.Count >= maxMatches,
             matches,
-        });
+        }, secretValues);
     }
 
     private static string EscapeForRestString(string value)
@@ -1052,9 +1058,16 @@ public sealed class ForRestMcpTools
             .Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
-    private static string Serialize(object value)
+    private static string Serialize(object value, IReadOnlyCollection<string>? secretValues = null)
     {
-        return JsonSerializer.Serialize(value, JsonOptions);
+        if (secretValues is null || secretValues.Count == 0)
+        {
+            return JsonSerializer.Serialize(value, JsonOptions);
+        }
+
+        var options = new JsonSerializerOptions(JsonOptions);
+        options.Converters.Add(new McpSecretJsonConverter(secretValues));
+        return JsonSerializer.Serialize(value, options);
     }
 
     #endregion

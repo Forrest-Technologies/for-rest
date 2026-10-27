@@ -86,6 +86,56 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task Script_reads_do_not_expose_credentials_in_cached_pre_request_code(bool staleSource)
+    {
+        const string secret = "fake-secret-9000";
+        const string original = """
+            method GET
+            url "https://example.test/"
+            flow {
+                secret api_key = "fake-secret-9000"
+            }
+            """;
+        var compilation = new ForRestScriptCompiler(new()).Compile(original, new());
+        Assert.IsTrue(compilation.Succeeded);
+        Assert.IsNotNull(compilation.Payload);
+        var compiled = compilation.Payload.Request.PreRequestScript;
+        StringAssert.Contains(compiled, secret);
+        var current = staleSource ? "method GET\nurl \"https://example.test/\"" : original;
+        var tools = CreateTools(new FakeHost
+        {
+            Script = new(WorkspaceId: "ws", WorkspaceName: "Tests", Location: "/requests/probe",
+                Name: "Probe", Method: "GET", Summary: "", Source: current, PreRequestScript: compiled),
+        });
+
+        var json = await tools.get_script("ws", "/requests/probe");
+
+        Assert.DoesNotContain(secret, json);
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("***", parsed.RootElement.GetProperty("preRequestScript").GetString());
+        Assert.IsTrue(parsed.RootElement.GetProperty("preRequestScriptRedacted").GetBoolean());
+        StringAssert.Contains(parsed.RootElement.GetProperty("source").GetString()!, "method GET");
+    }
+
+    [TestMethod]
+    public async Task Script_reads_distinguish_empty_cached_code_from_redacted_code()
+    {
+        var tools = CreateTools(new FakeHost
+        {
+            Script = new(WorkspaceId: "ws", WorkspaceName: "Tests", Location: "/requests/probe",
+                Name: "Probe", Method: "GET", Summary: "", Source: "method GET", PreRequestScript: ""),
+        });
+
+        var json = await tools.get_script("ws", "/requests/probe");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(string.Empty, parsed.RootElement.GetProperty("preRequestScript").GetString());
+        Assert.IsFalse(parsed.RootElement.GetProperty("preRequestScriptRedacted").GetBoolean());
+    }
+
+    [TestMethod]
     public void Build_attack_script_emits_runnable_query_fuzz_harness()
     {
         ForRestMcpTools tools = CreateTools(host: null);
@@ -395,6 +445,32 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow("raw")]
+    [DataRow("base64")]
+    [DataRow("url")]
+    public async Task Get_run_response_scrubs_secrets_before_truncating_the_body(string encoding)
+    {
+        const string secret = "token@private/user";
+        var encoded = encoding switch
+        {
+            "base64" => Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)),
+            "url" => Uri.EscapeDataString(secret),
+            _ => secret,
+        };
+        var host = new FakeHost
+        {
+            Run = SampleRun($"token={encoded};safe") with { SecretValues = [secret] },
+        };
+        var tools = CreateTools(host);
+
+        var json = await tools.get_run_response("ws", "run-1", max_body_chars: 12);
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("token=***;sa", parsed.RootElement.GetProperty("body").GetString());
+        Assert.IsTrue(parsed.RootElement.GetProperty("bodyTruncated").GetBoolean());
+    }
+
+    [TestMethod]
     public async Task Get_run_response_truncates_body_when_requested()
     {
         FakeHost host = new() { Run = SampleRun("0123456789abcdef") };
@@ -436,6 +512,58 @@ public sealed class ForRestMcpToolsTests
         StringAssert.Contains(json, "Accept: application/json");
         Assert.IsFalse(json.Contains("abc123", System.StringComparison.Ordinal));
         Assert.IsFalse(json.Contains("key-456", System.StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow("12345")]
+    [DataRow("false")]
+    [DataRow("a")]
+    [DataRow("\"")]
+    [DataRow("\\")]
+    [DataRow("🔑")]
+    public async Task Response_tools_redact_short_secrets_without_altering_JSON_field_names(string secret)
+    {
+        var run = SampleRun("credential=" + secret) with { SecretValues = [secret] };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_response("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        var expected = "credential=".Replace(secret, "***", StringComparison.Ordinal) + "***";
+        Assert.AreEqual(expected, parsed.RootElement.GetProperty("body").GetString());
+        Assert.IsFalse(parsed.RootElement.GetProperty("bodyTruncated").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task Stash_dictionary_keys_are_redacted_without_changing_protocol_property_names()
+    {
+        var run = SampleRun("safe") with
+        {
+            SecretValues = ["columns"],
+            Stash = new(["columns"], [new Dictionary<string, string> { ["columns"] = "safe" }]),
+        };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_stash("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("***", parsed.RootElement.GetProperty("columns")[0].GetString());
+        Assert.AreEqual("safe", parsed.RootElement.GetProperty("rows")[0].GetProperty("***").GetString());
+    }
+
+    [TestMethod]
+    public async Task Numeric_secrets_do_not_corrupt_response_metadata_JSON()
+    {
+        var run = SampleRun("credential=123456") with { SecretValues = ["123456"] };
+        Assert.IsNotNull(run.Response);
+        run = run with { Response = run.Response with { SizeBytes = 123456 } };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_response("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(123456L, parsed.RootElement.GetProperty("sizeBytes").GetInt64());
+        Assert.AreEqual("credential=***", parsed.RootElement.GetProperty("body").GetString());
     }
 
     [TestMethod]
@@ -669,6 +797,8 @@ public sealed class ForRestMcpToolsTests
 
         public ForRestMcpRunDetail? Run { get; set; }
 
+        public ForRestMcpScriptDetail? Script { get; set; }
+
         public ForRestMcpServerSettingsView Settings { get; set; } =
             new(false, "127.0.0.1", 7341, false, 4, "http://127.0.0.1:7341/");
 
@@ -709,7 +839,7 @@ public sealed class ForRestMcpToolsTests
             => Task.FromResult(ForRestMcpMutationResult.Ok("deleted"));
 
         public Task<ForRestMcpScriptDetail?> GetScript(string workspaceId, string location, CancellationToken cancellationToken)
-            => Task.FromResult<ForRestMcpScriptDetail?>(null);
+            => Task.FromResult(Script);
 
         public Task<ForRestMcpMutationResult> CreateScript(string workspaceId, string name, string source, CancellationToken cancellationToken)
         {
