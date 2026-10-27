@@ -384,6 +384,82 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow("target", 1, false)]
+    [DataRow("target\ntarget", 2, true)]
+    public async Task Grep_run_response_reports_actual_totals_and_exact_truncation(
+        string body, int total, bool truncated)
+    {
+        var tools = CreateTools(new FakeHost { Run = SampleRun(body) });
+
+        var json = await tools.grep_run_response("ws", "run-1", "target", max_matches: 1);
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(total, parsed.RootElement.GetProperty("totalMatches").GetInt32());
+        Assert.AreEqual(truncated, parsed.RootElement.GetProperty("truncated").GetBoolean());
+        Assert.AreEqual(1, parsed.RootElement.GetProperty("matches").GetArrayLength());
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_handles_maximum_integer_context_without_overflow()
+    {
+        var tools = CreateTools(new FakeHost { Run = SampleRun("before\ntarget\nafter") });
+
+        var json = await tools.grep_run_response("ws", "run-1", "target", context_lines: int.MaxValue);
+
+        using var parsed = JsonDocument.Parse(json);
+        var context = parsed.RootElement.GetProperty("matches")[0].GetProperty("context");
+        Assert.AreEqual(3, context.GetArrayLength());
+        Assert.AreEqual("before", context[0].GetProperty("text").GetString());
+        Assert.AreEqual("after", context[2].GetProperty("text").GetString());
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_regex_case_matching_is_independent_of_host_culture()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+            var tools = CreateTools(new FakeHost { Run = SampleRun("file") });
+
+            var json = await tools.grep_run_response("ws", "run-1", "FILE", is_regex: true);
+
+            using var parsed = JsonDocument.Parse(json);
+            Assert.AreEqual(1, parsed.RootElement.GetProperty("totalMatches").GetInt32());
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+        }
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_bounds_catastrophic_regex_backtracking()
+    {
+        var tools = CreateTools(new FakeHost { Run = SampleRun($"{new string('a', 2000)}!") });
+
+        var result = await tools.grep_run_response("ws", "run-1", "(a+)+$", is_regex: true);
+
+        StringAssert.Contains(result, "timed out");
+        StringAssert.Contains(result, "substring search");
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_caps_context_windows_to_fifty_lines_each_side()
+    {
+        var lines = Enumerable.Range(0, 201).Select(index => index == 100 ? "target" : $"line {index}");
+        var tools = CreateTools(new FakeHost { Run = SampleRun(string.Join('\n', lines)) });
+
+        var json = await tools.grep_run_response("ws", "run-1", "target", context_lines: int.MaxValue);
+
+        using var parsed = JsonDocument.Parse(json);
+        var context = parsed.RootElement.GetProperty("matches")[0].GetProperty("context");
+        Assert.AreEqual(101, context.GetArrayLength());
+        Assert.AreEqual(51, context[0].GetProperty("line").GetInt32());
+        Assert.AreEqual(151, context[100].GetProperty("line").GetInt32());
+    }
+
+    [TestMethod]
     public async Task Grep_run_response_reports_invalid_regex()
     {
         FakeHost host = new() { Run = SampleRun("anything") };
