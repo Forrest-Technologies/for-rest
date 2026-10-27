@@ -105,6 +105,17 @@
 		<MauiAsset Include="$(IntermediateOutputPath)ForRest.Maui.dll" LogicalName="roslyn-runtime/ForRest.Maui.dll" />
 	</ItemGroup>
 
+	<!-- Windows App SDK self-contained builds require one concrete runtime even when
+	     the solution uses AnyCPU. Keep this default inside the Windows app head;
+	     passing RuntimeIdentifier to the solution itself causes NETSDK1134. Explicit
+	     publish runtimes and architecture selections still take precedence. -->
+	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' and '$(RuntimeIdentifier)' == ''">
+		<RuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+		<RuntimeIdentifier Condition="'$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and $(NETCoreSdkPortableRuntimeIdentifier.EndsWith('arm64'))">win-arm64</RuntimeIdentifier>
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+	</PropertyGroup>
+
 	<!-- Unsigned macOS build: users can run via right-click Open or Security & Privacy settings.
 	     Pass -p:ForRestMacUnsigned=true to produce an unsigned .app bundle for testing. -->
 	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' and '$(ForRestMacUnsigned)' == 'true'">
