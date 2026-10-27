@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: android-maui-${{ github.ref }}
@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: windows-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Windows, X64, ft-windows]
+    timeout-minutes: 5
     outputs:
       build_configuration: ${{ steps.version.outputs.build_configuration }}
       version_label: ${{ steps.version.outputs.version_label }}
@@ -44,7 +46,7 @@ jobs:
           $buildTimestampUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
           $buildConfiguration = 'Release'
-          if ('${{ github.ref_name }}' -eq 'master') {
+          if ($env:GITHUB_REF_NAME -eq 'master') {
             $versionLabel = $dateLabel
           }
           else {
@@ -61,26 +63,45 @@ jobs:
           "release_title=ForRest $versionLabel" >> $env:GITHUB_OUTPUT
 
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     needs: prepare
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, ft-windows]
+    timeout-minutes: 60
     env:
       ANDROID_TFM: net10.0-android
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Java SDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
+
+      - name: Configure Android SDK directory
+        shell: pwsh
+        run: |
+          $sdkDirectory = Join-Path $env:RUNNER_TOOL_CACHE 'android-sdk'
+          "ANDROID_HOME=$sdkDirectory" >> $env:GITHUB_ENV
+          "ANDROID_SDK_ROOT=$sdkDirectory" >> $env:GITHUB_ENV
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configure writable toolchain state
+        shell: pwsh
+        run: |
+          "DOTNET_INSTALL_DIR=$(Join-Path $env:RUNNER_TOOL_CACHE 'for-rest-dotnet')" >> $env:GITHUB_ENV
+          "DOTNET_CLI_HOME=$(Join-Path $env:RUNNER_TEMP 'for-rest-dotnet-home')" >> $env:GITHUB_ENV
+          "NUGET_HTTP_CACHE_PATH=$(Join-Path $env:RUNNER_TEMP 'for-rest-nuget-http')" >> $env:GITHUB_ENV
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
-          dotnet-quality: preview
-          global-json-file: global.json
+          dotnet-version: '10.0.302'
 
       - name: Show toolchain
         shell: pwsh
@@ -91,6 +112,16 @@ jobs:
       - name: Restore MAUI workloads
         shell: pwsh
         run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj
+
+      - name: Install Android platform dependencies
+        shell: pwsh
+        run: |
+          dotnet build src/ForRest.Maui/ForRest.Maui.csproj `
+            -t:InstallAndroidDependencies `
+            -f $env:ANDROID_TFM `
+            -p:AndroidSdkDirectory="$env:ANDROID_HOME" `
+            -p:JavaSdkDirectory="$env:JAVA_HOME" `
+            -p:AcceptAndroidSDKLicenses=true
 
       - name: Run MAUI unit tests
         shell: pwsh
@@ -198,21 +229,38 @@ jobs:
             Copy-Item $package.FullName $destination -Force
           }
 
+      - name: Remove signing keystore
+        if: always()
+        shell: pwsh
+        run: |
+          $keystorePath = Join-Path $env:RUNNER_TEMP 'for-rest.keystore'
+          if (Test-Path $keystorePath) {
+            Remove-Item $keystorePath -Force
+          }
+
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-android
           path: artifacts/release/android/*
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1
 
   release:
-    if: github.ref_name == 'master'
+    if: github.event_name != 'pull_request' && github.ref_name == 'master'
+    permissions:
+      contents: write
     needs:
       - prepare
       - build
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, ft-windows]
+    timeout-minutes: 60
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:

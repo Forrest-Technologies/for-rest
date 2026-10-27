@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-maui-${{ github.ref }}
@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: windows-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Windows, X64, ft-windows]
+    timeout-minutes: 5
     outputs:
       build_configuration: ${{ steps.version.outputs.build_configuration }}
       version_label: ${{ steps.version.outputs.version_label }}
@@ -43,7 +45,7 @@ jobs:
           $fileVersion = $now.ToString('yyyy.M.d') + '.0'
           $buildTimestampUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
-          if ('${{ github.ref_name }}' -eq 'master') {
+          if ($env:GITHUB_REF_NAME -eq 'master') {
             $buildConfiguration = 'Release'
             $versionLabel = $dateLabel
           }
@@ -62,33 +64,42 @@ jobs:
           "release_title=ForRest $versionLabel" >> $env:GITHUB_OUTPUT
 
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     needs: prepare
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: win-x64
-            runner: windows-latest
+            runner: [self-hosted, Windows, X64, ft-windows]
             platform: x64
             runtime_identifier: win-x64
           - arch: win-arm64
-            runner: windows-latest
+            runner: [self-hosted, Windows, X64, ft-windows]
             platform: ARM64
             runtime_identifier: win-arm64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     env:
       WINDOWS_TFM: net10.0-windows10.0.19041.0
       WINDOWS_ONLY_BUILD: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configure writable toolchain state
+        shell: pwsh
+        run: |
+          "DOTNET_INSTALL_DIR=$(Join-Path $env:RUNNER_TOOL_CACHE 'for-rest-dotnet')" >> $env:GITHUB_ENV
+          "DOTNET_CLI_HOME=$(Join-Path $env:RUNNER_TEMP 'for-rest-dotnet-home')" >> $env:GITHUB_ENV
+          "NUGET_HTTP_CACHE_PATH=$(Join-Path $env:RUNNER_TEMP 'for-rest-nuget-http')" >> $env:GITHUB_ENV
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
-          dotnet-quality: preview
-          global-json-file: global.json
+          dotnet-version: '10.0.302'
 
       - name: Show .NET environment
         shell: pwsh
@@ -108,12 +119,17 @@ jobs:
         shell: pwsh
         run: dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj -c Debug
 
+      - name: Build full solution
+        if: matrix.arch == 'win-x64'
+        shell: pwsh
+        run: dotnet build ForRest.slnx -p:ForRestWindowsOnly=true
+
       - name: Restore Windows app (deterministic assets)
         shell: pwsh
         run: |
           # Explicitly restore the full ForRest.Maui graph for the exact Windows
           # TFM/RID before publishing. Earlier steps (dotnet test on the
-          # net10.0-windows ForRest.Maui.Tests)
+          # portable ForRest.Maui.Tests)
           # restore parts of the project graph; pinning a fresh restore here with
           # the same ForRestWindowsOnly + RID flags guarantees every
           # obj/project.assets.json targets this TFM and rules out NETSDK1005
@@ -181,15 +197,23 @@ jobs:
           name: for-rest-${{ needs.prepare.outputs.version_label }}-${{ matrix.arch }}
           path: artifacts/ci/${{ matrix.arch }}
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1
 
   release:
-    if: github.ref_name == 'master'
+    if: github.event_name != 'pull_request' && github.ref_name == 'master'
+    permissions:
+      contents: write
     needs:
       - prepare
       - build
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64, ft-windows]
+    timeout-minutes: 60
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:

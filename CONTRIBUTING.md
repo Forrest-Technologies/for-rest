@@ -24,6 +24,14 @@ dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj
 
 If you only have one platform available, that's fine — say which one you tested on in your PR.
 
+Both unit-test projects target `net10.0`, so you can run them on Windows, macOS, or Linux without installing a MAUI workload. Building the app still requires the workload and native toolchain for the platform you select.
+
+### CI runners
+
+Platform workflows use the existing `ft-windows` Windows x64 runner and `ft-mac-mini` macOS ARM64 runner. Windows ARM64 packages are cross-built on x64; these jobs do not test on ARM64 hardware. The Mac workflows install workload set `10.0.103` for the runner's Xcode 26.2. Android builds install JDK 21 and their Android SDK dependencies.
+
+Fork pull requests do not execute on these shared hosts. Maintainers review the patch before running the platform workflows from a trusted repository branch. Same-repository pull requests run the platform checks automatically.
+
 ## Code style
 
 [CLAUDE.md](CLAUDE.md) is the authoritative C# style guide for this repo. Read it before writing code. The short version:
