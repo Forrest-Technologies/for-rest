@@ -113,6 +113,13 @@ exposed tools.
 
 ## Security notes
 
+The MAUI workbench writes script text to `request-workbench-state.json` and
+keeps execution history in memory for the app session. Inline credentials can
+remain in that JSON file and in `settings.toml`. Provider OAuth tokens use the
+separate MAUI SecureStorage token store. The Windows WinUI head uses SQLite,
+where specific authentication fields and marked variables receive DPAPI
+protection. See the [storage details in the README](../../README.md).
+
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.
 - The raw `settings.toml` holds secrets (`auth_token` and the AI `api_key`).
