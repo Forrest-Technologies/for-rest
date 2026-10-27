@@ -122,6 +122,7 @@
 		<UseInterpreter>true</UseInterpreter>
 		<EnableCodeSigning>true</EnableCodeSigning>
 		<CodesignKey>-</CodesignKey>
+		<CodesignEntitlements>Platforms\MacCatalyst\Entitlements.AdHoc.plist</CodesignEntitlements>
 		<CodesignRequireProvisioningProfile>false</CodesignRequireProvisioningProfile>
 		<EnablePackageSigning>false</EnablePackageSigning>
 		<UseHardenedRuntime>false</UseHardenedRuntime>

@@ -23,9 +23,10 @@ dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj
 - **Mac Catalyst (ad-hoc signed, no Apple Developer account needed):**
   `dotnet publish src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-maccatalyst -c Release -p:ForRestMacUnsigned=true`
 
-The legacy `ForRestMacUnsigned` flag creates a local ad-hoc signature so the app
-bundle passes integrity verification. It does not use a Developer ID or notarize
-the app; downloaded builds may require approval in macOS Privacy & Security.
+The legacy `ForRestMacUnsigned` flag creates an ad-hoc signed, non-sandboxed
+app without a certificate or notarization. The bundle passes integrity checks;
+certificate-signed mode uses the existing sandbox profile. Downloaded builds
+may require approval in macOS Privacy & Security.
 
 If you only have one platform available, that's fine — say which one you tested on in your PR.
 
@@ -33,7 +34,8 @@ Both unit-test projects target `net10.0`, so you can run them on Windows, macOS,
 
 ### CI runners
 
-Platform workflows use the existing `ft-windows` Windows x64 runner and `ft-mac-mini` macOS ARM64 runner. Windows ARM64 packages are cross-built on x64; these jobs do not test on ARM64 hardware. The Mac workflows install workload set `10.0.103` for the runner's Xcode 26.2. Android builds install JDK 21 and their Android SDK dependencies.
+Platform workflows use the existing `ft-windows` Windows x64 runner and `ft-mac-mini` macOS ARM64 runner. Windows ARM64 packages are cross-built on x64; these jobs do not test on ARM64 hardware. Mac packages are published for Intel and Apple Silicon and checked for both
+architectures and signature integrity before archiving. The Mac workflows install workload set `10.0.103` for the runner's Xcode 26.2. Android builds install JDK 21 and their Android SDK dependencies.
 
 The platform workflows skip fork pull requests. Repository settings also require maintainer approval for every external contributor's workflow run. Review workflow changes and build scripts before approving a run; an untrusted fork can edit its own job conditions. To run the platform checks, review the patch and use a trusted repository branch. Same-repository pull requests run the platform checks automatically.
 

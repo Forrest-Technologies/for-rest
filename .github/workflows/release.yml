@@ -91,21 +91,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          OUTPUT_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-build/maccatalyst"
-          dotnet build src/ForRest.Maui/ForRest.Maui.csproj \
+          dotnet publish src/ForRest.Maui/ForRest.Maui.csproj \
             -c Release \
             -f "${MACCATALYST_TFM}" \
             -p:ForRestMacOnly="${MAC_ONLY_BUILD}" \
             -p:ForRestMacUnsigned=true \
             -p:ContinuousIntegrationBuild=true \
             -p:CreatePackage=false \
-            -p:EnableCodeSigning=false \
             -p:ApplicationDisplayVersion=${{ steps.version.outputs.version }} \
             -p:ApplicationVersion=${{ steps.version.outputs.app_version }} \
             -p:Version="${{ steps.version.outputs.version }}" \
             -p:InformationalVersion="${{ steps.version.outputs.version }}" \
-            -p:ForRestBuildDateUtc=${{ steps.version.outputs.build_timestamp_utc }} \
-            -o "${OUTPUT_DIRECTORY}"
+            -p:ForRestBuildDateUtc=${{ steps.version.outputs.build_timestamp_utc }}
 
       - name: Package release assets
         id: package
@@ -113,11 +110,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-build/maccatalyst"
+          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/src/ForRest.Maui/bin/Release/${MACCATALYST_TFM}"
           ASSET_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-assets"
           mkdir -p "${ASSET_DIRECTORY}"
 
-          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 3 -type d -name '*.app' | head -n 1 || true)
+          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 1 -type d -name '*.app' | head -n 1 || true)
           if [[ -z "${APP_BUNDLE}" ]]; then
             echo "No .app bundle was produced by the Mac Catalyst build." >&2
             exit 1
@@ -127,6 +124,8 @@ jobs:
           # for direct downloads.
           STABLE_ZIP="${ASSET_DIRECTORY}/For-Rest-macos.zip"
           VERSIONED_ZIP="${ASSET_DIRECTORY}/For-Rest-${VERSION}-macos.zip"
+          APP_EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "${APP_BUNDLE}/Contents/Info.plist")
+          /usr/bin/lipo "${APP_BUNDLE}/Contents/MacOS/${APP_EXECUTABLE}" -verify_arch arm64 x86_64
           /usr/bin/codesign --verify --deep --strict "${APP_BUNDLE}"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${STABLE_ZIP}"
           cp "${STABLE_ZIP}" "${VERSIONED_ZIP}"
