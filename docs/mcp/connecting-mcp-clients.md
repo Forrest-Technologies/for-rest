@@ -111,7 +111,20 @@ connected, the agent can browse the For-Rest script-language docs, enumerate
 workspaces and requests, and edit/execute the active request through the
 exposed tools.
 
+## Curl input limits
+
+Curl imports accept inline input. File and stdin inputs, multipart forms, and
+file uploads return an import error so they cannot silently become a different
+request. Paste input contents directly; use `--data-raw` when a body starts with
+a literal `@`.
+
 ## Security notes
+
+Curl imports put passwords, bearer tokens, and recognized credential-header
+values in explicit `secret` declarations. Request fields reference those
+variables so shared source and MCP reads can mask their values while request
+preparation resolves the original credentials. This does not encrypt MAUI's
+workbench JSON or detect every credential in arbitrary request text.
 
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.

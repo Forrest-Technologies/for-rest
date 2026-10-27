@@ -13,6 +13,18 @@ public sealed class CurlImportService : ICurlImportService
 {
     #region Private Fields
 
+    private static readonly HashSet<string> valueFlags = new(
+    [
+        "-X", "--request", "-H", "--header", "-d", "--data", "--data-raw", "--data-binary", "--data-ascii",
+        "--data-urlencode", "--json", "-u", "--user", "--oauth2-bearer", "-A", "--user-agent", "-e", "--referer",
+        "-b", "--cookie", "-m", "--max-time", "--url",
+        "-F", "--form", "--form-string", "-T", "--upload-file",
+    ], StringComparer.Ordinal);
+
+    private const string UnsupportedFileInputMessage = "Curl file and stdin inputs cannot be imported. Paste the input contents directly instead.";
+
+    private const string ShortSwitches = "GILksSvifg#";
+
     /// <summary>Flags curl treats as taking a value which For-Rest does not map onto the script.</summary>
     private static readonly HashSet<string> ignoredValueFlags = new(StringComparer.Ordinal)
     {
@@ -20,8 +32,6 @@ public sealed class CurlImportService : ICurlImportService
         "-w", "--write-out",
         "-c", "--cookie-jar",
         "-x", "--proxy",
-        "-F", "--form",
-        "-T", "--upload-file",
         "--connect-timeout",
         "--retry",
         "--retry-delay",
@@ -52,9 +62,7 @@ public sealed class CurlImportService : ICurlImportService
             return false;
         }
 
-        string trimmed = StripPromptPrefix(text.Trim());
-        return trimmed.StartsWith("curl ", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("curl.exe ", StringComparison.OrdinalIgnoreCase);
+        return HasCurlCommandPrefix(text.Trim());
     }
 
     public string ConvertToScript(string curlCommand, out string suggestedName)
@@ -63,8 +71,26 @@ public sealed class CurlImportService : ICurlImportService
 
         List<string> tokens = Tokenize(JoinContinuations(StripPromptPrefix(curlCommand.Trim())));
         ParsedCurl parsed = ParseTokens(tokens);
+        if (string.IsNullOrWhiteSpace(parsed.Url))
+        {
+            throw new FormatException("The curl command must include a URL.");
+        }
+
         suggestedName = BuildSuggestedName(parsed);
         return Render(parsed, suggestedName);
+    }
+
+    #endregion
+
+    #region Internal Methods
+
+    internal static bool HasCurlCommandPrefix(string text)
+    {
+        var candidate = StripPromptPrefix(text);
+        var commandLength = candidate.StartsWith("curl.exe", StringComparison.OrdinalIgnoreCase) ? 8 : 4;
+        return candidate.Length > commandLength
+            && candidate.StartsWith("curl", StringComparison.OrdinalIgnoreCase)
+            && char.IsWhiteSpace(candidate[commandLength]);
     }
 
     #endregion
@@ -133,8 +159,13 @@ public sealed class CurlImportService : ICurlImportService
                 continue;
             }
 
-            if (character == '\\' && index + 1 < text.Length)
+            if (character == '\\')
             {
+                if (index + 1 >= text.Length)
+                {
+                    throw new FormatException("The curl command ends with an incomplete escape sequence.");
+                }
+
                 current.Append(text[index + 1]);
                 index += 2;
                 continue;
@@ -160,6 +191,11 @@ public sealed class CurlImportService : ICurlImportService
             index++;
         }
 
+        if (index >= text.Length)
+        {
+            throw new FormatException("The curl command contains an unterminated quoted value.");
+        }
+
         return index + 1;
     }
 
@@ -177,6 +213,11 @@ public sealed class CurlImportService : ICurlImportService
 
             current.Append(character);
             index++;
+        }
+
+        if (index >= text.Length)
+        {
+            throw new FormatException("The curl command contains an unterminated quoted value.");
         }
 
         return index + 1;
@@ -213,13 +254,73 @@ public sealed class CurlImportService : ICurlImportService
             index++;
         }
 
+        if (index >= text.Length)
+        {
+            throw new FormatException("The curl command contains an unterminated quoted value.");
+        }
+
         return index + 1;
+    }
+
+    private static bool TryExpandOption(string token, out IReadOnlyList<string> expanded)
+    {
+        expanded = [];
+        if (token.Length <= 2 || token[0] != '-')
+        {
+            return false;
+        }
+
+        if (token.StartsWith("--", StringComparison.Ordinal))
+        {
+            var separator = token.IndexOf('=');
+            if (separator < 0)
+            {
+                return false;
+            }
+
+            var flag = token[..separator];
+            if (!valueFlags.Contains(flag) && !ignoredValueFlags.Contains(flag))
+            {
+                return false;
+            }
+
+            expanded = [flag, token[(separator + 1)..]];
+            return true;
+        }
+
+        List<string> flags = [];
+        for (var index = 1; index < token.Length; index++)
+        {
+            var flag = $"-{token[index]}";
+            if (valueFlags.Contains(flag) || ignoredValueFlags.Contains(flag))
+            {
+                flags.Add(flag);
+                if (index + 1 < token.Length)
+                {
+                    flags.Add(token[(index + 1)..]);
+                }
+
+                expanded = flags;
+                return true;
+            }
+
+            if (!ShortSwitches.Contains(token[index]))
+            {
+                return false;
+            }
+
+            flags.Add(flag);
+        }
+
+        expanded = flags;
+        return true;
     }
 
     private static ParsedCurl ParseTokens(IReadOnlyList<string> tokens)
     {
         ParsedCurl parsed = new();
         int index = 0;
+        var pending = new Queue<string>();
         if (index < tokens.Count &&
             (string.Equals(tokens[index], "curl", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(tokens[index], "curl.exe", StringComparison.OrdinalIgnoreCase)))
@@ -227,44 +328,68 @@ public sealed class CurlImportService : ICurlImportService
             index++;
         }
 
-        while (index < tokens.Count)
+        while (index < tokens.Count || pending.Count > 0)
         {
-            string token = tokens[index];
-            index++;
+            var token = pending.Count > 0 ? pending.Dequeue() : tokens[index++];
+            if (TryExpandOption(token, out var expanded))
+            {
+                token = expanded[0];
+                foreach (var value in expanded.Skip(1))
+                {
+                    pending.Enqueue(value);
+                }
+            }
 
             switch (token)
             {
+                case "-G" or "--get":
+                    parsed.UseQueryData = true;
+                    break;
+                case "--no-get":
+                    parsed.UseQueryData = false;
+                    break;
+                case "-I" or "--head":
+                    parsed.HeadOnly = true;
+                    break;
+                case "--no-head":
+                    parsed.HeadOnly = false;
+                    break;
                 case "-X" or "--request":
-                    parsed.ExplicitMethod = NextValue(tokens, ref index)?.ToUpperInvariant();
+                    parsed.ExplicitMethod = NextValue(tokens, ref index, pending)?.ToUpperInvariant();
                     break;
                 case "-H" or "--header":
-                    AddHeader(parsed, NextValue(tokens, ref index));
+                    AddHeader(parsed, NextValue(tokens, ref index, pending));
                     break;
-                case "-d" or "--data" or "--data-raw" or "--data-binary" or "--data-ascii":
-                    AddData(parsed, NextValue(tokens, ref index), urlEncode: false);
+                case "--data-raw":
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: false, interpretFilePrefix: false);
+                    break;
+                case "-d" or "--data" or "--data-binary" or "--data-ascii":
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: false);
                     break;
                 case "--data-urlencode":
-                    AddData(parsed, NextValue(tokens, ref index), urlEncode: true);
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: true);
                     break;
                 case "--json":
                     parsed.JsonFlag = true;
-                    AddData(parsed, NextValue(tokens, ref index), urlEncode: false);
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: false);
                     break;
                 case "-u" or "--user":
-                    SetBasicAuth(parsed, NextValue(tokens, ref index));
+                    SetBasicAuth(parsed, NextValue(tokens, ref index, pending));
                     break;
                 case "--oauth2-bearer":
-                    parsed.BearerToken = NextValue(tokens, ref index);
+                    parsed.BearerToken = NextValue(tokens, ref index, pending);
                     break;
                 case "-A" or "--user-agent":
-                    parsed.Headers.Add(("User-Agent", NextValue(tokens, ref index) ?? string.Empty));
+                    parsed.Headers.Add(("User-Agent", NextValue(tokens, ref index, pending) ?? string.Empty));
                     break;
                 case "-e" or "--referer":
-                    parsed.Headers.Add(("Referer", NextValue(tokens, ref index) ?? string.Empty));
+                    parsed.Headers.Add(("Referer", NextValue(tokens, ref index, pending) ?? string.Empty));
                     break;
                 case "-b" or "--cookie":
-                    parsed.Headers.Add(("Cookie", NextValue(tokens, ref index) ?? string.Empty));
+                    AddCookie(parsed, NextValue(tokens, ref index, pending));
                     break;
+                case "-F" or "--form" or "--form-string" or "-T" or "--upload-file":
+                    throw new FormatException("Curl multipart forms and file uploads cannot be imported. Paste the request body directly instead.");
                 case "-L" or "--location":
                     parsed.FollowRedirects = true;
                     break;
@@ -272,10 +397,10 @@ public sealed class CurlImportService : ICurlImportService
                     parsed.Insecure = true;
                     break;
                 case "-m" or "--max-time":
-                    SetTimeout(parsed, NextValue(tokens, ref index));
+                    SetTimeout(parsed, NextValue(tokens, ref index, pending));
                     break;
                 case "--url":
-                    parsed.Url = NextValue(tokens, ref index);
+                    parsed.Url = NextValue(tokens, ref index, pending);
                     break;
                 case "--compressed" or "-s" or "--silent" or "-S" or "--show-error" or "-v" or "--verbose"
                     or "-i" or "--include" or "-f" or "--fail" or "-g" or "--globoff" or "--http1.1"
@@ -283,15 +408,21 @@ public sealed class CurlImportService : ICurlImportService
                     parsed.IgnoredFlags.Add(token);
                     break;
                 default:
-                    HandleUnknownToken(parsed, tokens, token, ref index);
+                    HandleUnknownToken(parsed, tokens, token, ref index, pending);
                     break;
             }
+        }
+
+        if (parsed.HeadOnly && parsed.DataSegments.Count > 0 && !parsed.UseQueryData)
+        {
+            throw new FormatException("curl --head cannot send body data. Use --get for query parameters.");
         }
 
         return parsed;
     }
 
-    private static void HandleUnknownToken(ParsedCurl parsed, IReadOnlyList<string> tokens, string token, ref int index)
+    private static void HandleUnknownToken(ParsedCurl parsed, IReadOnlyList<string> tokens, string token, ref int index,
+        Queue<string> pending)
     {
         if (!token.StartsWith('-') || token.Length <= 1)
         {
@@ -303,15 +434,20 @@ public sealed class CurlImportService : ICurlImportService
         parsed.IgnoredFlags.Add(token);
         if (ignoredValueFlags.Contains(token))
         {
-            NextValue(tokens, ref index);
+            NextValue(tokens, ref index, pending);
         }
     }
 
-    private static string? NextValue(IReadOnlyList<string> tokens, ref int index)
+    private static string? NextValue(IReadOnlyList<string> tokens, ref int index, Queue<string> pending)
     {
+        if (pending.TryDequeue(out var attached))
+        {
+            return attached;
+        }
+
         if (index >= tokens.Count)
         {
-            return null;
+            throw new FormatException($"The curl option '{tokens[index - 1]}' requires a value.");
         }
 
         string value = tokens[index];
@@ -326,6 +462,11 @@ public sealed class CurlImportService : ICurlImportService
             return;
         }
 
+        if (header.StartsWith('@'))
+        {
+            throw new FormatException(UnsupportedFileInputMessage);
+        }
+
         int separatorIndex = header.IndexOf(':');
         string name = separatorIndex < 0 ? header.Trim() : header[..separatorIndex].Trim();
         string value = separatorIndex < 0 ? string.Empty : header[(separatorIndex + 1)..].Trim();
@@ -338,7 +479,17 @@ public sealed class CurlImportService : ICurlImportService
         parsed.Headers.Add((name, value));
     }
 
-    private static void AddData(ParsedCurl parsed, string? data, bool urlEncode)
+    private static void AddCookie(ParsedCurl parsed, string? cookie)
+    {
+        if (!string.IsNullOrEmpty(cookie) && !cookie.Contains('='))
+        {
+            throw new FormatException(UnsupportedFileInputMessage);
+        }
+
+        parsed.Headers.Add(("Cookie", cookie ?? string.Empty));
+    }
+
+    private static void AddData(ParsedCurl parsed, string? data, bool urlEncode, bool interpretFilePrefix = true)
     {
         if (data is null)
         {
@@ -349,9 +500,21 @@ public sealed class CurlImportService : ICurlImportService
         if (urlEncode)
         {
             int separatorIndex = data.IndexOf('=');
-            value = separatorIndex < 0
-                ? Uri.EscapeDataString(data)
-                : $"{data[..separatorIndex]}={Uri.EscapeDataString(data[(separatorIndex + 1)..])}";
+            if (separatorIndex < 0 && data.Contains('@'))
+            {
+                throw new FormatException(UnsupportedFileInputMessage);
+            }
+
+            value = separatorIndex switch
+            {
+                < 0 => Uri.EscapeDataString(data),
+                0 => Uri.EscapeDataString(data[1..]),
+                _ => $"{data[..separatorIndex]}={Uri.EscapeDataString(data[(separatorIndex + 1)..])}",
+            };
+        }
+        else if (interpretFilePrefix && data.StartsWith('@'))
+        {
+            throw new FormatException(UnsupportedFileInputMessage);
         }
 
         parsed.DataSegments.Add(value);
@@ -410,24 +573,53 @@ public sealed class CurlImportService : ICurlImportService
             return parsed.ExplicitMethod;
         }
 
-        return parsed.DataSegments.Count > 0 || parsed.JsonFlag ? "POST" : "GET";
+        if (parsed.HeadOnly)
+        {
+            return "HEAD";
+        }
+
+        return !parsed.UseQueryData && (parsed.DataSegments.Count > 0 || parsed.JsonFlag) ? "POST" : "GET";
+    }
+
+    private static string RenderUrl(ParsedCurl parsed)
+    {
+        var url = parsed.Url ?? string.Empty;
+        var query = string.Join("&", parsed.DataSegments);
+        if (!parsed.UseQueryData || string.IsNullOrEmpty(url) || string.IsNullOrEmpty(query))
+        {
+            return url;
+        }
+
+        var fragmentIndex = url.IndexOf('#');
+        var fragment = fragmentIndex >= 0 ? url[fragmentIndex..] : string.Empty;
+        var requestUrl = fragmentIndex >= 0 ? url[..fragmentIndex] : url;
+        var separator = requestUrl.EndsWith('?') || requestUrl.EndsWith('&')
+            ? string.Empty
+            : requestUrl.Contains('?') ? "&" : "?";
+        return $"{requestUrl}{separator}{query}{fragment}";
+    }
+
+    private static string AddSecret(List<string> lines, string name, string value)
+    {
+        lines.Add($"secret {name} = {JsonSerializer.Serialize(value)}");
+        return "{{" + name + "}}";
     }
 
     private static string Render(ParsedCurl parsed, string suggestedName)
     {
         string method = ResolveMethod(parsed);
         string body = string.Join("&", parsed.DataSegments);
-        bool hasBody = parsed.DataSegments.Count > 0;
-        bool jsonBody = hasBody
-            && (parsed.JsonFlag
-                || (parsed.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false)
-                || (parsed.ContentType is null && FrsScriptWriter.LooksLikeJson(body)));
+        var hasBody = !parsed.UseQueryData && parsed.DataSegments.Count > 0;
+        var contentType = parsed.ContentType ?? (parsed.JsonFlag ? "application/json" : null);
+        var jsonBody = hasBody
+            && ((contentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false)
+                || (contentType is null && FrsScriptWriter.LooksLikeJson(body)));
 
         List<string> lines =
         [
             $"name \"{FrsScriptWriter.Escape(suggestedName)}\"",
             $"method {method}",
-            $"url \"{FrsScriptWriter.Escape(parsed.Url ?? string.Empty)}\"",
+            $"url \"{FrsScriptWriter.Escape(RenderUrl(parsed))}\"",
         ];
 
         if (parsed.TimeoutMilliseconds is int timeout)
@@ -445,16 +637,29 @@ public sealed class CurlImportService : ICurlImportService
             lines.Add("ssl false");
         }
 
-        if (parsed.ContentType is not null && !jsonBody)
+        if (hasBody && contentType is not null && !jsonBody)
         {
-            lines.Add($"content_type \"{FrsScriptWriter.Escape(parsed.ContentType)}\"");
+            lines.Add($"content_type \"{FrsScriptWriter.Escape(contentType)}\"");
         }
-        else if (hasBody && !jsonBody && parsed.ContentType is null)
+        else if (hasBody && !jsonBody && contentType is null)
         {
             lines.Add("content_type \"application/x-www-form-urlencoded\"");
         }
 
-        List<string> headers = [.. parsed.Headers.Select(static header => FrsScriptWriter.HeaderLine(header.Name, header.Value))];
+        List<string> headers = [];
+        var secretHeaderIndex = 0;
+        foreach (var header in parsed.Headers)
+        {
+            var value = HttpCredentialHeaders.IsSensitive(header.Name)
+                ? AddSecret(lines, $"curl_header_{++secretHeaderIndex}", header.Value)
+                : header.Value;
+            headers.Add(FrsScriptWriter.HeaderLine(header.Name, value));
+        }
+        if (!hasBody && contentType is not null)
+        {
+            headers.Insert(0, FrsScriptWriter.HeaderLine("Content-Type", contentType));
+        }
+
         if (parsed.JsonFlag && !parsed.Headers.Any(static header => string.Equals(header.Name, "Accept", StringComparison.OrdinalIgnoreCase)))
         {
             headers.Insert(0, FrsScriptWriter.HeaderLine("Accept", "application/json"));
@@ -469,12 +674,13 @@ public sealed class CurlImportService : ICurlImportService
         if (parsed.Username is not null)
         {
             lines.Add(string.Empty);
-            lines.AddRange(FrsScriptWriter.BasicAuthBlock(parsed.Username, parsed.Password ?? string.Empty));
+            lines.AddRange(FrsScriptWriter.BasicAuthBlock(parsed.Username,
+                AddSecret(lines, "curl_password", parsed.Password ?? string.Empty)));
         }
         else if (parsed.BearerToken is not null)
         {
             lines.Add(string.Empty);
-            lines.AddRange(FrsScriptWriter.BearerAuthBlock(parsed.BearerToken));
+            lines.AddRange(FrsScriptWriter.BearerAuthBlock(AddSecret(lines, "curl_bearer_token", parsed.BearerToken)));
         }
 
         if (hasBody)
@@ -505,6 +711,8 @@ public sealed class CurlImportService : ICurlImportService
         public string? Password { get; set; }
         public string? BearerToken { get; set; }
         public bool JsonFlag { get; set; }
+        public bool UseQueryData { get; set; }
+        public bool HeadOnly { get; set; }
         public bool FollowRedirects { get; set; }
         public bool Insecure { get; set; }
         public int? TimeoutMilliseconds { get; set; }
