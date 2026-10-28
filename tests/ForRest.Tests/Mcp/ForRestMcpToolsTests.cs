@@ -188,7 +188,7 @@ public sealed class ForRestMcpToolsTests
             "https://target.test/items", "xss", injection: "body", restrict_to_host: false);
 
         StringAssert.Contains(script, "method = POST");
-        StringAssert.Contains(script, "request.body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload })");
+        StringAssert.Contains(script, "attempt.Body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload })");
         Assert.IsFalse(script.Contains("fuzz.AllowHost", System.StringComparison.Ordinal));
     }
 

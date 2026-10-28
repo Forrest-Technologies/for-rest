@@ -83,6 +83,66 @@ public sealed class GeneratedScriptUrlTests
         }
     }
 
+    [TestMethod]
+    [DataRow("query")]
+    [DataRow("url_path")]
+    [DataRow("body")]
+    [DataRow("header")]
+    public async Task Concurrent_fuzz_attempts_preserve_the_original_request(string mode)
+    {
+        const string target = "https://target.test/items";
+        var catalog = new ForRestAiKnowledgeCatalog();
+        var tools = new ForRestMcpTools(catalog, new AiDocumentationSearchService(catalog.GetDocuments()), () => null);
+        var source = tools.build_fuzz_script(target, "sqli", mode, max_concurrency: 8, delay_ms: 1);
+        var compilation = new ForRestScriptCompiler(new()).Compile(source, new());
+        Assert.IsTrue(compilation.Succeeded);
+        var original = new PreparedRequest
+        {
+            Uri = new(target),
+            Method = compilation.Payload!.Request.Method,
+            Body = new() { Mode = RequestBodyMode.RawText, RawContent = "fixture-original-body", ContentType = "text/plain" },
+            Headers = [new() { Key = "X-Keep", Value = "fixture-original-header" }],
+        };
+        List<PreparedRequest> sent = [];
+        var engine = new RoslynScriptEngine(NullLogger<RoslynScriptEngine>.Instance);
+
+        var result = await engine.Run(new()
+        {
+            Script = compilation.Payload.Request.PreRequestScript,
+            PreparedRequest = original,
+            MaxSendIterations = compilation.Payload.Request.MaxSendIterations,
+            SendAsync = async request =>
+            {
+                lock (sent)
+                {
+                    sent.Add(request);
+                }
+                await Task.Delay(2);
+                return new() { StatusCode = 200, Body = "ok" };
+            },
+        });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage, result.ErrorMessage);
+        Assert.AreEqual(original.Uri, result.PreparedRequest.Uri);
+        Assert.AreEqual(original.Body, result.PreparedRequest.Body);
+        CollectionAssert.AreEqual(original.Headers.Select(item => (item.Key, item.Value, item.IsEnabled)).ToArray(),
+            result.PreparedRequest.Headers.Select(item => (item.Key, item.Value, item.IsEnabled)).ToArray());
+        var payloads = new PayloadsApi().Category("sqli");
+        Assert.HasCount(payloads.Count, sent);
+        Assert.AreEqual(payloads.Count, result.SendCount);
+        Assert.HasCount(payloads.Count, result.SentRequests);
+        Assert.HasCount(payloads.Count, result.SentResponses);
+        var actualValues = sent.Select(request => mode switch
+        {
+            "body" => JsonSerializer.Deserialize<Dictionary<string, string>>(request.Body.RawContent)!["value"],
+            "header" => request.Headers.Single(item => item.Key == "X-Fuzz").Value,
+            "url_path" => Uri.UnescapeDataString(request.Uri.AbsolutePath["/items/".Length..]),
+            _ => Uri.UnescapeDataString(request.Uri.Query["?q=".Length..]),
+        });
+        CollectionAssert.AreEqual(payloads.Order(StringComparer.Ordinal).ToArray(),
+            actualValues.Order(StringComparer.Ordinal).ToArray());
+    }
+
     #endregion
 
     #region Private Methods

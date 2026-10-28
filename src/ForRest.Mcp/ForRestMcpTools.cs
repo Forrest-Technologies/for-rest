@@ -313,26 +313,27 @@ public sealed class ForRestMcpTools
 
         builder.AppendLine($"  let opts = new ForRest.Scripting.FuzzOptions {{ MaxConcurrency = {safeConcurrency}, TimeoutMs = {safeTimeout}, DelayMs = {safeDelay} }}");
         builder.AppendLine($"  let result = await fuzz.Run(payloads.Category(\"{categoryLiteral}\"), async (string payload) => {{");
+        builder.AppendLine("    var attempt = request.Clone();");
 
         switch (mode)
         {
             case "url_path":
-                builder.AppendLine($"    request.url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
+                builder.AppendLine($"    attempt.Url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
                 break;
             case "body":
-                builder.AppendLine("    request.content_type = \"application/json\";");
-                builder.AppendLine("    request.body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload });");
+                builder.AppendLine("    attempt.ContentType = \"application/json\";");
+                builder.AppendLine("    attempt.Body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload });");
                 break;
             case "header":
                 string headerName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "X-Fuzz" : parameter.Trim());
-                builder.AppendLine($"    request.headers[\"{headerName}\"] = payload;");
+                builder.AppendLine($"    attempt.Headers[\"{headerName}\"] = payload;");
                 break;
             default: // query
-                builder.AppendLine($"    request.url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
+                builder.AppendLine($"    attempt.Url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
                 break;
         }
 
-        builder.AppendLine("    var sent = await request.send();");
+        builder.AppendLine("    var sent = await attempt.send();");
         builder.AppendLine("    return sent.Snapshot;");
         builder.AppendLine($"  }}, (ForRest.Scripting.FuzzOptions)opts, \"{categoryLiteral}\")");
         builder.AppendLine();
