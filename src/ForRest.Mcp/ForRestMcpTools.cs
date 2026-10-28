@@ -312,7 +312,8 @@ public sealed class ForRestMcpTools
         }
 
         builder.AppendLine($"  let opts = new ForRest.Scripting.FuzzOptions {{ MaxConcurrency = {safeConcurrency}, TimeoutMs = {safeTimeout}, DelayMs = {safeDelay} }}");
-        builder.AppendLine($"  let result = await fuzz.Run(payloads.Category(\"{categoryLiteral}\"), async (string payload) => {{");
+        builder.Append($"  let result = await fuzz.Run(payloads.Category(\"{categoryLiteral}\"), ");
+        builder.AppendLine("async (string payload, System.Threading.CancellationToken cancellationToken) => {");
         builder.AppendLine("    var attempt = request.Clone();");
 
         switch (mode)
@@ -333,7 +334,7 @@ public sealed class ForRestMcpTools
                 break;
         }
 
-        builder.AppendLine("    var sent = await attempt.send();");
+        builder.AppendLine("    var sent = await attempt.send(cancellationToken);");
         builder.AppendLine("    return sent.Snapshot;");
         builder.AppendLine($"  }}, (ForRest.Scripting.FuzzOptions)opts, \"{categoryLiteral}\")");
         builder.AppendLine();

@@ -147,7 +147,8 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 responseApi,
                 variablesApi,
                 request.SendAsync,
-                request.MaxSendIterations);
+                request.MaxSendIterations,
+                request.SendWithCancellation);
             globals = new ScriptGlobals
             {
                 request = requestApi,
@@ -164,7 +165,7 @@ public sealed class RoslynScriptEngine(ILogger<RoslynScriptEngine> logger) : ISc
                 regex = new RegexApi(),
                 random = new RandomApi(),
                 payloads = new PayloadsApi(),
-                fuzz = new FuzzApi(consoleApi, requestApi),
+                fuzz = new FuzzApi(consoleApi, requestApi, cancellationToken),
                 workspace = new WorkspaceApi(
                     request.Workspace,
                     variablesApi,

@@ -415,6 +415,11 @@ The runtime ships a defensive security-testing surface for **authorized** testin
   For concurrent attempts, call `request.Clone()` inside the delegate and modify
   that clone before sending it. Clones keep their own URL, body, and headers while
   sharing the original request's send budget and captured results.
+  A send delegate can accept `(payload, cancellationToken)`; pass that token to
+  the clone's `send(cancellationToken)` call to cancel the HTTP send at the attempt
+  deadline. Legacy delegates with only a payload argument keep their concurrency
+  slot until they finish, then record a timeout if the deadline passed. Cancelling
+  the script also stops queued attempts.
 
 - Response diffing / fingerprinting is pure and deterministic (no LLM):
   `fuzz.Fingerprint(response)` reduces a response to `(status, size bucket, timing

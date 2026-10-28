@@ -78,6 +78,74 @@ public sealed class ScriptRequestCloneTests
             sent.Headers.Where(header => header.Key == "X-Multi").Select(header => header.Value).ToArray());
     }
 
+    [TestMethod]
+    public async Task Clone_passes_per_send_cancellation_to_the_host()
+    {
+        var receivedToken = false;
+        var finished = false;
+        var engine = new RoslynScriptEngine(NullLogger<RoslynScriptEngine>.Instance);
+
+        var result = await engine.Run(new()
+        {
+            Script = """
+                using var cancellation = new System.Threading.CancellationTokenSource();
+                var sending = request.Clone().send(cancellation.Token);
+                cancellation.Cancel();
+                try { await sending; }
+                catch (System.OperationCanceledException) { stash.Cancelled = true; stash.Commit(); }
+                """,
+            MaxSendIterations = 1,
+            SendWithCancellation = async (_, cancellationToken) =>
+            {
+                receivedToken = cancellationToken.CanBeCanceled;
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                    return new() { StatusCode = 200 };
+                }
+                finally
+                {
+                    finished = true;
+                }
+            },
+        });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage, result.ErrorMessage);
+        Assert.IsTrue(receivedToken);
+        Assert.IsTrue(finished);
+        Assert.AreEqual(1, result.SendCount);
+        Assert.IsEmpty(result.SentResponses);
+        Assert.AreEqual("true", result.Stash.Rows.Single().Values["Cancelled"]);
+    }
+
+    [TestMethod]
+    public async Task A_pre_cancelled_send_does_not_consume_the_shared_budget_or_call_the_host()
+    {
+        var calls = 0;
+        var engine = new RoslynScriptEngine(NullLogger<RoslynScriptEngine>.Instance);
+        var result = await engine.Run(new()
+        {
+            Script = """
+                using var cancellation = new System.Threading.CancellationTokenSource();
+                cancellation.Cancel();
+                try { await request.Clone().send(cancellation.Token); }
+                catch (System.OperationCanceledException) { stash.Cancelled = true; stash.Commit(); }
+                """,
+            MaxSendIterations = 1,
+            SendWithCancellation = (_, _) =>
+            {
+                calls++;
+                return Task.FromResult<ResponseSnapshot?>(new() { StatusCode = 200 });
+            },
+        });
+
+        Assert.AreEqual(string.Empty, result.ErrorMessage, result.ErrorMessage);
+        Assert.AreEqual(0, calls);
+        Assert.AreEqual(0, result.SendCount);
+        Assert.IsEmpty(result.SentRequests);
+        Assert.AreEqual("true", result.Stash.Rows.Single().Values["Cancelled"]);
+    }
+
     #endregion
 
     #region Private Methods
