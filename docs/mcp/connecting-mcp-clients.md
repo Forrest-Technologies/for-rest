@@ -111,7 +111,22 @@ connected, the agent can browse the For-Rest script-language docs, enumerate
 workspaces and requests, and edit/execute the active request through the
 exposed tools.
 
+## Imported Postman variables
+
+Collection-variable values are copied into each imported request so its URL,
+headers, and body can resolve without running a separate variables document.
+The "Collection variables" document is a reference copy; edit the declarations
+in each request to change those copies. Disabled entries and names outside the
+script language's ASCII identifier syntax are skipped. Credential names and variables marked with `type: "secret"` use secret declarations for
+source redaction. Values still follow the app head's storage rules.
+
 ## Security notes
+
+Curl imports put passwords, bearer tokens, and recognized credential-header
+values in explicit `secret` declarations. Request fields reference those
+variables so shared source and MCP reads can mask their values while request
+preparation resolves the original credentials. This does not encrypt MAUI's
+workbench JSON or detect every credential in arbitrary request text.
 
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.

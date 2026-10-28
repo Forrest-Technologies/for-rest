@@ -10,7 +10,7 @@ public interface IPostmanImportService
     /// <summary>
     /// Converts a Postman collection into portable .frs documents. Folders are flattened into the
     /// document name ("folder / request"). Collection-level variables become one synthetic document
-    /// named "Collection variables" containing request-scoped variable declarations, because
+    /// named "Collection variables" and are copied into each imported request, because
     /// <c>{{var}}</c> syntax is shared between Postman and .frs so the values carry over directly.
     /// </summary>
     IReadOnlyList<PortableWorkspaceDocument> Convert(string json, out string collectionName);
@@ -64,7 +64,8 @@ public sealed class PostmanImportService : IPostmanImportService
 
             List<PortableWorkspaceDocument> documents = [];
             HashSet<string> usedLocations = new(StringComparer.OrdinalIgnoreCase);
-            PortableWorkspaceDocument? variablesDocument = BuildCollectionVariablesDocument(root, usedLocations);
+            var variableLines = BuildCollectionVariableLines(root);
+            PortableWorkspaceDocument? variablesDocument = BuildCollectionVariablesDocument(variableLines, usedLocations);
             if (variablesDocument is not null)
             {
                 documents.Add(variablesDocument);
@@ -72,7 +73,7 @@ public sealed class PostmanImportService : IPostmanImportService
 
             if (root.TryGetProperty("item", out JsonElement items) && items.ValueKind == JsonValueKind.Array)
             {
-                ConvertItems(items, [], documents, usedLocations);
+                ConvertItems(items, [], documents, usedLocations, variableLines, ResolveAuth(root, default));
             }
 
             return documents;
@@ -99,7 +100,9 @@ public sealed class PostmanImportService : IPostmanImportService
         JsonElement items,
         List<string> folderPath,
         List<PortableWorkspaceDocument> documents,
-        HashSet<string> usedLocations)
+        HashSet<string> usedLocations,
+        IReadOnlyList<string> variableLines,
+        JsonElement inheritedAuth)
     {
         foreach (JsonElement item in items.EnumerateArray())
         {
@@ -112,7 +115,7 @@ public sealed class PostmanImportService : IPostmanImportService
             if (item.TryGetProperty("item", out JsonElement children) && children.ValueKind == JsonValueKind.Array)
             {
                 folderPath.Add(itemName);
-                ConvertItems(children, folderPath, documents, usedLocations);
+                ConvertItems(children, folderPath, documents, usedLocations, variableLines, ResolveAuth(item, inheritedAuth));
                 folderPath.RemoveAt(folderPath.Count - 1);
                 continue;
             }
@@ -125,12 +128,20 @@ public sealed class PostmanImportService : IPostmanImportService
             string documentName = folderPath.Count == 0
                 ? itemName
                 : $"{string.Join(" / ", folderPath)} / {itemName}";
-            string source = ConvertRequest(request, documentName);
+            string source = ConvertRequest(request, documentName, variableLines, ResolveAuth(request, inheritedAuth));
             documents.Add(new(documentName, BuildUniqueLocation(documentName, usedLocations), source));
         }
     }
 
-    private static string ConvertRequest(JsonElement request, string documentName)
+    private static JsonElement ResolveAuth(JsonElement container, JsonElement inheritedAuth)
+    {
+        return !container.TryGetProperty("auth", out var auth) || auth.ValueKind == JsonValueKind.Null
+            ? inheritedAuth
+            : auth;
+    }
+
+    private static string ConvertRequest(
+        JsonElement request, string documentName, IReadOnlyList<string> variableLines, JsonElement auth)
     {
         string method = (ReadString(request, "method") ?? "GET").ToUpperInvariant();
         string url = ResolveUrl(request);
@@ -172,6 +183,12 @@ public sealed class PostmanImportService : IPostmanImportService
             $"url \"{FrsScriptWriter.Escape(url)}\"",
         ];
 
+        if (variableLines.Count > 0)
+        {
+            lines.Add(string.Empty);
+            lines.AddRange(variableLines);
+        }
+
         string? effectiveContentType = body.BodyContentType ?? contentType;
         if (effectiveContentType is not null && !body.JsonBody)
         {
@@ -184,7 +201,7 @@ public sealed class PostmanImportService : IPostmanImportService
             lines.AddRange(headers.Select(static header => FrsScriptWriter.HeaderLine(header.Name, header.Value)));
         }
 
-        List<string> authLines = BuildAuth(request);
+        List<string> authLines = BuildAuth(auth, variableLines, request.GetRawText());
         if (authLines.Count > 0)
         {
             lines.Add(string.Empty);
@@ -365,35 +382,82 @@ public sealed class PostmanImportService : IPostmanImportService
         }
     }
 
-    private static List<string> BuildAuth(JsonElement request)
+    private static List<string> BuildAuth(JsonElement auth, IReadOnlyList<string> variableLines, string requestText)
     {
-        if (!request.TryGetProperty("auth", out JsonElement auth) || auth.ValueKind != JsonValueKind.Object)
+        if (auth.ValueKind != JsonValueKind.Object)
         {
             return [];
         }
 
+        var secrets = new AuthImportSecrets(variableLines, requestText);
+        var lines = BuildAuthLines(auth, secrets);
+        return [.. secrets.Lines, .. lines];
+    }
+
+    private static List<string> BuildAuthLines(JsonElement auth, AuthImportSecrets secrets)
+    {
         string type = ReadString(auth, "type") ?? string.Empty;
         switch (type.ToLowerInvariant())
         {
             case "bearer":
-                return [.. FrsScriptWriter.BearerAuthBlock(ReadAuthParameter(auth, "bearer", "token") ?? string.Empty)];
+                return [.. FrsScriptWriter.BearerAuthBlock(secrets.Protect("postman_bearer_token", ReadAuthParameter(auth, "bearer", "token")))];
             case "basic":
                 return
                 [
                     .. FrsScriptWriter.BasicAuthBlock(
-                        ReadAuthParameter(auth, "basic", "username") ?? string.Empty,
-                        ReadAuthParameter(auth, "basic", "password") ?? string.Empty),
+                        secrets.Protect("postman_basic_username", ReadAuthParameter(auth, "basic", "username")),
+                        secrets.Protect("postman_basic_password", ReadAuthParameter(auth, "basic", "password"))),
                 ];
             case "apikey":
             {
                 string name = ReadAuthParameter(auth, "apikey", "key") ?? string.Empty;
-                string value = ReadAuthParameter(auth, "apikey", "value") ?? string.Empty;
+                var value = secrets.Protect("postman_apikey_value", ReadAuthParameter(auth, "apikey", "value"));
                 bool inQuery = string.Equals(ReadAuthParameter(auth, "apikey", "in"), "query", StringComparison.OrdinalIgnoreCase);
                 return [.. FrsScriptWriter.ApiKeyAuthBlock(name, value, inQuery)];
             }
             default:
                 return [];
         }
+    }
+
+    private sealed class AuthImportSecrets(IReadOnlyList<string> variableLines, string requestText)
+    {
+        #region Private Fields
+
+        private readonly HashSet<string> usedNames = new(
+            variableLines.Select(static line => line.Split(' ', 3)[1]), StringComparer.OrdinalIgnoreCase);
+
+        #endregion
+
+        #region Properties
+
+        public List<string> Lines { get; } = [];
+
+        #endregion
+
+        #region Public Methods
+
+        public string Protect(string baseName, string? value)
+        {
+            value ??= string.Empty;
+            if (value.Contains("{{", StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            var name = baseName;
+            var suffix = 2;
+            while (!usedNames.Add(name)
+                || requestText.Contains("{{" + name + "}}", StringComparison.OrdinalIgnoreCase))
+            {
+                name = $"{baseName}_{suffix++}";
+            }
+
+            Lines.Add($"secret {name} = {JsonSerializer.Serialize(value)}");
+            return "{{" + name + "}}";
+        }
+
+        #endregion
     }
 
     /// <summary>Reads an auth parameter from either the v2.1 array-of-{key,value} shape or the v2.0 object shape.</summary>
@@ -426,50 +490,71 @@ public sealed class PostmanImportService : IPostmanImportService
         return null;
     }
 
-    private static PortableWorkspaceDocument? BuildCollectionVariablesDocument(JsonElement root, HashSet<string> usedLocations)
+    private static List<string> BuildCollectionVariableLines(JsonElement root)
     {
         if (!root.TryGetProperty("variable", out JsonElement variables) || variables.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return [];
         }
 
-        List<string> lines = ["name \"Collection variables\"", string.Empty];
-        int count = 0;
-        foreach (JsonElement variable in variables.EnumerateArray())
+        List<string> lines = [];
+        foreach (var variable in variables.EnumerateArray())
         {
             if (variable.ValueKind != JsonValueKind.Object || IsDisabled(variable))
             {
                 continue;
             }
 
-            string key = ReadString(variable, "key") ?? string.Empty;
+            var key = ReadString(variable, "key") ?? string.Empty;
             if (!IsValidVariableName(key))
             {
                 continue;
             }
 
-            string value = ReadString(variable, "value") ?? string.Empty;
-            lines.Add($"request {key} = \"{FrsScriptWriter.Escape(value)}\"");
-            count++;
+            var value = variable.TryGetProperty("value", out var element)
+                ? element.ValueKind switch
+                {
+                    JsonValueKind.String => element.GetString() ?? string.Empty,
+                    JsonValueKind.Null or JsonValueKind.Undefined => string.Empty,
+                    _ => element.GetRawText(),
+                }
+                : string.Empty;
+            var isSecret = string.Equals(ReadString(variable, "type"), "secret", StringComparison.OrdinalIgnoreCase)
+                || HttpCredentialHeaders.IsSensitive(key);
+            var scope = isSecret ? "secret" : "request";
+            lines.Add($"{scope} {key} = {JsonSerializer.Serialize(value)}");
         }
 
-        if (count == 0)
+        return lines;
+    }
+
+    private static PortableWorkspaceDocument? BuildCollectionVariablesDocument(
+        IReadOnlyList<string> variableLines, HashSet<string> usedLocations)
+    {
+        if (variableLines.Count == 0)
         {
             return null;
         }
 
         const string documentName = "Collection variables";
+        List<string> lines =
+        [
+            "name \"Collection variables\"",
+            "# Reference copy. Edit variable declarations in each imported request.",
+            string.Empty,
+            .. variableLines,
+        ];
         return new(documentName, BuildUniqueLocation(documentName, usedLocations), string.Join(Environment.NewLine, lines));
     }
 
     private static bool IsValidVariableName(string name)
     {
-        if (string.IsNullOrEmpty(name) || (!char.IsLetter(name[0]) && name[0] != '_'))
+        if (string.IsNullOrEmpty(name) || (!char.IsAsciiLetter(name[0]) && name[0] != '_'))
         {
             return false;
         }
 
-        return name.All(static character => char.IsLetterOrDigit(character) || character == '_');
+        return name.All(static character => char.IsAsciiLetterOrDigit(character) || character == '_');
     }
 
     private static string BuildUniqueLocation(string documentName, HashSet<string> usedLocations)
