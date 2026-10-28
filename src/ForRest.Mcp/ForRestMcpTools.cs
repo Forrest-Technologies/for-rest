@@ -184,20 +184,18 @@ public sealed class ForRestMcpTools
         switch (mode)
         {
             case "url_path":
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}/{{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    request.url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)}");
                 break;
             case "body":
                 builder.AppendLine("    request.content_type = \"application/json\"");
-                builder.AppendLine("    request.body = json.Stringify(new { value = payload })");
+                builder.AppendLine("    request.body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload })");
                 break;
             case "header":
                 string headerName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "X-Fuzz" : parameter.Trim());
                 builder.AppendLine($"    request.headers[\"{headerName}\"] = payload");
                 break;
             default: // query
-                string queryName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
-                string separator = target_url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}{separator}{queryName}={{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    request.url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)}");
                 break;
         }
 
@@ -310,35 +308,34 @@ public sealed class ForRestMcpTools
         builder.AppendLine("flow {");
         if (restrict_to_host)
         {
-            builder.AppendLine($"  fuzz.AllowHost(\"{EscapeForRestString(host)}\")   # authorized scope only");
+            builder.AppendLine($"  fuzz.AllowHost(\"{EscapeForRestString(host)}\")");
         }
 
         builder.AppendLine($"  let opts = new ForRest.Scripting.FuzzOptions {{ MaxConcurrency = {safeConcurrency}, TimeoutMs = {safeTimeout}, DelayMs = {safeDelay} }}");
         builder.AppendLine($"  let result = await fuzz.Run(payloads.Category(\"{categoryLiteral}\"), async (string payload) => {{");
+        builder.AppendLine("    var attempt = request.Clone();");
 
         switch (mode)
         {
             case "url_path":
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}/{{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    attempt.Url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
                 break;
             case "body":
-                builder.AppendLine("    request.content_type = \"application/json\"");
-                builder.AppendLine("    request.body = json.Stringify(new { value = payload })");
+                builder.AppendLine("    attempt.ContentType = \"application/json\";");
+                builder.AppendLine("    attempt.Body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload });");
                 break;
             case "header":
                 string headerName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "X-Fuzz" : parameter.Trim());
-                builder.AppendLine($"    request.headers[\"{headerName}\"] = payload");
+                builder.AppendLine($"    attempt.Headers[\"{headerName}\"] = payload;");
                 break;
             default: // query
-                string queryName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
-                string separator = target_url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}{separator}{queryName}={{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    attempt.Url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
                 break;
         }
 
-        builder.AppendLine("    let sent = await request.send()");
-        builder.AppendLine("    return sent.Snapshot");
-        builder.AppendLine($"  }}, opts, \"{categoryLiteral}\")");
+        builder.AppendLine("    var sent = await attempt.send();");
+        builder.AppendLine("    return sent.Snapshot;");
+        builder.AppendLine($"  }}, (ForRest.Scripting.FuzzOptions)opts, \"{categoryLiteral}\")");
         builder.AppendLine();
         builder.AppendLine("  console.Log(result.Summarize())");
         builder.AppendLine("  foreach f in result.Findings {");
@@ -1043,6 +1040,34 @@ public sealed class ForRestMcpTools
             truncated = matches.Count >= maxMatches,
             matches,
         });
+    }
+
+    private static string BuildPayloadUrlExpression(string targetUrl, string mode, string parameter)
+    {
+        string prefix;
+        string suffix;
+        if (mode == "url_path")
+        {
+            var suffixIndex = targetUrl.IndexOfAny(['?', '#']);
+            var path = suffixIndex < 0 ? targetUrl : targetUrl[..suffixIndex];
+            suffix = suffixIndex < 0 ? string.Empty : targetUrl[suffixIndex..];
+            prefix = path.EndsWith('/') ? path : path + "/";
+        }
+        else
+        {
+            var fragmentIndex = targetUrl.IndexOf('#');
+            var beforeFragment = fragmentIndex < 0 ? targetUrl : targetUrl[..fragmentIndex];
+            suffix = fragmentIndex < 0 ? string.Empty : targetUrl[fragmentIndex..];
+            var separator = "?";
+            if (beforeFragment.Contains('?'))
+            {
+                separator = beforeFragment.EndsWith('?') || beforeFragment.EndsWith('&') ? string.Empty : "&";
+            }
+            var queryName = Uri.EscapeDataString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
+            prefix = beforeFragment + separator + queryName + "=";
+        }
+
+        return $"\"{EscapeForRestString(prefix)}\" + encoding.UrlEncode(payload) + \"{EscapeForRestString(suffix)}\"";
     }
 
     private static string EscapeForRestString(string value)
