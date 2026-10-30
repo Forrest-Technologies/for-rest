@@ -146,6 +146,15 @@ in each request to change those copies. Disabled entries and names outside the
 script language's ASCII identifier syntax are skipped. Credential names and variables marked with `type: "secret"` use secret declarations for
 source redaction. Values still follow the app head's storage rules.
 
+## Workbench recovery
+
+If MAUI cannot parse its saved workbench, it writes the original bytes beside
+`request-workbench-state.json` as `request-workbench-state.json.corrupt-<id>.bak`
+before loading defaults. Keep that backup for manual recovery; it can contain
+script credentials. If the backup cannot be written, loading fails instead of
+returning defaults. File-access errors also propagate without resetting the
+workbench.
+
 ## Security notes
 
 Curl imports put passwords, bearer tokens, and recognized credential-header

@@ -7,3 +7,4 @@ global using Microsoft.Extensions.Logging.Abstractions;
 global using Microsoft.Maui.ApplicationModel;
 global using WebKit;
 #endif
+global using System.Text;
