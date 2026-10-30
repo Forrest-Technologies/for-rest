@@ -86,6 +86,56 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task Script_reads_do_not_expose_credentials_in_cached_pre_request_code(bool staleSource)
+    {
+        const string secret = "fake-secret-9000";
+        const string original = """
+            method GET
+            url "https://example.test/"
+            flow {
+                secret api_key = "fake-secret-9000"
+            }
+            """;
+        var compilation = new ForRestScriptCompiler(new()).Compile(original, new());
+        Assert.IsTrue(compilation.Succeeded);
+        Assert.IsNotNull(compilation.Payload);
+        var compiled = compilation.Payload.Request.PreRequestScript;
+        StringAssert.Contains(compiled, secret);
+        var current = staleSource ? "method GET\nurl \"https://example.test/\"" : original;
+        var tools = CreateTools(new FakeHost
+        {
+            Script = new(WorkspaceId: "ws", WorkspaceName: "Tests", Location: "/requests/probe",
+                Name: "Probe", Method: "GET", Summary: "", Source: current, PreRequestScript: compiled),
+        });
+
+        var json = await tools.get_script("ws", "/requests/probe");
+
+        Assert.DoesNotContain(secret, json);
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("***", parsed.RootElement.GetProperty("preRequestScript").GetString());
+        Assert.IsTrue(parsed.RootElement.GetProperty("preRequestScriptRedacted").GetBoolean());
+        StringAssert.Contains(parsed.RootElement.GetProperty("source").GetString()!, "method GET");
+    }
+
+    [TestMethod]
+    public async Task Script_reads_distinguish_empty_cached_code_from_redacted_code()
+    {
+        var tools = CreateTools(new FakeHost
+        {
+            Script = new(WorkspaceId: "ws", WorkspaceName: "Tests", Location: "/requests/probe",
+                Name: "Probe", Method: "GET", Summary: "", Source: "method GET", PreRequestScript: ""),
+        });
+
+        var json = await tools.get_script("ws", "/requests/probe");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(string.Empty, parsed.RootElement.GetProperty("preRequestScript").GetString());
+        Assert.IsFalse(parsed.RootElement.GetProperty("preRequestScriptRedacted").GetBoolean());
+    }
+
+    [TestMethod]
     public void Build_attack_script_emits_runnable_query_fuzz_harness()
     {
         ForRestMcpTools tools = CreateTools(host: null);
@@ -917,6 +967,8 @@ public sealed class ForRestMcpToolsTests
 
         public ForRestMcpRunDetail? Run { get; set; }
 
+        public ForRestMcpScriptDetail? Script { get; set; }
+
         public ForRestMcpServerSettingsView Settings { get; set; } =
             new(false, "127.0.0.1", 7341, false, 4, "http://127.0.0.1:7341/");
 
@@ -957,7 +1009,7 @@ public sealed class ForRestMcpToolsTests
             => Task.FromResult(ForRestMcpMutationResult.Ok("deleted"));
 
         public Task<ForRestMcpScriptDetail?> GetScript(string workspaceId, string location, CancellationToken cancellationToken)
-            => Task.FromResult<ForRestMcpScriptDetail?>(null);
+            => Task.FromResult(Script);
 
         public Task<ForRestMcpMutationResult> CreateScript(string workspaceId, string name, string source, CancellationToken cancellationToken)
         {
