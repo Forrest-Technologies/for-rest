@@ -1158,6 +1158,34 @@ public sealed class ForRestMcpTools
         return context;
     }
 
+    private static string BuildPayloadUrlExpression(string targetUrl, string mode, string parameter)
+    {
+        string prefix;
+        string suffix;
+        if (mode == "url_path")
+        {
+            var suffixIndex = targetUrl.IndexOfAny(['?', '#']);
+            var path = suffixIndex < 0 ? targetUrl : targetUrl[..suffixIndex];
+            suffix = suffixIndex < 0 ? string.Empty : targetUrl[suffixIndex..];
+            prefix = path.EndsWith('/') ? path : path + "/";
+        }
+        else
+        {
+            var fragmentIndex = targetUrl.IndexOf('#');
+            var beforeFragment = fragmentIndex < 0 ? targetUrl : targetUrl[..fragmentIndex];
+            suffix = fragmentIndex < 0 ? string.Empty : targetUrl[fragmentIndex..];
+            var separator = "?";
+            if (beforeFragment.Contains('?'))
+            {
+                separator = beforeFragment.EndsWith('?') || beforeFragment.EndsWith('&') ? string.Empty : "&";
+            }
+            var queryName = Uri.EscapeDataString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
+            prefix = beforeFragment + separator + queryName + "=";
+        }
+
+        return $"\"{EscapeForRestString(prefix)}\" + encoding.UrlEncode(payload) + \"{EscapeForRestString(suffix)}\"";
+    }
+
     private static string EscapeForRestString(string value)
     {
         return value
