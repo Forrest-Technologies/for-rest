@@ -137,6 +137,15 @@ Use the pane's takeover control to suspend synthetic input and resume it when
 ready. Mac Catalyst uses JavaScript events; websites that require trusted OS
 input can reject those events.
 
+## Imported Postman variables
+
+Collection-variable values are copied into each imported request so its URL,
+headers, and body can resolve without running a separate variables document.
+The "Collection variables" document is a reference copy; edit the declarations
+in each request to change those copies. Disabled entries and names outside the
+script language's ASCII identifier syntax are skipped. Credential names and variables marked with `type: "secret"` use secret declarations for
+source redaction. Values still follow the app head's storage rules.
+
 ## Security notes
 
 Curl imports put passwords, bearer tokens, and recognized credential-header
