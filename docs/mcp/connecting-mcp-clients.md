@@ -126,6 +126,17 @@ name. Source edits are rejected when the document has repeated secret names;
 rename those declarations locally to distinct names before editing through an
 agent. This prevents one scope's credential from overwriting another's.
 
+## Browser automation
+
+Open the visible browser pane with `show_in_app` using `target: "browser"`, then
+call `browser_snapshot` to inspect the page and choose targets. Windows and Mac
+Catalyst connect this pane to the desktop MCP tools. A snapshot reports
+`Available: false` while the pane is unavailable or human takeover is active.
+
+Use the pane's takeover control to suspend synthetic input and resume it when
+ready. Mac Catalyst uses JavaScript events; websites that require trusted OS
+input can reject those events.
+
 ## Security notes
 
 Curl imports put passwords, bearer tokens, and recognized credential-header
