@@ -3040,6 +3040,12 @@ internal static class ForRestFlowScriptCompiler
         return string.Equals(combinedHeader[..^1].TrimEnd(), "else", StringComparison.Ordinal);
     }
 
+    internal static int GetStatementLineCount(IReadOnlyList<string> lines, int startIndex)
+    {
+        TryCollectStatementText(lines, startIndex, out _, out var consumedLineCount);
+        return consumedLineCount;
+    }
+
     private static void TryCollectStatementText(
         IReadOnlyList<string> lines,
         int startIndex,

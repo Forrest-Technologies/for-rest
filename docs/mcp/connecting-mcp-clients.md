@@ -118,6 +118,14 @@ file uploads return an import error so they cannot silently become a different
 request. Paste input contents directly; use `--data-raw` when a body starts with
 a literal `@`.
 
+## Repeated secret names
+
+MCP and in-app AI reads mask each secret declaration. An unchanged redacted
+copy restores the original document, including separate values that share a
+name. Source edits are rejected when the document has repeated secret names;
+rename those declarations locally to distinct names before editing through an
+agent. This prevents one scope's credential from overwriting another's.
+
 ## Security notes
 
 Curl imports put passwords, bearer tokens, and recognized credential-header

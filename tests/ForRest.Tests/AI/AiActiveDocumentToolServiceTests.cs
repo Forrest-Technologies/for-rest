@@ -332,15 +332,9 @@ public sealed class AiActiveDocumentToolServiceTests
         FakeActiveDocumentHost host = new(
             new AiActiveDocumentSnapshot("request-1", "Example", "forrest", original, []));
 
-        // The AI sees the redacted form (...***...) and crafts a patch
-        // that flips method GET → method POST. The patch start index
-        // matches the redacted text length, not the real source — the
-        // tool service must apply the patch against the redacted view
-        // and then splice the original secret back in. Compute the
-        // redacted view inline (rather than reaching into the internal
-        // RedactSecrets helper) so the test stays decoupled from the
-        // implementation surface.
-        const string redactedView = "secret api_key = \"***\"\nmethod GET\n";
+        // Calculate offsets from the public read response, including its line endings.
+        using var read = JsonDocument.Parse(service.ReadActiveDocument(BuildSettings(), host));
+        var redactedView = read.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
         int methodIndex = redactedView.IndexOf("method GET", StringComparison.Ordinal);
         Assert.IsTrue(methodIndex >= 0);
 
@@ -417,6 +411,60 @@ public sealed class AiActiveDocumentToolServiceTests
         var returnedSource = parsed.RootElement.GetProperty("patchedText").GetString()!;
         StringAssert.Contains(returnedSource, "secret api_key = \"***\"");
         StringAssert.Contains(returnedSource, "secret new_token = \"***\"");
+    }
+
+    [TestMethod]
+    [DataRow("\n", true)]
+    [DataRow("\r\n", true)]
+    [DataRow("\n", false)]
+    [DataRow("\r\n", false)]
+    public void Multiline_secrets_remain_private_and_survive_edits(string newline, bool patch)
+    {
+        var original = "method GET\nurl \"https://fixture.test/\"\nflow {\n  secret vault = string.Concat(\n    \"fake-private-credential-6723\",\n    \"suffix\")\n  runtime after = \"public-before\"\n}".Replace("\n", newline, StringComparison.Ordinal);
+        var host = new FakeActiveDocumentHost(new("multiline", "Example", "forrest", original, []));
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        var response = service.ReadActiveDocument(BuildSettings(), host);
+        Assert.DoesNotContain("fake-private-credential-6723", response);
+        using var read = JsonDocument.Parse(response);
+        var redacted = read.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
+
+        if (patch)
+        {
+            var edits = JsonSerializer.Serialize(new[] { new { startIndex = redacted.IndexOf("public-before", StringComparison.Ordinal), length = 13, replacement = "public-after" } });
+            response = service.PatchActiveDocument(BuildSettings(), host, edits);
+        }
+        else
+        {
+            response = service.ReplaceActiveDocument(BuildSettings(), host, redacted.Replace("public-before", "public-after", StringComparison.Ordinal));
+        }
+
+        Assert.DoesNotContain("fake-private-credential-6723", response);
+        Assert.AreEqual(original.Replace("public-before", "public-after", StringComparison.Ordinal), host.LastUpdatedText);
+    }
+
+    [TestMethod]
+    [DataRow(true, true)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(false, false)]
+    public void Repeated_secret_names_cannot_silently_copy_one_value_to_another_scope(bool patch, bool change)
+    {
+        const string original = "method GET\nurl \"https://fixture.test/\"\nscenario \"alpha\" {\n  secret token = \"fake-alpha-value-1963\"\n}\nscenario \"beta\" {\n  secret token = \"fake-beta-value-2734\"\n}";
+        var host = new FakeActiveDocumentHost(new("fixture", "Example", "forrest", original, []));
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        using var read = JsonDocument.Parse(service.ReadActiveDocument(BuildSettings(), host));
+        var redacted = read.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
+
+        var response = patch
+            ? service.PatchActiveDocument(BuildSettings(), host, change ? "[{\"startIndex\":7,\"length\":3,\"replacement\":\"POST\"}]" : "[]")
+            : service.ReplaceActiveDocument(BuildSettings(), host, change ? redacted.Replace("method GET", "method POST", StringComparison.Ordinal) : redacted);
+
+        using var result = JsonDocument.Parse(response);
+        Assert.AreEqual(!change, result.RootElement.GetProperty("succeeded").GetBoolean());
+        Assert.AreEqual(change ? null : original, host.LastUpdatedText);
+        Assert.AreEqual(original, host.CurrentDocument!.SourceText);
+        Assert.DoesNotContain("fake-alpha-value-1963", response);
+        Assert.DoesNotContain("fake-beta-value-2734", response);
     }
 
     private static AiSettings BuildSettings()
