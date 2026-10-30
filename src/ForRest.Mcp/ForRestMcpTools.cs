@@ -73,12 +73,14 @@ public sealed class ForRestMcpTools
 
     #region Passive tools
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the canonical ForRest scripting language reference as markdown. Use this to learn the DSL (request surface, flow, auth modes, retry, delay, payloads, expect) before authoring or editing scripts.")]
     public string get_instructions()
     {
         return ForRestLanguageCatalog.BuildMarkdownReference();
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Searches the local ForRest documentation corpus and returns the top matching entries with their content. Use this before guessing about language or app behavior.")]
     public string search_docs(
         [Description("Natural-language query describing what you want to know about For-Rest.")] string query,
@@ -108,6 +110,7 @@ public sealed class ForRestMcpTools
         }));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists every AI provider preset For-Rest ships out of the box, with default endpoints, transports, and aliases.")]
     public string list_ai_providers()
     {
@@ -118,6 +121,7 @@ public sealed class ForRestMcpTools
         return providerDoc?.Content ?? "AI provider reference is not registered.";
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists every built-in security test payload category exposed to ForRest scripts via the `payloads` namespace, along with the number of payloads in each.")]
     public string list_payload_categories()
     {
@@ -130,6 +134,7 @@ public sealed class ForRestMcpTools
         }));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the raw payload list for a given category (sqli, xss, path_traversal, command_injection, ssti, open_redirect, xxe, nosqli, crlf, ssrf, or any custom category).")]
     public string get_payloads(
         [Description("Category name or alias.")] string category)
@@ -144,6 +149,7 @@ public sealed class ForRestMcpTools
         return Serialize(list);
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Generates a ready-to-run ForRest attack/fuzz script that iterates a built-in payload category against a target, sends one request per payload, and stashes the status, size, and payload for each attempt. Run the returned script with execute_script. Use this for authorized security testing only.")]
     public string build_attack_script(
         [Description("Absolute base target URL, e.g. https://api.example.test/items. For 'query' injection the payload is appended as a query value; for 'url_path' it is appended to the path; for 'body'/'header' the base URL is used as-is.")] string target_url,
@@ -215,6 +221,7 @@ public sealed class ForRestMcpTools
         return builder.ToString();
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Diffs and fingerprints two HTTP responses (a baseline and a candidate) the same way the ForRest `fuzz` engine does, and reports any anomalies: status changes, large size deltas, and time-based anomalies (the classic blind-injection signal). Pure analysis — no host or network required. Use it to triage whether a fuzz attempt's response is meaningfully different from a clean baseline.")]
     public string analyze_responses(
         [Description("Baseline (known-good) response status code.")] int baseline_status,
@@ -266,6 +273,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Generates a ready-to-run ForRest script that uses the new `fuzz` engine: it iterates a built-in payload category against a target with bounded concurrency, captures a baseline, diffs every response, and stashes the flagged anomalies. Optionally constrains the run to an in-scope host allowlist. Run the returned script with execute_script. Authorized security testing only.")]
     public string build_fuzz_script(
         [Description("Absolute base target URL, e.g. https://api.example.test/search.")] string target_url,
@@ -359,6 +367,7 @@ public sealed class ForRestMcpTools
 
     #region Active document
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns a JSON snapshot of the active ForRest request document (the selected document in the selected workspace): id, title, language, workspace, and full source text. Secret values are redacted.")]
     public Task<string> get_active_request(CancellationToken cancellationToken = default)
     {
@@ -381,6 +390,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Replaces the entire source of the active ForRest request document with the supplied text. The host restores any redacted secret declarations before saving. The new source should be valid ForRest script.")]
     public Task<string> replace_active_request(
         [Description("Full ForRest script to install as the new active document body.")] string new_source,
@@ -400,6 +410,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Selects which document is active by workspace id and script location, so subsequent active-document tools target it.")]
     public Task<string> set_active_request(
         [Description("Workspace id (GUID) from list_workspaces.")] string workspace_id,
@@ -414,6 +425,7 @@ public sealed class ForRestMcpTools
 
     #region Workspace CRUD
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists the workspaces in the live workbench, each with its scripts (name, HTTP method, URL template, location). Start here to orient before editing or executing.")]
     public Task<string> list_workspaces(CancellationToken cancellationToken = default)
     {
@@ -421,6 +433,7 @@ public sealed class ForRestMcpTools
             Serialize((await host.ListWorkspaces(cancellationToken)).Select(MapWorkspace)));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns a single workspace by id with its scripts.")]
     public Task<string> get_workspace(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -435,6 +448,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Creates a new empty workspace and returns its id.")]
     public Task<string> create_workspace(
         [Description("Display name for the new workspace.")] string name,
@@ -444,6 +458,7 @@ public sealed class ForRestMcpTools
             Describe(await host.CreateWorkspace(name, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Renames a workspace.")]
     public Task<string> rename_workspace(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -454,6 +469,7 @@ public sealed class ForRestMcpTools
             Describe(await host.RenameWorkspace(workspace_id, new_name, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Deletes a workspace and all of its scripts. This is destructive and cannot be undone.")]
     public Task<string> delete_workspace(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -467,6 +483,7 @@ public sealed class ForRestMcpTools
 
     #region Script CRUD
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns a script's name, method, summary, and ForRest source with secret declarations redacted. Cached pre-request code is withheld because it can contain credentials.")]
     public Task<string> get_script(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -496,6 +513,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Creates a new request script in a workspace from ForRest source text and returns its location.")]
     public Task<string> create_script(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -512,6 +530,7 @@ public sealed class ForRestMcpTools
             Describe(await host.CreateScript(workspace_id, name, source, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Replaces the source of an existing script. The host restores any redacted secret declarations before saving.")]
     public Task<string> update_script(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -528,6 +547,7 @@ public sealed class ForRestMcpTools
             Describe(await host.UpdateScript(workspace_id, location, new_source, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Renames an existing script.")]
     public Task<string> rename_script(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -539,6 +559,7 @@ public sealed class ForRestMcpTools
             Describe(await host.RenameScript(workspace_id, location, new_name, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Deletes a script from a workspace. This is destructive and cannot be undone.")]
     public Task<string> delete_script(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -553,6 +574,7 @@ public sealed class ForRestMcpTools
 
     #region Compile / execute
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Compiles a ForRest script without sending any request and returns diagnostics plus the resolved method, URL, and request name. Use this to validate edits before executing.")]
     public string compile_script(
         [Description("Workspace id (GUID) the script belongs to. Affects variable scoping.")] string workspace_id,
@@ -572,6 +594,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Compiles and executes a ForRest script against the live HTTP pipeline (real network request) and returns the response, tests, debug logs, and stash. The run is saved to the workspace's history. Use for authorized testing only.")]
     public Task<string> execute_script(
         [Description("Workspace id (GUID) to execute under.")] string workspace_id,
@@ -595,6 +618,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Executes a stored script (by workspace id and location) against the live HTTP pipeline and returns the response, tests, debug logs, and stash. The run is saved to history.")]
     public Task<string> execute_stored_script(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -612,6 +636,7 @@ public sealed class ForRestMcpTools
 
     #region Results / monitoring
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists recent execution runs for a workspace (most recent first) with status, target, timing, and any error. Use this to monitor what has been executed.")]
     public Task<string> list_runs(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -623,6 +648,7 @@ public sealed class ForRestMcpTools
             Serialize((await host.ListRuns(workspace_id, limit, cancellationToken)).Select(MapRunSummary)));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the full detail of a single execution run: response (status, headers, cookies, body), all responses for multi-send flows, tests, debug logs, stash, and the raw request. Secret values and credential-bearing headers are redacted.")]
     public Task<string> get_run(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -651,6 +677,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns just the response of a run (status, headers, cookies, content type, size, timing, body). Optionally truncates the body to keep results compact.")]
     public Task<string> get_run_response(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -679,6 +706,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Searches (greps) a run's response body for a pattern and returns matching lines with line numbers. Supports substring or regex matching, case sensitivity, and optional surrounding context lines.")]
     public Task<string> grep_run_response(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -718,6 +746,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the stash table captured by a run (columns and rows). The stash is how ForRest scripts record structured per-iteration results for batch probes and fuzz runs.")]
     public Task<string> get_run_stash(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -737,6 +766,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns a run's debug logs (console entries) and test assertion results — the equivalent of reading the debug pane. Useful for diagnosing failures.")]
     public Task<string> get_run_logs(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -766,6 +796,7 @@ public sealed class ForRestMcpTools
 
     #region Browser automation
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Navigates the embedded For-Rest browser pane to a URL. The desktop Browser tab must be open. This is the agent's 'hands': pair it with browser_snapshot/browser_query for 'eyes', then record the actions into a script for deterministic replay.")]
     public Task<string> browser_navigate(
         [Description("Absolute URL to load, e.g. https://app.example.test/login.")] string url,
@@ -774,18 +805,21 @@ public sealed class ForRestMcpTools
         return WithHostAsync(cancellationToken, async host => await host.BrowserNavigate(url, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Returns the page's interactive elements (links, buttons, inputs, role/aria nodes) with their stable selectors (css, xpath, role+name, id) and on-screen positions. Use this as the agent's 'eyes' to decide what to target next.")]
     public Task<string> browser_snapshot(CancellationToken cancellationToken = default)
     {
         return WithHostAsync(cancellationToken, async host => Serialize(await host.BrowserSnapshot(cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Captures a screenshot of the current page and returns it as a base64-encoded PNG.")]
     public Task<string> browser_screenshot(CancellationToken cancellationToken = default)
     {
         return WithHostAsync(cancellationToken, async host => await host.BrowserScreenshot(cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Locates a single element and returns its stable selectors (css, xpath, role+name, id), text, and bounding box. Use the returned selectors when authoring or recording a replayable script. Target forms: '#id', 'css=.row', 'xpath=//a', 'text=Save', 'role=button:Save', 'testid=submit'.")]
     public Task<string> browser_query(
         [Description("Element target expression, e.g. '#submit' or 'role=button:Save'.")] string target,
@@ -795,6 +829,7 @@ public sealed class ForRestMcpTools
             Serialize(await host.BrowserQuery(target, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Clicks the element matching the target, moving the visible cursor to it first. Target forms: '#id', 'css=.row', 'xpath=//a', 'text=Save', 'role=button:Save', 'testid=submit'.")]
     public Task<string> browser_click(
         [Description("Element target expression.")] string target,
@@ -803,6 +838,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(cancellationToken, async host => await host.BrowserClick(target, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Types text into the element matching the target (clicks to focus first).")]
     public Task<string> browser_type(
         [Description("Element target expression.")] string target,
@@ -812,6 +848,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(cancellationToken, async host => await host.BrowserType(target, text, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Presses a key or key name in the page (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown', or a single character).")]
     public Task<string> browser_press(
         [Description("Key name or single character.")] string keys,
@@ -820,6 +857,7 @@ public sealed class ForRestMcpTools
         return WithHostAsync(cancellationToken, async host => await host.BrowserPress(keys, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Waits up to a timeout for an element matching the target to appear, then returns its selectors and position. Use before interacting with elements that load asynchronously.")]
     public Task<string> browser_wait_for(
         [Description("Element target expression.")] string target,
@@ -830,6 +868,7 @@ public sealed class ForRestMcpTools
             Serialize(await host.BrowserWaitFor(target, timeout_ms, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Evaluates a JavaScript expression in the current page and returns the result as JSON. Use for reads the other tools do not cover.")]
     public Task<string> browser_eval(
         [Description("JavaScript expression to evaluate in the page.")] string expression,
@@ -843,6 +882,7 @@ public sealed class ForRestMcpTools
 
     #region App surface
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Focuses a pane/tab in the running For-Rest desktop app so the user looks at it before you respond — making the experience feel seamless (e.g. flip to the live browser, or show the response after a run). Center targets: 'browser', 'request'. Inspector targets: 'response', 'requests', 'stash', 'headers', 'trace', 'raw', 'debug'. To open a specific document instead, use set_active_request. Requires the desktop app to be running.")]
     public Task<string> show_in_app(
         [Description("Which pane/tab to focus: browser, request, response, requests, stash, headers, trace, raw, or debug.")] string target,
@@ -857,6 +897,7 @@ public sealed class ForRestMcpTools
 
     #region Settings
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the current For-Rest MCP server settings (enabled, bind address, port, whether an auth token is set, max concurrent sessions, and the active endpoint). The token value itself is never returned.")]
     public string get_server_settings()
     {
@@ -875,6 +916,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the settings.toml content for the For-Rest app so an agent can inspect theme, AI, and MCP configuration before proposing changes. Secret values (api keys, the MCP auth token, and custom headers) are redacted to \"***\".")]
     public string get_settings_text()
     {
@@ -885,6 +927,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Overwrites the settings.toml content. The host validates the supplied TOML before persisting. Any secret you leave as the redacted \"***\" marker keeps its original value; set a real value to change a secret. Note: changes to the MCP bind address or port only take effect after the server restarts.")]
     public string update_settings_text(
         [Description("Full replacement settings.toml content.")] string raw_toml)

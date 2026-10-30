@@ -4,3 +4,4 @@ global using System.Text.Json.Serialization;
 global using System.Text.Json;
 global using System.Diagnostics;
 global using ForRest.Models;
+global using ModelContextProtocol.Server;
