@@ -28,6 +28,11 @@ app without a certificate or notarization. The bundle passes integrity checks;
 certificate-signed mode uses the existing sandbox profile. Downloaded builds
 may require approval in macOS Privacy & Security.
 
+Ad-hoc Mac builds keep provider OAuth tokens in memory for the app session.
+Closing the app clears them; sign in again after restarting. Certificate-signed
+Mac builds, Windows, and Android use platform-protected persistent storage.
+Persistent Mac OAuth storage requires provisioned Keychain access.
+
 If you only have one platform available, that's fine — say which one you tested on in your PR.
 
 Both unit-test projects target `net10.0`, so you can run them on Windows, macOS, or Linux without installing a MAUI workload. Building the app still requires the workload and native toolchain for the platform you select.

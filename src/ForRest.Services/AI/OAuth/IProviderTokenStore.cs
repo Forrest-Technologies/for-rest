@@ -3,8 +3,8 @@ using System.Collections.Concurrent;
 namespace ForRest.Services.AI.OAuth;
 
 /// <summary>
-/// Persistence seam for provider OAuth tokens. The MAUI app supplies a DPAPI-backed implementation
-/// so tokens are protected at rest; the service depends only on this abstraction.
+/// Persistence seam for provider OAuth tokens. Application heads choose platform-protected
+/// storage or a process-lifetime store; the service depends only on this abstraction.
 /// </summary>
 public interface IProviderTokenStore
 {
@@ -17,7 +17,7 @@ public interface IProviderTokenStore
 
 /// <summary>
 /// Volatile, process-lifetime token store. Default registration so the service is usable in tests
-/// and headless contexts; MAUI overrides it with a protected, durable implementation.
+/// and headless contexts, and in ad-hoc Mac builds without provisioned Keychain access.
 /// </summary>
 public sealed class InMemoryProviderTokenStore : IProviderTokenStore
 {
