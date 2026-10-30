@@ -36,6 +36,7 @@ public sealed class ForRestMcpHost(
     ThemeConfigParser themeConfigParser,
     McpLiveWorkbenchAccessor liveWorkbenchAccessor,
     IBrowserAutomationProvider browserProvider,
+    IScriptEngine scriptEngine,
     ILogger<ForRestMcpHost>? logger = null) : IForRestMcpHost
 {
     #region Private Fields
@@ -409,7 +410,7 @@ public sealed class ForRestMcpHost(
     {
         Guid id = TryParseWorkspaceId(workspaceId);
         ForRestScriptCompilationResult compilation = scriptExecutionService.Compile(source, id);
-        return MapCompilation(compilation);
+        return MapCompilation(compilation.ValidateScripts(scriptEngine));
     }
 
     public async Task<ForRestMcpExecutionResult> ExecuteScript(
