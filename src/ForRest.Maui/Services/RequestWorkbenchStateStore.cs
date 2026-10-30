@@ -80,6 +80,7 @@ public sealed class RequestWorkbenchStateStore
         IReadOnlyList<RequestWorkbenchWorkspaceState> defaults,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(stateFilePath))
         {
             return CreateDefaultState(defaults);
@@ -101,6 +102,10 @@ public sealed class RequestWorkbenchStateStore
             }
 
             return CreateDefaultState(defaults);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
