@@ -18,3 +18,8 @@ global using Jint;
 global using ForRest.Mcp;
 global using ForRest.Services.AI;
 global using System.Text.Json;
+global using System.Net;
+global using System.Net.Sockets;
+global using System.Reflection;
+global using ModelContextProtocol.Client;
+global using ModelContextProtocol.Server;
