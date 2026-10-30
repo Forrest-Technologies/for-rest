@@ -178,6 +178,12 @@ Script reads mask `secret` declarations in the editable `.frs` source. The
 contain credentials from compilation or earlier edits. The editable source
 remains available in `source`.
 
+The Windows SQLite repository protects OAuth client secrets and custom
+authentication-header values with DPAPI, alongside passwords, bearer tokens,
+API-key values, and marked variables. Existing plaintext authentication fields
+are protected on the next save. MAUI's JSON workbench uses separate storage;
+this SQLite change does not encrypt those files.
+
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.
 - The raw `settings.toml` holds secrets (`auth_token` and the AI `api_key`).
