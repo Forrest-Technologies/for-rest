@@ -25,3 +25,4 @@ global using ModelContextProtocol.Client;
 global using ModelContextProtocol.Server;
 global using System.Net.Http;
 global using System.Globalization;
+global using Microsoft.Data.Sqlite;
