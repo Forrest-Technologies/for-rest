@@ -465,6 +465,58 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow("12345")]
+    [DataRow("false")]
+    [DataRow("a")]
+    [DataRow("\"")]
+    [DataRow("\\")]
+    [DataRow("🔑")]
+    public async Task Response_tools_redact_short_secrets_without_altering_JSON_field_names(string secret)
+    {
+        var run = SampleRun("credential=" + secret) with { SecretValues = [secret] };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_response("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        var expected = "credential=".Replace(secret, "***", StringComparison.Ordinal) + "***";
+        Assert.AreEqual(expected, parsed.RootElement.GetProperty("body").GetString());
+        Assert.IsFalse(parsed.RootElement.GetProperty("bodyTruncated").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task Stash_dictionary_keys_are_redacted_without_changing_protocol_property_names()
+    {
+        var run = SampleRun("safe") with
+        {
+            SecretValues = ["columns"],
+            Stash = new(["columns"], [new Dictionary<string, string> { ["columns"] = "safe" }]),
+        };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_stash("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("***", parsed.RootElement.GetProperty("columns")[0].GetString());
+        Assert.AreEqual("safe", parsed.RootElement.GetProperty("rows")[0].GetProperty("***").GetString());
+    }
+
+    [TestMethod]
+    public async Task Numeric_secrets_do_not_corrupt_response_metadata_JSON()
+    {
+        var run = SampleRun("credential=123456") with { SecretValues = ["123456"] };
+        Assert.IsNotNull(run.Response);
+        run = run with { Response = run.Response with { SizeBytes = 123456 } };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_response("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(123456L, parsed.RootElement.GetProperty("sizeBytes").GetInt64());
+        Assert.AreEqual("credential=***", parsed.RootElement.GetProperty("body").GetString());
+    }
+
+    [TestMethod]
     public async Task Get_run_and_logs_scrub_secret_values_from_output()
     {
         ForRestMcpRunDetail run = SampleRun("response with runtime-token-9000 echoed") with
