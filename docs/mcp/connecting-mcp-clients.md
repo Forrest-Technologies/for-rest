@@ -126,6 +126,10 @@ variables so shared source and MCP reads can mask their values while request
 preparation resolves the original credentials. This does not encrypt MAUI's
 workbench JSON or detect every credential in arbitrary request text.
 
+Source-sharing helpers mask declaration-like `secret name = value` lines even
+when the name is temporarily invalid during editing. The compiler still
+validates identifier syntax; masking a line does not make that script runnable.
+
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.
 - The raw `settings.toml` holds secrets (`auth_token` and the AI `api_key`).
