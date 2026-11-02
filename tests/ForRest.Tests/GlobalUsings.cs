@@ -20,3 +20,4 @@ global using ForRest.Mcp;
 global using ModelContextProtocol.Client;
 global using ModelContextProtocol.Server;
 global using System.Text;
+global using System.Globalization;
