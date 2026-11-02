@@ -393,6 +393,9 @@ public sealed class CurlImportService : ICurlImportService
                 case "-L" or "--location":
                     parsed.FollowRedirects = true;
                     break;
+                case "--no-location":
+                    parsed.FollowRedirects = false;
+                    break;
                 case "-k" or "--insecure":
                     parsed.Insecure = true;
                     break;
@@ -634,10 +637,7 @@ public sealed class CurlImportService : ICurlImportService
             lines.Add($"timeout {timeout}");
         }
 
-        if (parsed.FollowRedirects)
-        {
-            lines.Add("redirects true");
-        }
+        lines.Add(parsed.FollowRedirects ? "redirects true" : "redirects false");
 
         if (parsed.Insecure)
         {
