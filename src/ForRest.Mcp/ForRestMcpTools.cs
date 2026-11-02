@@ -482,7 +482,7 @@ public sealed class ForRestMcpTools
     #region Script CRUD
 
     [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [Description("Returns a single script's full detail (name, method, summary, source, pre-request script). Secret values in the source are redacted.")]
+    [Description("Returns a script's name, method, summary, and ForRest source with secret declarations redacted. Cached pre-request code is withheld because it can contain credentials.")]
     public Task<string> get_script(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Script location/path from list_workspaces.")] string location,
@@ -505,7 +505,8 @@ public sealed class ForRestMcpTools
                 method = script.Method,
                 summary = script.Summary,
                 source = McpSecretRedactor.Redact(script.Source),
-                preRequestScript = script.PreRequestScript,
+                preRequestScript = string.IsNullOrEmpty(script.PreRequestScript) ? string.Empty : "***",
+                preRequestScriptRedacted = !string.IsNullOrEmpty(script.PreRequestScript),
             });
         });
     }
