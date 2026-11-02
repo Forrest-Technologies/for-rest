@@ -140,6 +140,13 @@ in each request to change those copies. Disabled entries and names outside the
 script language's ASCII identifier syntax are skipped. Credential names and variables marked with `type: "secret"` use secret declarations for
 source redaction. Values still follow the app head's storage rules.
 
+## Curl input limits
+
+Curl imports accept inline input. File and stdin inputs, multipart forms, and
+file uploads return an import error so they cannot silently become a different
+request. Paste input contents directly; use `--data-raw` when a body starts with
+a literal `@`.
+
 ## Security notes
 
 Native MCP clients may omit `Origin`. When that header is present, its scheme,
