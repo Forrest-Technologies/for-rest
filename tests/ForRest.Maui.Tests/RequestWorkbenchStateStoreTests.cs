@@ -157,6 +157,59 @@ public sealed class RequestWorkbenchStateStoreTests
 		Assert.IsTrue(loaded.Workspaces.Any(workspace => workspace.Id == userWorkspace.Id && workspace.Name == "Workspace 3"));
 	}
 
+    [TestMethod]
+    [DataRow("{")]
+    [DataRow("null")]
+    [DataRow("{\"workspaces\":null}")]
+    [DataRow("{\"workspaces\":[null]}")]
+    [DataRow("{\"workspaces\":[{\"documents\":null}]}")]
+    [DataRow("{\"workspaces\":[{\"documents\":[null]}]}")]
+    public async Task Corrupt_state_is_preserved_before_a_default_state_can_replace_it(string corruptJson)
+    {
+        var original = Encoding.UTF8.GetBytes(corruptJson);
+        await File.WriteAllBytesAsync(_stateFilePath, original);
+        var store = new RequestWorkbenchStateStore(_stateFilePath);
+
+        var recovered = await store.LoadAsync(BuildDefaults());
+        await store.SaveAsync(recovered);
+
+        var backups = Directory.GetFiles(Path.GetDirectoryName(_stateFilePath)!, "request-workbench-state.json.corrupt-*.bak");
+        Assert.HasCount(1, backups);
+        CollectionAssert.AreEqual(original, await File.ReadAllBytesAsync(backups[0]));
+        Assert.HasCount(2, recovered.Workspaces);
+        Assert.AreNotEqual(corruptJson, await File.ReadAllTextAsync(_stateFilePath));
+    }
+
+    [TestMethod]
+    public async Task File_access_failures_do_not_return_default_workspaces()
+    {
+        var store = new RequestWorkbenchStateStore(_stateFilePath);
+        await store.SaveAsync(new() { Workspaces = BuildDefaults() });
+        var original = await File.ReadAllBytesAsync(_stateFilePath);
+        await using (var lockedFile = new FileStream(_stateFilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            await Assert.ThrowsAsync<IOException>(() => store.LoadAsync(BuildDefaults()));
+        }
+
+        CollectionAssert.AreEqual(original, await File.ReadAllBytesAsync(_stateFilePath));
+        Assert.HasCount(0, Directory.GetFiles(Path.GetDirectoryName(_stateFilePath)!, "*.bak"));
+    }
+
+    [TestMethod]
+    public async Task Existing_utf16_state_files_remain_readable()
+    {
+        var json = JsonSerializer.Serialize(new RequestWorkbenchState { Workspaces = BuildDefaults() },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        await File.WriteAllTextAsync(_stateFilePath, json, Encoding.Unicode);
+        var store = new RequestWorkbenchStateStore(_stateFilePath);
+
+        var state = await store.LoadAsync([]);
+
+        Assert.HasCount(2, state.Workspaces);
+        Assert.AreEqual("HTTP Bin Playground", state.Workspaces[0].Name);
+        Assert.HasCount(0, Directory.GetFiles(Path.GetDirectoryName(_stateFilePath)!, "*.bak"));
+    }
+
 	private static List<RequestWorkbenchWorkspaceState> BuildDefaults()
 	{
 		return

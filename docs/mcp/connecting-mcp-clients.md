@@ -122,6 +122,15 @@ Use the pane's takeover control to suspend synthetic input and resume it when
 ready. Mac Catalyst uses JavaScript events; websites that require trusted OS
 input can reject those events.
 
+## Workbench recovery
+
+If MAUI cannot parse its saved workbench, it writes the original bytes beside
+`request-workbench-state.json` as `request-workbench-state.json.corrupt-<id>.bak`
+before loading defaults. Keep that backup for manual recovery; it can contain
+script credentials. If the backup cannot be written, loading fails instead of
+returning defaults. File-access errors also propagate without resetting the
+workbench.
+
 ## Security notes
 
 Native MCP clients may omit `Origin`. When that header is present, its scheme,
