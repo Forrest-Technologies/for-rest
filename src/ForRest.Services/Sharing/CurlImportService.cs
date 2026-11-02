@@ -534,10 +534,17 @@ public sealed class CurlImportService : ICurlImportService
 
     private static void SetTimeout(ParsedCurl parsed, string? seconds)
     {
-        if (double.TryParse(seconds, System.Globalization.CultureInfo.InvariantCulture, out double parsedSeconds) && parsedSeconds > 0)
+        if (!double.TryParse(seconds, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsedSeconds)
+            || !double.IsFinite(parsedSeconds)
+            || parsedSeconds <= 0
+            || parsedSeconds > int.MaxValue / 1000d)
         {
-            parsed.TimeoutMilliseconds = (int)Math.Round(parsedSeconds * 1000);
+            throw new FormatException(
+                "curl --max-time must be positive and finite, up to 2147483.647 seconds; zero/unlimited is unsupported.");
         }
+
+        parsed.TimeoutMilliseconds = Math.Max(1, (int)Math.Round(parsedSeconds * 1000));
     }
 
     private static string BuildSuggestedName(ParsedCurl parsed)
