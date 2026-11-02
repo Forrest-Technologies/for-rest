@@ -32,8 +32,8 @@ public sealed class ScriptRequestApi
         VariablesApi variablesApi,
         Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync,
         int maxSendIterations,
-        List<ResponseSnapshot>? sharedResponses,
-        List<RequestSnapshot>? sharedRequests)
+        ScriptSendState? sharedState,
+        IEnumerable<KeyValueDefinition>? seedHeaders)
     {
         originalRequest = request;
         this.responseApi = responseApi;
@@ -41,17 +41,14 @@ public sealed class ScriptRequestApi
         this.sendAsync = sendAsync;
         this.maxSendIterations = Math.Max(0, maxSendIterations);
 
-        // A clone records into the originating request's buffers (passed here) so its sends — e.g. each
-        // branch of a parallel block — surface as response cards. A fresh request owns new buffers.
-        sentResponses = sharedResponses ?? [];
-        sentRequests = sharedRequests ?? [];
+        sendState = sharedState ?? new ScriptSendState(responseApi);
         Method = request.Method.ToString().ToUpperInvariant();
         Url = request.Uri.ToString();
         Body = request.Body.RawContent;
         ContentType = request.Body.ContentType;
         UserAgent = request.UserAgent.ToString();
         CustomUserAgent = request.CustomUserAgent;
-        Headers = new ScriptHeaderCollection(request.Headers);
+        Headers = new ScriptHeaderCollection(seedHeaders ?? request.Headers);
     }
 
     #endregion
@@ -68,13 +65,7 @@ public sealed class ScriptRequestApi
 
     private readonly int maxSendIterations;
 
-    private int sendCount;
-
-    private ResponseSnapshot? lastSentResponse;
-
-    private readonly List<ResponseSnapshot> sentResponses;
-
-    private readonly List<RequestSnapshot> sentRequests;
+    private readonly ScriptSendState sendState;
 
     public string Method { get; set; }
 
@@ -92,33 +83,15 @@ public sealed class ScriptRequestApi
 
     public int MaxSendIterations => maxSendIterations;
 
-    public int RemainingSendIterations => Math.Max(0, maxSendIterations - sendCount);
+    public int RemainingSendIterations => Math.Max(0, maxSendIterations - sendState.Count);
 
-    public int SendCount => Volatile.Read(ref sendCount);
+    public int SendCount => sendState.Count;
 
-    public ResponseSnapshot? LastSentResponse => lastSentResponse;
+    public ResponseSnapshot? LastSentResponse => sendState.LastResponse;
 
-    public IReadOnlyList<ResponseSnapshot> SentResponses
-    {
-        get
-        {
-            lock (sentResponses)
-            {
-                return [.. sentResponses];
-            }
-        }
-    }
+    public IReadOnlyList<ResponseSnapshot> SentResponses => sendState.Responses;
 
-    public IReadOnlyList<RequestSnapshot> SentRequests
-    {
-        get
-        {
-            lock (sentRequests)
-            {
-                return [.. sentRequests];
-            }
-        }
-    }
+    public IReadOnlyList<RequestSnapshot> SentRequests => sendState.Requests;
 
     #endregion
 
@@ -156,15 +129,14 @@ public sealed class ScriptRequestApi
 
     public ScriptRequestApi Clone()
     {
-        var clonedResponse = new ScriptResponseApi(null);
-        var clone = new ScriptRequestApi(
+        return new ScriptRequestApi(
             originalRequest,
-            clonedResponse,
+            responseApi,
             variablesApi,
             sendAsync,
             maxSendIterations,
-            sentResponses,
-            sentRequests)
+            sendState,
+            Headers.All())
         {
             Method = Method,
             Url = Url,
@@ -173,13 +145,6 @@ public sealed class ScriptRequestApi
             UserAgent = UserAgent,
             CustomUserAgent = CustomUserAgent,
         };
-
-        foreach (var header in Headers.All())
-        {
-            clone.Headers[header.Key] = header.Value;
-        }
-
-        return clone;
     }
 
     private async Task<dynamic> SendAsyncCore(string? label)
@@ -191,8 +156,7 @@ public sealed class ScriptRequestApi
 
         var preparedRequest = ToPreparedRequest();
         RequestSnapshot requestSnapshot = PreparedRequestSnapshotBuilder.Build(preparedRequest);
-        var nextSendCount = Interlocked.Increment(ref sendCount);
-        if (nextSendCount > maxSendIterations)
+        if (!sendState.TryReserve(maxSendIterations))
         {
             throw new InvalidOperationException($"request.send() exceeded max_send_iterations ({maxSendIterations}).");
         }
@@ -203,21 +167,7 @@ public sealed class ScriptRequestApi
             response = response with { Label = label };
         }
 
-        lastSentResponse = response;
-        if (response is not null)
-        {
-            lock (sentResponses)
-            {
-                sentResponses.Add(response);
-            }
-
-            lock (sentRequests)
-            {
-                sentRequests.Add(requestSnapshot);
-            }
-        }
-
-        responseApi.Update(response);
+        sendState.Record(response, requestSnapshot);
         return new ScriptResponseApi(response);
     }
 
