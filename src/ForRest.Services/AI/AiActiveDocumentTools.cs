@@ -154,19 +154,6 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    // Match the entire `secret <name> = <value>` declaration as a line, so
-    // we can redact non-string secret values (identifiers, function calls,
-    // future list literals) and round-trip the original right-hand side
-    // back into the document after the AI replaces it. Captures:
-    //   1: leading whitespace
-    //   2: secret name
-    //   3: raw value expression text (everything after `=` to end of line)
-    // Values must stay private while an identifier is incomplete or invalid.
-    // Identifier validation belongs to the compiler, not the sharing boundary.
-    private static readonly Regex SecretDeclarationPattern = new(
-        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[^\s=]+)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
-
     private const string RedactedSecretMarker = "\"***\"";
 
     #endregion
@@ -424,10 +411,10 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             return sourceText;
         }
 
-        return SecretDeclarationPattern.Replace(sourceText, match =>
+        return ForRestSecretDeclarations.Replace(sourceText, match =>
         {
-            string indent = match.Groups["indent"].Value;
-            string name = match.Groups["name"].Value;
+            string indent = match.Indent;
+            string name = match.Name;
             return $"{indent}secret {name} = {RedactedSecretMarker}";
         });
     }
@@ -435,7 +422,7 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
     /// <summary>
     /// Returns a name-keyed map of every <c>secret</c> declaration in
     /// <paramref name="sourceText"/>, capturing the full original
-    /// declaration line (including indentation and the unredacted
+    /// declaration (including indentation and the unredacted
     /// right-hand side). Used to restore secrets after the AI replaces
     /// the document with text it built from the redacted view.
     /// </summary>
@@ -447,19 +434,19 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
             return declarations;
         }
 
-        foreach (Match match in SecretDeclarationPattern.Matches(sourceText))
+        foreach (var match in ForRestSecretDeclarations.Read(sourceText))
         {
-            string name = match.Groups["name"].Value;
+            string name = match.Name;
             if (string.IsNullOrEmpty(name) || declarations.ContainsKey(name))
             {
                 continue;
             }
 
-            // Store the canonical line text (no trailing whitespace) so it
+            // Store the canonical declaration text (no trailing whitespace) so it
             // can be substituted back verbatim — preserving indentation,
             // quoting, and any comment-free trailing characters the user
             // wrote.
-            declarations[name] = match.Value.TrimEnd();
+            declarations[name] = match.Text.TrimEnd();
         }
 
         return declarations;
@@ -486,13 +473,13 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
         // First pass: replace each surviving secret declaration with its
         // original line so the AI cannot mutate the value, even if it
         // tried to write a different placeholder than `"***"`.
-        updated = SecretDeclarationPattern.Replace(updated, match =>
+        updated = ForRestSecretDeclarations.Replace(updated, match =>
         {
-            string name = match.Groups["name"].Value;
+            string name = match.Name;
             if (originals.TryGetValue(name, out string? originalLine))
             {
                 seen.Add(name);
-                string indent = match.Groups["indent"].Value;
+                string indent = match.Indent;
                 // Keep whatever indentation the AI placed the line at so
                 // surrounding formatting is preserved.
                 int firstNonWhitespace = 0;
@@ -504,7 +491,7 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
                 return indent + originalLine[firstNonWhitespace..];
             }
 
-            return match.Value;
+            return match.Text;
         });
 
         // Second pass: re-insert any secret the AI deleted entirely.
