@@ -382,6 +382,29 @@ public sealed class AiActiveDocumentToolServiceTests
         StringAssert.Contains(host.LastUpdatedText!, "method POST");
     }
 
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void Rejected_replacements_keep_returned_source_redacted(bool echoSource)
+    {
+        const string original = "secret api_key = \"fake-existing-private-4928\"\nmethod GET";
+        const string replacement = "secret api_key = \"***\"\nsecret new_token = \"fake-new-private-8429\"\nmethod POST";
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        var host = new RejectingActiveDocumentHost(new("rejected", "Example", "forrest", original, []), echoSource);
+
+        var response = service.ReplaceActiveDocument(BuildSettings(), host, replacement);
+
+        Assert.DoesNotContain("fake-existing-private-4928", response);
+        Assert.DoesNotContain("fake-new-private-8429", response);
+        Assert.AreEqual(original, host.CurrentDocument!.SourceText);
+        using var parsed = JsonDocument.Parse(response);
+        Assert.IsFalse(parsed.RootElement.GetProperty("succeeded").GetBoolean());
+        Assert.IsTrue(parsed.RootElement.GetProperty("retryWithReplace").GetBoolean());
+        var returnedSource = parsed.RootElement.GetProperty("patchedText").GetString()!;
+        StringAssert.Contains(returnedSource, "secret api_key = \"***\"");
+        StringAssert.Contains(returnedSource, "secret new_token = \"***\"");
+    }
+
     private static AiSettings BuildSettings()
     {
         return new()
@@ -423,7 +446,7 @@ public sealed class AiActiveDocumentToolServiceTests
         public AiActiveDocumentUpdateResult CreateScript(string name, string sourceText) => AiActiveDocumentUpdateResult.Failure("Not supported in tests.");
     }
 
-    private sealed class RejectingActiveDocumentHost(AiActiveDocumentSnapshot? snapshot) : IAiActiveDocumentHost
+    private sealed class RejectingActiveDocumentHost(AiActiveDocumentSnapshot? snapshot, bool echoSource = true) : IAiActiveDocumentHost
     {
         public AiActiveDocumentSnapshot? CurrentDocument { get; private set; } = snapshot;
 
@@ -433,7 +456,7 @@ public sealed class AiActiveDocumentToolServiceTests
         {
             return AiActiveDocumentUpdateResult.Failure(
                 "The AI edit was rejected because it left the request invalid.",
-                updatedText,
+                echoSource ? updatedText : string.Empty,
                 [
                     new("error", "Unexpected token 'expect'.", 4, 1),
                 ],
