@@ -73,7 +73,7 @@ public sealed class PostmanImportService : IPostmanImportService
 
             if (root.TryGetProperty("item", out JsonElement items) && items.ValueKind == JsonValueKind.Array)
             {
-                ConvertItems(items, [], documents, usedLocations, variableLines);
+                ConvertItems(items, [], documents, usedLocations, variableLines, ResolveAuth(root, default));
             }
 
             return documents;
@@ -101,7 +101,8 @@ public sealed class PostmanImportService : IPostmanImportService
         List<string> folderPath,
         List<PortableWorkspaceDocument> documents,
         HashSet<string> usedLocations,
-        IReadOnlyList<string> variableLines)
+        IReadOnlyList<string> variableLines,
+        JsonElement inheritedAuth)
     {
         foreach (JsonElement item in items.EnumerateArray())
         {
@@ -114,7 +115,7 @@ public sealed class PostmanImportService : IPostmanImportService
             if (item.TryGetProperty("item", out JsonElement children) && children.ValueKind == JsonValueKind.Array)
             {
                 folderPath.Add(itemName);
-                ConvertItems(children, folderPath, documents, usedLocations, variableLines);
+                ConvertItems(children, folderPath, documents, usedLocations, variableLines, ResolveAuth(item, inheritedAuth));
                 folderPath.RemoveAt(folderPath.Count - 1);
                 continue;
             }
@@ -127,12 +128,20 @@ public sealed class PostmanImportService : IPostmanImportService
             string documentName = folderPath.Count == 0
                 ? itemName
                 : $"{string.Join(" / ", folderPath)} / {itemName}";
-            string source = ConvertRequest(request, documentName, variableLines);
+            string source = ConvertRequest(request, documentName, variableLines, ResolveAuth(request, inheritedAuth));
             documents.Add(new(documentName, BuildUniqueLocation(documentName, usedLocations), source));
         }
     }
 
-    private static string ConvertRequest(JsonElement request, string documentName, IReadOnlyList<string> variableLines)
+    private static JsonElement ResolveAuth(JsonElement container, JsonElement inheritedAuth)
+    {
+        return !container.TryGetProperty("auth", out var auth) || auth.ValueKind == JsonValueKind.Null
+            ? inheritedAuth
+            : auth;
+    }
+
+    private static string ConvertRequest(
+        JsonElement request, string documentName, IReadOnlyList<string> variableLines, JsonElement auth)
     {
         string method = (ReadString(request, "method") ?? "GET").ToUpperInvariant();
         string url = ResolveUrl(request);
@@ -192,7 +201,7 @@ public sealed class PostmanImportService : IPostmanImportService
             lines.AddRange(headers.Select(static header => FrsScriptWriter.HeaderLine(header.Name, header.Value)));
         }
 
-        List<string> authLines = BuildAuth(request, variableLines);
+        List<string> authLines = BuildAuth(auth, variableLines, request.GetRawText());
         if (authLines.Count > 0)
         {
             lines.Add(string.Empty);
@@ -373,14 +382,14 @@ public sealed class PostmanImportService : IPostmanImportService
         }
     }
 
-    private static List<string> BuildAuth(JsonElement request, IReadOnlyList<string> variableLines)
+    private static List<string> BuildAuth(JsonElement auth, IReadOnlyList<string> variableLines, string requestText)
     {
-        if (!request.TryGetProperty("auth", out JsonElement auth) || auth.ValueKind != JsonValueKind.Object)
+        if (auth.ValueKind != JsonValueKind.Object)
         {
             return [];
         }
 
-        var secrets = new AuthImportSecrets(variableLines, request.GetRawText());
+        var secrets = new AuthImportSecrets(variableLines, requestText);
         var lines = BuildAuthLines(auth, secrets);
         return [.. secrets.Lines, .. lines];
     }
