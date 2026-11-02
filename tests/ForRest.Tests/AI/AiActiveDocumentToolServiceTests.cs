@@ -428,6 +428,20 @@ public sealed class AiActiveDocumentToolServiceTests
         Assert.AreEqual(original.Replace("public-before", "public-after", StringComparison.Ordinal), host.LastUpdatedText);
     }
 
+    [TestMethod]
+    public void Null_patch_objects_return_an_error_without_updating_the_document()
+    {
+        var host = new FakeActiveDocumentHost(new("fixture", "Example", "forrest", "method GET", []));
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+
+        var response = service.PatchActiveDocument(BuildSettings(), host, "[null]");
+
+        using var parsed = JsonDocument.Parse(response);
+        Assert.IsFalse(parsed.RootElement.GetProperty("succeeded").GetBoolean());
+        Assert.IsNull(host.LastUpdatedText);
+        Assert.AreEqual("method GET", host.CurrentDocument!.SourceText);
+    }
+
     private static AiSettings BuildSettings()
     {
         return new()
