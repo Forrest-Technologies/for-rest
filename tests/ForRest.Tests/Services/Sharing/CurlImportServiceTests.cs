@@ -20,6 +20,58 @@ public sealed class CurlImportServiceTests
     }
 
     [TestMethod]
+    [DataRow("curl\thttps://example.com")]
+    [DataRow("curl.exe\nhttps://example.com")]
+    [DataRow("$ curl\r\nhttps://example.com")]
+    public void Command_detection_accepts_shell_whitespace(string command)
+    {
+        Assert.IsTrue(service.LooksLikeCurl(command));
+        Assert.AreEqual(ImportContentClassifier.ContentKind.CurlCommand,
+            ImportContentClassifier.ClassifyText(command));
+    }
+
+    [TestMethod]
+    [DataRow("curl 'https://example.com")]
+    [DataRow("curl \"https://example.com")]
+    [DataRow("curl $'https://example.com")]
+    [DataRow("curl https://example.com -H X-Trace:\\")]
+    public void Incomplete_shell_tokens_are_rejected(string command)
+    {
+        Assert.ThrowsExactly<FormatException>(() => service.ConvertToScript(command, out _));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("curl")]
+    [DataRow("curl -s")]
+    [DataRow("curl --url ''")]
+    [DataRow("curl ''")]
+    public void Commands_without_a_URL_are_rejected(string command)
+    {
+        Assert.ThrowsExactly<FormatException>(() => service.ConvertToScript(command, out _));
+    }
+
+    [TestMethod]
+    [DataRow("-X")]
+    [DataRow("--header")]
+    [DataRow("--data")]
+    [DataRow("--data-urlencode")]
+    [DataRow("--json")]
+    [DataRow("--user")]
+    [DataRow("--oauth2-bearer")]
+    [DataRow("--user-agent")]
+    [DataRow("--referer")]
+    [DataRow("--cookie")]
+    [DataRow("--max-time")]
+    [DataRow("--url")]
+    [DataRow("--output")]
+    public void Options_without_a_required_value_are_rejected(string option)
+    {
+        Assert.ThrowsExactly<FormatException>(() => service.ConvertToScript(
+            $"curl https://example.com {option}", out _));
+    }
+
+    [TestMethod]
     public void Simple_get_produces_parsable_script_with_url_and_name()
     {
         string script = service.ConvertToScript("curl https://api.example.com/users", out string suggestedName);
