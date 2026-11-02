@@ -22,3 +22,4 @@ global using ModelContextProtocol.Server;
 global using System.Text;
 global using System.Globalization;
 global using System.Text.Json;
+global using Microsoft.Data.Sqlite;
