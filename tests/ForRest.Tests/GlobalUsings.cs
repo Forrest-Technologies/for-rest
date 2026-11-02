@@ -25,3 +25,4 @@ global using System.Text.Json;
 global using Microsoft.Data.Sqlite;
 global using System.Net.Http;
 global using ForRest.Services.AI;
+global using Jint;
