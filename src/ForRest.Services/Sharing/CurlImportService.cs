@@ -234,6 +234,18 @@ public sealed class CurlImportService : ICurlImportService
 
             switch (token)
             {
+                case "-G" or "--get":
+                    parsed.UseQueryData = true;
+                    break;
+                case "--no-get":
+                    parsed.UseQueryData = false;
+                    break;
+                case "-I" or "--head":
+                    parsed.HeadOnly = true;
+                    break;
+                case "--no-head":
+                    parsed.HeadOnly = false;
+                    break;
                 case "-X" or "--request":
                     parsed.ExplicitMethod = NextValue(tokens, ref index)?.ToUpperInvariant();
                     break;
@@ -286,6 +298,11 @@ public sealed class CurlImportService : ICurlImportService
                     HandleUnknownToken(parsed, tokens, token, ref index);
                     break;
             }
+        }
+
+        if (parsed.HeadOnly && parsed.DataSegments.Count > 0 && !parsed.UseQueryData)
+        {
+            throw new FormatException("curl --head cannot send body data. Use --get for query parameters.");
         }
 
         return parsed;
@@ -410,24 +427,47 @@ public sealed class CurlImportService : ICurlImportService
             return parsed.ExplicitMethod;
         }
 
-        return parsed.DataSegments.Count > 0 || parsed.JsonFlag ? "POST" : "GET";
+        if (parsed.HeadOnly)
+        {
+            return "HEAD";
+        }
+
+        return !parsed.UseQueryData && (parsed.DataSegments.Count > 0 || parsed.JsonFlag) ? "POST" : "GET";
+    }
+
+    private static string RenderUrl(ParsedCurl parsed)
+    {
+        var url = parsed.Url ?? string.Empty;
+        var query = string.Join("&", parsed.DataSegments);
+        if (!parsed.UseQueryData || string.IsNullOrEmpty(url) || string.IsNullOrEmpty(query))
+        {
+            return url;
+        }
+
+        var fragmentIndex = url.IndexOf('#');
+        var fragment = fragmentIndex >= 0 ? url[fragmentIndex..] : string.Empty;
+        var requestUrl = fragmentIndex >= 0 ? url[..fragmentIndex] : url;
+        var separator = requestUrl.EndsWith('?') || requestUrl.EndsWith('&')
+            ? string.Empty
+            : requestUrl.Contains('?') ? "&" : "?";
+        return $"{requestUrl}{separator}{query}{fragment}";
     }
 
     private static string Render(ParsedCurl parsed, string suggestedName)
     {
         string method = ResolveMethod(parsed);
         string body = string.Join("&", parsed.DataSegments);
-        bool hasBody = parsed.DataSegments.Count > 0;
-        bool jsonBody = hasBody
-            && (parsed.JsonFlag
-                || (parsed.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false)
-                || (parsed.ContentType is null && FrsScriptWriter.LooksLikeJson(body)));
+        var hasBody = !parsed.UseQueryData && parsed.DataSegments.Count > 0;
+        var contentType = parsed.ContentType ?? (parsed.JsonFlag ? "application/json" : null);
+        var jsonBody = hasBody
+            && ((contentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false)
+                || (contentType is null && FrsScriptWriter.LooksLikeJson(body)));
 
         List<string> lines =
         [
             $"name \"{FrsScriptWriter.Escape(suggestedName)}\"",
             $"method {method}",
-            $"url \"{FrsScriptWriter.Escape(parsed.Url ?? string.Empty)}\"",
+            $"url \"{FrsScriptWriter.Escape(RenderUrl(parsed))}\"",
         ];
 
         if (parsed.TimeoutMilliseconds is int timeout)
@@ -445,16 +485,21 @@ public sealed class CurlImportService : ICurlImportService
             lines.Add("ssl false");
         }
 
-        if (parsed.ContentType is not null && !jsonBody)
+        if (hasBody && contentType is not null && !jsonBody)
         {
-            lines.Add($"content_type \"{FrsScriptWriter.Escape(parsed.ContentType)}\"");
+            lines.Add($"content_type \"{FrsScriptWriter.Escape(contentType)}\"");
         }
-        else if (hasBody && !jsonBody && parsed.ContentType is null)
+        else if (hasBody && !jsonBody && contentType is null)
         {
             lines.Add("content_type \"application/x-www-form-urlencoded\"");
         }
 
         List<string> headers = [.. parsed.Headers.Select(static header => FrsScriptWriter.HeaderLine(header.Name, header.Value))];
+        if (!hasBody && contentType is not null)
+        {
+            headers.Insert(0, FrsScriptWriter.HeaderLine("Content-Type", contentType));
+        }
+
         if (parsed.JsonFlag && !parsed.Headers.Any(static header => string.Equals(header.Name, "Accept", StringComparison.OrdinalIgnoreCase)))
         {
             headers.Insert(0, FrsScriptWriter.HeaderLine("Accept", "application/json"));
@@ -505,6 +550,8 @@ public sealed class CurlImportService : ICurlImportService
         public string? Password { get; set; }
         public string? BearerToken { get; set; }
         public bool JsonFlag { get; set; }
+        public bool UseQueryData { get; set; }
+        public bool HeadOnly { get; set; }
         public bool FollowRedirects { get; set; }
         public bool Insecure { get; set; }
         public int? TimeoutMilliseconds { get; set; }
