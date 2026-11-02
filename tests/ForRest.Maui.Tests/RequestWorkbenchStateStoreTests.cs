@@ -49,6 +49,34 @@ public sealed class RequestWorkbenchStateStoreTests
 	}
 
 	[TestMethod]
+	[DataRow(false)]
+	[DataRow(true)]
+	public async Task Cancelled_loads_propagate_cancellation_instead_of_returning_default_workspaces(bool fileExists)
+	{
+		var store = new RequestWorkbenchStateStore(_stateFilePath);
+		var defaults = BuildDefaults();
+		if (fileExists)
+		{
+			await store.SaveAsync(new() { Workspaces = defaults, SelectedWorkspaceId = defaults[0].Id });
+		}
+
+		var original = fileExists ? await File.ReadAllTextAsync(_stateFilePath) : null;
+		using var cancellation = new CancellationTokenSource();
+		await cancellation.CancelAsync();
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() => store.LoadAsync(defaults, cancellation.Token));
+
+		if (fileExists)
+		{
+			Assert.AreEqual(original, await File.ReadAllTextAsync(_stateFilePath));
+		}
+		else
+		{
+			Assert.IsFalse(File.Exists(_stateFilePath));
+		}
+	}
+
+	[TestMethod]
 	public async Task LoadAsync_migrates_legacy_flat_state_into_first_workspace()
 	{
 		var legacyState = new
