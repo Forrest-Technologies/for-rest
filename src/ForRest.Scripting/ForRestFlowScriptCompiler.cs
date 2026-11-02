@@ -10,6 +10,7 @@ internal static class ForRestFlowScriptCompiler
 {
     private static readonly HashSet<string> ReservedIdentifiers =
     [
+        "async",
         "await",
         "break",
         "browser",
@@ -52,6 +53,7 @@ internal static class ForRestFlowScriptCompiler
         "Regex",
         "request",
         "response",
+        "return",
         "retry",
         "runtime",
         "scenario",
@@ -1830,6 +1832,7 @@ internal static class ForRestFlowScriptCompiler
                 return segment;
             });
         translated = NormalizeSendCalls(translated);
+        var lambdaScopes = GetLambdaScopes(translated);
 
         var builder = new StringBuilder();
         for (var index = 0; index < translated.Length; index++)
@@ -1869,7 +1872,8 @@ internal static class ForRestFlowScriptCompiler
                     previous == '.' ||
                     previous == '@' ||
                     locals.Contains(token) ||
-                    ReservedIdentifiers.Contains(token))
+                    ReservedIdentifiers.Contains(token) ||
+                    lambdaScopes.Any(scope => start >= scope.Start && start < scope.End && scope.Names.Contains(token)))
                 {
                     builder.Append(token);
                     continue;
@@ -1885,6 +1889,46 @@ internal static class ForRestFlowScriptCompiler
         }
 
         return RewriteCollectionMethodChains(builder.ToString());
+    }
+
+    // Callback parameters and locals retain C# binding only within their lexical scopes.
+    private static List<(int Start, int End, HashSet<string> Names)> GetLambdaScopes(string expression)
+    {
+        List<(int Start, int End, HashSet<string> Names)> scopes = [];
+        if (!expression.Contains("=>", StringComparison.Ordinal))
+        {
+            return scopes;
+        }
+
+        var syntax = SyntaxFactory.ParseExpression(expression);
+        foreach (var lambda in syntax.DescendantNodesAndSelf().OfType<LambdaExpressionSyntax>())
+        {
+            ParameterSyntax[] parameters = lambda switch
+            {
+                SimpleLambdaExpressionSyntax simple => [simple.Parameter],
+                ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ParameterList.Parameters.ToArray(),
+                _ => [],
+            };
+            var names = new HashSet<string>(parameters.Select(parameter => parameter.Identifier.ValueText), StringComparer.Ordinal);
+            scopes.Add((lambda.SpanStart, lambda.Span.End, names));
+        }
+
+        foreach (var declaration in syntax.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+        {
+            if (!declaration.Ancestors().OfType<LambdaExpressionSyntax>().Any())
+            {
+                continue;
+            }
+
+            var scope = declaration.Ancestors().FirstOrDefault(node =>
+                node is BlockSyntax or ForStatementSyntax or UsingStatementSyntax or FixedStatementSyntax);
+            if (scope is not null)
+            {
+                scopes.Add((scope.SpanStart, scope.Span.End, [declaration.Identifier.ValueText]));
+            }
+        }
+
+        return scopes;
     }
 
     private static readonly HashSet<string> CollectionMethods = new(StringComparer.OrdinalIgnoreCase)

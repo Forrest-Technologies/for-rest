@@ -23,3 +23,4 @@ global using System.Text;
 global using System.Globalization;
 global using System.Text.Json;
 global using Microsoft.Data.Sqlite;
+global using ForRest.Services.AI;
