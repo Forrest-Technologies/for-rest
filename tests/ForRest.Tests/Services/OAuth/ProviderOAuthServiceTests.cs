@@ -204,7 +204,77 @@ public sealed class ProviderOAuthServiceTests
         Assert.AreEqual(state, result.State);
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task CompleteAuthorization_does_not_cache_token_when_storage_fails(bool cancelled)
+    {
+        using var client = new HttpClient(new FakeHandler(
+            """{"access_token":"new-token","expires_in":3600}""", HttpStatusCode.OK));
+        var store = new FailingTokenStore(null, cancelled);
+        var service = new ProviderOAuthService(NullLogger<ProviderOAuthService>.Instance, store, client);
+        var session = service.StartAuthorization(AiProviderKind.OpenAI, OAuthCompletionMode.ManualPaste);
+
+        await AssertStorageFailure(() => service.CompleteAuthorization(session, "code"), cancelled);
+
+        Assert.IsNull(await service.GetValidToken(AiProviderKind.OpenAI));
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task RefreshToken_preserves_cached_token_when_storage_fails(bool cancelled)
+    {
+        var existing = new ProviderOAuthToken
+        {
+            Provider = AiProviderKind.OpenAI,
+            AccessToken = "previous-token",
+            RefreshToken = "previous-refresh-token",
+            ExpiresUtc = DateTimeOffset.UtcNow.AddHours(1),
+        };
+        using var client = new HttpClient(new FakeHandler(
+            """{"access_token":"new-token","refresh_token":"new-refresh-token","expires_in":3600}""",
+            HttpStatusCode.OK));
+        var store = new FailingTokenStore(existing, cancelled);
+        var service = new ProviderOAuthService(NullLogger<ProviderOAuthService>.Instance, store, client);
+        Assert.AreSame(existing, await service.GetValidToken(AiProviderKind.OpenAI));
+
+        await AssertStorageFailure(() => service.RefreshToken(AiProviderKind.OpenAI, existing), cancelled);
+
+        Assert.AreSame(existing, await service.GetValidToken(AiProviderKind.OpenAI));
+    }
+
     #region Helpers
+
+    private static async Task AssertStorageFailure(Func<Task<ProviderOAuthToken>> action, bool cancelled)
+    {
+        if (cancelled)
+        {
+            await Assert.ThrowsExactlyAsync<OperationCanceledException>(action);
+        }
+        else
+        {
+            await Assert.ThrowsExactlyAsync<IOException>(action);
+        }
+    }
+
+    private sealed class FailingTokenStore(ProviderOAuthToken? storedToken, bool cancelled) : IProviderTokenStore
+    {
+        #region Public Methods
+
+        public Task Save(AiProviderKind provider, ProviderOAuthToken token, CancellationToken cancellationToken = default)
+            => cancelled
+                ? Task.FromException(new OperationCanceledException())
+                : Task.FromException(new IOException("Fixture token store unavailable."));
+
+        public Task<ProviderOAuthToken?> Load(AiProviderKind provider, CancellationToken cancellationToken = default)
+            => Task.FromResult(storedToken);
+
+        public Task Clear(AiProviderKind provider, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        #endregion
+    }
 
     private static ProviderOAuthService CreateService(
         out FakeHandler handler,
