@@ -566,6 +566,12 @@ public sealed class CurlImportService : ICurlImportService
         return $"{requestUrl}{separator}{query}{fragment}";
     }
 
+    private static string AddSecret(List<string> lines, string name, string value)
+    {
+        lines.Add($"secret {name} = {JsonSerializer.Serialize(value)}");
+        return "{{" + name + "}}";
+    }
+
     private static string Render(ParsedCurl parsed, string suggestedName)
     {
         string method = ResolveMethod(parsed);
@@ -607,7 +613,15 @@ public sealed class CurlImportService : ICurlImportService
             lines.Add("content_type \"application/x-www-form-urlencoded\"");
         }
 
-        List<string> headers = [.. parsed.Headers.Select(static header => FrsScriptWriter.HeaderLine(header.Name, header.Value))];
+        List<string> headers = [];
+        var secretHeaderIndex = 0;
+        foreach (var header in parsed.Headers)
+        {
+            var value = HttpCredentialHeaders.IsSensitive(header.Name)
+                ? AddSecret(lines, $"curl_header_{++secretHeaderIndex}", header.Value)
+                : header.Value;
+            headers.Add(FrsScriptWriter.HeaderLine(header.Name, value));
+        }
         if (!hasBody && contentType is not null)
         {
             headers.Insert(0, FrsScriptWriter.HeaderLine("Content-Type", contentType));
@@ -627,12 +641,13 @@ public sealed class CurlImportService : ICurlImportService
         if (parsed.Username is not null)
         {
             lines.Add(string.Empty);
-            lines.AddRange(FrsScriptWriter.BasicAuthBlock(parsed.Username, parsed.Password ?? string.Empty));
+            lines.AddRange(FrsScriptWriter.BasicAuthBlock(parsed.Username,
+                AddSecret(lines, "curl_password", parsed.Password ?? string.Empty)));
         }
         else if (parsed.BearerToken is not null)
         {
             lines.Add(string.Empty);
-            lines.AddRange(FrsScriptWriter.BearerAuthBlock(parsed.BearerToken));
+            lines.AddRange(FrsScriptWriter.BearerAuthBlock(AddSecret(lines, "curl_bearer_token", parsed.BearerToken)));
         }
 
         if (hasBody)

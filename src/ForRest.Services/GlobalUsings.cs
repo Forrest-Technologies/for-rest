@@ -15,3 +15,4 @@ global using ForRest.Repositories;
 global using ForRest.Scripting;
 global using ForRest.Shared;
 global using Microsoft.Extensions.Logging;
+global using System.Text.Json;
