@@ -6,18 +6,21 @@ The product is intended to grow into a serious developer platform, not just a ba
 
 ## Current Baseline
 
-Date: 2026-03-17
+Date: 2026-10-27
 
 - Solution format: `ForRest.slnx`
-- SDK baseline: `.NET 10.0.200-preview.0.26103.119` pinned in [`global.json`](global.json)
-- App model: Maui Windows and Android apps
-- Primary storage: Maui Local Storage
+- SDK baseline: `.NET 10.0.302` with stable feature-band roll-forward in [`global.json`](global.json)
+- App model: .NET MAUI for Windows, Android, and Mac Catalyst; a separate WinUI app is outside the solution
+- MAUI storage: workbench JSON and settings TOML; in-memory execution history; SecureStorage for OAuth provider tokens
 
 ## Repo Map
 
 ```text
 src/
-  ForRest.App/                    Maui app shell and presentation view models
+  ForRest.Maui/                   MAUI app shell, platform heads, and presentation view models
+  ForRest.App/                    Separate WinUI app (outside ForRest.slnx)
+  ForRest.Browser/                Browser automation contracts and helpers
+  ForRest.Mcp/                    MCP tools, redaction, and server hosting
   ForRest.Domain/                 Variable resolution, request compilation, JSON helpers, extraction
   ForRest.Models/                 DTOs, enums, persisted models, execution records
   ForRest.Services/               Application services and HTTP execution pipeline
@@ -30,6 +33,7 @@ src/
 
 tests/
   ForRest.Tests/                 Unit and repository tests
+  ForRest.Maui.Tests/            Portable MAUI service tests
 ```
 
 ## Commands
@@ -37,7 +41,9 @@ tests/
 ```powershell
 dotnet build ForRest.slnx
 dotnet test tests\ForRest.Tests\ForRest.Tests.csproj
-Start-Process .\src\ForRest.App\bin\Debug\net10.0-windows10.0.19041.0\ForRest.App.exe
+dotnet test tests\ForRest.Maui.Tests\ForRest.Maui.Tests.csproj
+# Windows MAUI head
+dotnet run --project src/ForRest.Maui/ForRest.Maui.csproj -f net10.0-windows10.0.19041.0 -p:ForRestWindowsOnly=true
 ```
 
 ## Architecture Rules
