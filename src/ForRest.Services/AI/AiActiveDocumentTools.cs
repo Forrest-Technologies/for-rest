@@ -161,8 +161,10 @@ public sealed class AiActiveDocumentToolService(IAiDocumentPatchService document
     //   1: leading whitespace
     //   2: secret name
     //   3: raw value expression text (everything after `=` to end of line)
+    // Values must stay private while an identifier is incomplete or invalid.
+    // Identifier validation belongs to the compiler, not the sharing boundary.
     private static readonly Regex SecretDeclarationPattern = new(
-        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
+        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[^\s=]+)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
 
     private const string RedactedSecretMarker = "\"***\"";

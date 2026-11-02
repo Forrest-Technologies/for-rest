@@ -358,6 +358,30 @@ public sealed class AiActiveDocumentToolServiceTests
         Assert.IsFalse(response.Contains("real-secret", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    [DataRow("clé")]
+    [DataRow("ключ")]
+    [DataRow("令牌")]
+    [DataRow("api-token")]
+    [DataRow("token.v2")]
+    [DataRow("api_key")]
+    public void Ai_tools_redact_and_restore_secret_declarations_while_editing(string name)
+    {
+        var original = $"secret {name} = \"fake-unicode-private-value\"\nmethod GET";
+        var service = new AiActiveDocumentToolService(new AiDocumentPatchService());
+        var host = new FakeActiveDocumentHost(new("unicode", "Example", "forrest", original, []));
+        var read = service.ReadActiveDocument(BuildSettings(), host);
+
+        Assert.DoesNotContain("fake-unicode-private-value", read);
+        using var parsed = JsonDocument.Parse(read);
+        var source = parsed.RootElement.GetProperty("document").GetProperty("sourceText").GetString()!;
+        var updated = service.ReplaceActiveDocument(BuildSettings(), host, source.Replace("GET", "POST", StringComparison.Ordinal));
+
+        Assert.DoesNotContain("fake-unicode-private-value", updated);
+        StringAssert.Contains(host.LastUpdatedText!, $"secret {name} = \"fake-unicode-private-value\"");
+        StringAssert.Contains(host.LastUpdatedText!, "method POST");
+    }
+
     private static AiSettings BuildSettings()
     {
         return new()

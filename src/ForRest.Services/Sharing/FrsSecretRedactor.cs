@@ -13,8 +13,10 @@ public static partial class FrsSecretRedactor
 
     private const string RedactedSecretMarker = "\"***\"";
 
+    // Values must stay private while an identifier is incomplete or invalid.
+    // Identifier validation belongs to the compiler, not the sharing boundary.
     [GeneratedRegex(
-        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
+        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[^\s=]+)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex SecretDeclarationPattern();
 
