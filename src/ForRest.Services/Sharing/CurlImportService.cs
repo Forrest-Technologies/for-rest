@@ -13,6 +13,15 @@ public sealed class CurlImportService : ICurlImportService
 {
     #region Private Fields
 
+    private static readonly HashSet<string> valueFlags = new(
+    [
+        "-X", "--request", "-H", "--header", "-d", "--data", "--data-raw", "--data-binary", "--data-ascii",
+        "--data-urlencode", "--json", "-u", "--user", "--oauth2-bearer", "-A", "--user-agent", "-e", "--referer",
+        "-b", "--cookie", "-m", "--max-time", "--url",
+    ], StringComparer.Ordinal);
+
+    private const string ShortSwitches = "GILksSvifg#";
+
     /// <summary>Flags curl treats as taking a value which For-Rest does not map onto the script.</summary>
     private static readonly HashSet<string> ignoredValueFlags = new(StringComparer.Ordinal)
     {
@@ -252,10 +261,65 @@ public sealed class CurlImportService : ICurlImportService
         return index + 1;
     }
 
+    private static bool TryExpandOption(string token, out IReadOnlyList<string> expanded)
+    {
+        expanded = [];
+        if (token.Length <= 2 || token[0] != '-')
+        {
+            return false;
+        }
+
+        if (token.StartsWith("--", StringComparison.Ordinal))
+        {
+            var separator = token.IndexOf('=');
+            if (separator < 0)
+            {
+                return false;
+            }
+
+            var flag = token[..separator];
+            if (!valueFlags.Contains(flag) && !ignoredValueFlags.Contains(flag))
+            {
+                return false;
+            }
+
+            expanded = [flag, token[(separator + 1)..]];
+            return true;
+        }
+
+        List<string> flags = [];
+        for (var index = 1; index < token.Length; index++)
+        {
+            var flag = $"-{token[index]}";
+            if (valueFlags.Contains(flag) || ignoredValueFlags.Contains(flag))
+            {
+                flags.Add(flag);
+                if (index + 1 < token.Length)
+                {
+                    flags.Add(token[(index + 1)..]);
+                }
+
+                expanded = flags;
+                return true;
+            }
+
+            if (!ShortSwitches.Contains(token[index]))
+            {
+                return false;
+            }
+
+            flags.Add(flag);
+        }
+
+        expanded = flags;
+        return true;
+    }
+
     private static ParsedCurl ParseTokens(IReadOnlyList<string> tokens)
     {
         ParsedCurl parsed = new();
         int index = 0;
+        var pending = new Queue<string>();
         if (index < tokens.Count &&
             (string.Equals(tokens[index], "curl", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(tokens[index], "curl.exe", StringComparison.OrdinalIgnoreCase)))
@@ -263,10 +327,17 @@ public sealed class CurlImportService : ICurlImportService
             index++;
         }
 
-        while (index < tokens.Count)
+        while (index < tokens.Count || pending.Count > 0)
         {
-            string token = tokens[index];
-            index++;
+            var token = pending.Count > 0 ? pending.Dequeue() : tokens[index++];
+            if (TryExpandOption(token, out var expanded))
+            {
+                token = expanded[0];
+                foreach (var value in expanded.Skip(1))
+                {
+                    pending.Enqueue(value);
+                }
+            }
 
             switch (token)
             {
@@ -283,35 +354,35 @@ public sealed class CurlImportService : ICurlImportService
                     parsed.HeadOnly = false;
                     break;
                 case "-X" or "--request":
-                    parsed.ExplicitMethod = NextValue(tokens, ref index)?.ToUpperInvariant();
+                    parsed.ExplicitMethod = NextValue(tokens, ref index, pending)?.ToUpperInvariant();
                     break;
                 case "-H" or "--header":
-                    AddHeader(parsed, NextValue(tokens, ref index));
+                    AddHeader(parsed, NextValue(tokens, ref index, pending));
                     break;
                 case "-d" or "--data" or "--data-raw" or "--data-binary" or "--data-ascii":
-                    AddData(parsed, NextValue(tokens, ref index), urlEncode: false);
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: false);
                     break;
                 case "--data-urlencode":
-                    AddData(parsed, NextValue(tokens, ref index), urlEncode: true);
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: true);
                     break;
                 case "--json":
                     parsed.JsonFlag = true;
-                    AddData(parsed, NextValue(tokens, ref index), urlEncode: false);
+                    AddData(parsed, NextValue(tokens, ref index, pending), urlEncode: false);
                     break;
                 case "-u" or "--user":
-                    SetBasicAuth(parsed, NextValue(tokens, ref index));
+                    SetBasicAuth(parsed, NextValue(tokens, ref index, pending));
                     break;
                 case "--oauth2-bearer":
-                    parsed.BearerToken = NextValue(tokens, ref index);
+                    parsed.BearerToken = NextValue(tokens, ref index, pending);
                     break;
                 case "-A" or "--user-agent":
-                    parsed.Headers.Add(("User-Agent", NextValue(tokens, ref index) ?? string.Empty));
+                    parsed.Headers.Add(("User-Agent", NextValue(tokens, ref index, pending) ?? string.Empty));
                     break;
                 case "-e" or "--referer":
-                    parsed.Headers.Add(("Referer", NextValue(tokens, ref index) ?? string.Empty));
+                    parsed.Headers.Add(("Referer", NextValue(tokens, ref index, pending) ?? string.Empty));
                     break;
                 case "-b" or "--cookie":
-                    parsed.Headers.Add(("Cookie", NextValue(tokens, ref index) ?? string.Empty));
+                    parsed.Headers.Add(("Cookie", NextValue(tokens, ref index, pending) ?? string.Empty));
                     break;
                 case "-L" or "--location":
                     parsed.FollowRedirects = true;
@@ -320,10 +391,10 @@ public sealed class CurlImportService : ICurlImportService
                     parsed.Insecure = true;
                     break;
                 case "-m" or "--max-time":
-                    SetTimeout(parsed, NextValue(tokens, ref index));
+                    SetTimeout(parsed, NextValue(tokens, ref index, pending));
                     break;
                 case "--url":
-                    parsed.Url = NextValue(tokens, ref index);
+                    parsed.Url = NextValue(tokens, ref index, pending);
                     break;
                 case "--compressed" or "-s" or "--silent" or "-S" or "--show-error" or "-v" or "--verbose"
                     or "-i" or "--include" or "-f" or "--fail" or "-g" or "--globoff" or "--http1.1"
@@ -331,7 +402,7 @@ public sealed class CurlImportService : ICurlImportService
                     parsed.IgnoredFlags.Add(token);
                     break;
                 default:
-                    HandleUnknownToken(parsed, tokens, token, ref index);
+                    HandleUnknownToken(parsed, tokens, token, ref index, pending);
                     break;
             }
         }
@@ -344,7 +415,8 @@ public sealed class CurlImportService : ICurlImportService
         return parsed;
     }
 
-    private static void HandleUnknownToken(ParsedCurl parsed, IReadOnlyList<string> tokens, string token, ref int index)
+    private static void HandleUnknownToken(ParsedCurl parsed, IReadOnlyList<string> tokens, string token, ref int index,
+        Queue<string> pending)
     {
         if (!token.StartsWith('-') || token.Length <= 1)
         {
@@ -356,12 +428,17 @@ public sealed class CurlImportService : ICurlImportService
         parsed.IgnoredFlags.Add(token);
         if (ignoredValueFlags.Contains(token))
         {
-            NextValue(tokens, ref index);
+            NextValue(tokens, ref index, pending);
         }
     }
 
-    private static string? NextValue(IReadOnlyList<string> tokens, ref int index)
+    private static string? NextValue(IReadOnlyList<string> tokens, ref int index, Queue<string> pending)
     {
+        if (pending.TryDequeue(out var attached))
+        {
+            return attached;
+        }
+
         if (index >= tokens.Count)
         {
             throw new FormatException($"The curl option '{tokens[index - 1]}' requires a value.");
