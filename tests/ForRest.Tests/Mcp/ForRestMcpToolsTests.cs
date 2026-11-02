@@ -395,6 +395,32 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow("raw")]
+    [DataRow("base64")]
+    [DataRow("url")]
+    public async Task Get_run_response_scrubs_secrets_before_truncating_the_body(string encoding)
+    {
+        const string secret = "token@private/user";
+        var encoded = encoding switch
+        {
+            "base64" => Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)),
+            "url" => Uri.EscapeDataString(secret),
+            _ => secret,
+        };
+        var host = new FakeHost
+        {
+            Run = SampleRun($"token={encoded};safe") with { SecretValues = [secret] },
+        };
+        var tools = CreateTools(host);
+
+        var json = await tools.get_run_response("ws", "run-1", max_body_chars: 12);
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("token=***;sa", parsed.RootElement.GetProperty("body").GetString());
+        Assert.IsTrue(parsed.RootElement.GetProperty("bodyTruncated").GetBoolean());
+    }
+
+    [TestMethod]
     public async Task Get_run_response_truncates_body_when_requested()
     {
         FakeHost host = new() { Run = SampleRun("0123456789abcdef") };
