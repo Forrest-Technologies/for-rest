@@ -113,6 +113,13 @@ exposed tools.
 
 ## Security notes
 
+Native MCP clients may omit `Origin`. When that header is present, its scheme,
+host, and port must match the configured endpoint. Requests with other origins,
+credentials, non-root paths, queries, fragments, or multiple origin values receive
+HTTP 403. Wildcard bindings reject requests that carry `Origin`. Bearer
+authentication is checked separately. This follows the
+[MCP transport requirements](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#security-warning).
+
 - Bind to `127.0.0.1` unless you have a specific reason to expose the server on
   the network. On `0.0.0.0`, always set an `auth_token`.
 - The raw `settings.toml` holds secrets (`auth_token` and the AI `api_key`).
