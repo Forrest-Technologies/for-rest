@@ -12,7 +12,7 @@ public static class HttpCredentialHeaders
 
     private static readonly string[] sensitiveHeaderNameFragments =
     [
-        "api-key", "apikey", "token", "secret", "password", "auth", "credential",
+        "api-key", "api_key", "apikey", "token", "secret", "password", "auth", "credential",
     ];
 
     #endregion

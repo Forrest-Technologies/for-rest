@@ -55,6 +55,8 @@ public sealed class McpRawRequestRedactorTests
     [DataRow("X-Credential")]
     [DataRow("x-password")]
     [DataRow("APIKEY")]
+    [DataRow("api_key")]
+    [DataRow("X_API_KEY")]
     public void Credential_header_policy_is_shared_with_imports(string name)
     {
         var redacted = McpRawRequestRedactor.Redact($"GET https://fixture.test/\n{name}: fake-private-value");

@@ -9,6 +9,8 @@ public sealed class CurlCredentialImportTests
     #region Public Methods
 
     [TestMethod]
+    [DataRow("--header 'api_key: fake-api-key-2468'", "api_key", "fake-api-key-2468", "fake-api-key-2468")]
+    [DataRow("--header 'X_API_KEY: fake-api-key-2468'", "X_API_KEY", "fake-api-key-2468", "fake-api-key-2468")]
     [DataRow("--user 'reader:fake-password-9182'", "Authorization", "Basic cmVhZGVyOmZha2UtcGFzc3dvcmQtOTE4Mg==", "fake-password-9182")]
     [DataRow("--oauth2-bearer fake-bearer-7264", "Authorization", "Bearer fake-bearer-7264", "fake-bearer-7264")]
     [DataRow("--header 'Authorization: Bearer fake-header-5382'", "Authorization", "Bearer fake-header-5382", "fake-header-5382")]
