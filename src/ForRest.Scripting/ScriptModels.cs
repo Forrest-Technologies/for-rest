@@ -22,6 +22,9 @@ public sealed record ScriptExecutionRequest
 
     public Func<PreparedRequest, Task<ResponseSnapshot?>>? SendAsync { get; init; }
 
+    /// <summary>Host send seam that links attempt cancellation with the request's lifecycle token.</summary>
+    public Func<PreparedRequest, CancellationToken, Task<ResponseSnapshot?>>? SendWithCancellation { get; init; }
+
     public Func<string, IReadOnlyList<VariableDefinition>, Task<ScriptExecutionResult>>? ExecuteWorkspaceRequestAsync { get; init; }
 
     public IBrowserAutomationBridge? BrowserBridge { get; init; }

@@ -22,7 +22,18 @@ public sealed class ScriptRequestApi
         VariablesApi variablesApi,
         Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync = null,
         int maxSendIterations = 0)
-        : this(request, responseApi, variablesApi, sendAsync, maxSendIterations, null, null)
+        : this(request, responseApi, variablesApi, sendAsync, maxSendIterations, null, null, null)
+    {
+    }
+
+    public ScriptRequestApi(
+        PreparedRequest request,
+        ScriptResponseApi responseApi,
+        VariablesApi variablesApi,
+        Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync,
+        int maxSendIterations,
+        Func<PreparedRequest, CancellationToken, Task<ResponseSnapshot?>>? sendWithCancellation)
+        : this(request, responseApi, variablesApi, sendAsync, maxSendIterations, null, null, sendWithCancellation)
     {
     }
 
@@ -33,12 +44,14 @@ public sealed class ScriptRequestApi
         Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync,
         int maxSendIterations,
         ScriptSendState? sharedState,
-        IEnumerable<KeyValueDefinition>? seedHeaders)
+        IEnumerable<KeyValueDefinition>? seedHeaders,
+        Func<PreparedRequest, CancellationToken, Task<ResponseSnapshot?>>? sendWithCancellation)
     {
         originalRequest = request;
         this.responseApi = responseApi;
         this.variablesApi = variablesApi;
         this.sendAsync = sendAsync;
+        this.sendWithCancellation = sendWithCancellation;
         this.maxSendIterations = Math.Max(0, maxSendIterations);
 
         sendState = sharedState ?? new ScriptSendState(responseApi);
@@ -62,6 +75,8 @@ public sealed class ScriptRequestApi
     private readonly VariablesApi variablesApi;
 
     private readonly Func<PreparedRequest, Task<ResponseSnapshot?>>? sendAsync;
+
+    private readonly Func<PreparedRequest, CancellationToken, Task<ResponseSnapshot?>>? sendWithCancellation;
 
     private readonly int maxSendIterations;
 
@@ -117,6 +132,11 @@ public sealed class ScriptRequestApi
         return SendAsync();
     }
 
+    public Task<dynamic> send(CancellationToken cancellationToken)
+    {
+        return SendAsyncCore(null, cancellationToken);
+    }
+
     public async Task<dynamic> SendAsync()
     {
         return await SendAsyncCore(null);
@@ -136,7 +156,8 @@ public sealed class ScriptRequestApi
             sendAsync,
             maxSendIterations,
             sendState,
-            Headers.All())
+            Headers.All(),
+            sendWithCancellation)
         {
             Method = Method,
             Url = Url,
@@ -147,12 +168,14 @@ public sealed class ScriptRequestApi
         };
     }
 
-    private async Task<dynamic> SendAsyncCore(string? label)
+    private async Task<dynamic> SendAsyncCore(string? label, CancellationToken cancellationToken = default)
     {
-        if (sendAsync is null || maxSendIterations <= 0)
+        if ((sendAsync is null && sendWithCancellation is null) || maxSendIterations <= 0)
         {
             throw new InvalidOperationException("request.send() is disabled for this request. Increase max_send_iterations to enable it.");
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         var preparedRequest = ToPreparedRequest();
         RequestSnapshot requestSnapshot = PreparedRequestSnapshotBuilder.Build(preparedRequest);
@@ -161,7 +184,10 @@ public sealed class ScriptRequestApi
             throw new InvalidOperationException($"request.send() exceeded max_send_iterations ({maxSendIterations}).");
         }
 
-        ResponseSnapshot? response = await sendAsync(preparedRequest);
+        var response = sendWithCancellation is not null
+            ? await sendWithCancellation(preparedRequest, cancellationToken)
+            : await sendAsync!(preparedRequest);
+        cancellationToken.ThrowIfCancellationRequested();
         if (response is not null && !string.IsNullOrWhiteSpace(label))
         {
             response = response with { Label = label };

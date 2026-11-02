@@ -107,9 +107,17 @@ public sealed class RequestExecutionService(
             PreparedRequest? lastSentPreparedRequest = null;
             int remainingSendIterations = Math.Max(0, request.MaxSendIterations);
 
-            async Task<ResponseSnapshot?> ExecuteScriptSend(PreparedRequest scriptedRequest)
+            Task<ResponseSnapshot?> ExecuteScriptSend(PreparedRequest scriptedRequest)
+                => ExecuteScriptSendWithCancellation(scriptedRequest, CancellationToken.None);
+
+            async Task<ResponseSnapshot?> ExecuteScriptSendWithCancellation(
+                PreparedRequest scriptedRequest, CancellationToken sendCancellationToken)
             {
-                AuthenticatedPreparedRequest authenticatedScriptedRequest = await _requestAuthenticationService.PrepareAsync(scriptedRequest, iterationCancellationToken);
+                using var sendCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    iterationCancellationToken, sendCancellationToken);
+                var cancellation = sendCancellation.Token;
+                var authenticatedScriptedRequest = await _requestAuthenticationService.PrepareAsync(
+                    scriptedRequest, cancellation);
                 lastSentPreparedRequest = authenticatedScriptedRequest.Request;
                 using var scriptedHandler = CreateHandler(authenticatedScriptedRequest);
                 using var scriptedClient = new HttpClient(scriptedHandler)
@@ -121,7 +129,7 @@ public sealed class RequestExecutionService(
                     scriptedClient,
                     authenticatedScriptedRequest.Request,
                     request,
-                    iterationCancellationToken);
+                    cancellation);
 
                 if (!string.IsNullOrWhiteSpace(scriptedError))
                 {
@@ -135,7 +143,7 @@ public sealed class RequestExecutionService(
 
                 using (scriptedResponse)
                 {
-                    return await BuildResponseSnapshot(scriptedResponse, scriptedDuration, iterationCancellationToken);
+                    return await BuildResponseSnapshot(scriptedResponse, scriptedDuration, cancellation);
                 }
             }
 
@@ -165,6 +173,7 @@ public sealed class RequestExecutionService(
                     RequestVariables = request.Variables,
                     RuntimeVariables = runtimeVariables,
                     SendAsync = ExecuteScriptSend,
+                    SendWithCancellation = ExecuteScriptSendWithCancellation,
                     ExecuteWorkspaceRequestAsync = ExecuteWorkspaceRequestAsync,
                     BrowserBridge = _browserProvider.Current,
                     MaxSendIterations = request.MaxSendIterations,
@@ -219,7 +228,7 @@ public sealed class RequestExecutionService(
             string errorMessage = string.Empty;
 
             // Flow-only documents (e.g. browser automation) run their flow but never send an HTTP request.
-            if (responseSnapshot is null && !request.FlowOnly)
+            if (responseSnapshot is null && preRequestResult.SendCount == 0 && !request.FlowOnly)
             {
                 AuthenticatedPreparedRequest authenticatedPreparedRequest = await _requestAuthenticationService.PrepareAsync(preparedRequest, iterationCancellationToken);
                 preparedRequest = authenticatedPreparedRequest.Request;
@@ -276,6 +285,7 @@ public sealed class RequestExecutionService(
                     RequestVariables = request.Variables,
                     RuntimeVariables = runtimeVariables,
                     SendAsync = ExecuteScriptSend,
+                    SendWithCancellation = ExecuteScriptSendWithCancellation,
                     ExecuteWorkspaceRequestAsync = ExecuteWorkspaceRequestAsync,
                     MaxSendIterations = remainingSendIterations,
                 },

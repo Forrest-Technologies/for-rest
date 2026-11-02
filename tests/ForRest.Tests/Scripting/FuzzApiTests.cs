@@ -119,9 +119,9 @@ public sealed class FuzzApiTests
 
         FuzzResult result = await fuzz.Run(
             new[] { "slow" },
-            async payload =>
+            async (payload, cancellationToken) =>
             {
-                await Task.Delay(5000);
+                await Task.Delay(5000, cancellationToken);
                 return Response(200, 100, 1);
             },
             new FuzzOptions { MaxConcurrency = 1, TimeoutMs = 50, DelayMs = 0 });
@@ -130,6 +130,107 @@ public sealed class FuzzApiTests
         Assert.IsNotNull(result.Attempts[0].Error);
         StringAssert.Contains(result.Attempts[0].Error!, "timeout");
         Assert.AreEqual(1, result.AnomalyCount, "errored attempts surface as findings");
+    }
+
+    [TestMethod]
+    public async Task Timed_out_legacy_sends_keep_their_concurrency_slot_until_completion()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fuzz = new FuzzApi(new ConsoleApi());
+        var run = fuzz.Run(new[] { "first", "second" }, async payload =>
+        {
+            if (payload == "first")
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+            }
+            else
+            {
+                secondStarted.TrySetResult();
+            }
+            return Response(200, 100, 1);
+        }, new() { MaxConcurrency = 1, TimeoutMs = 10, DelayMs = 0 });
+
+        try
+        {
+            await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(100);
+            Assert.IsFalse(secondStarted.Task.IsCompleted,
+                "A timed-out send must finish before another send uses its concurrency slot.");
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        var result = await run;
+        StringAssert.Contains(result.Attempts[0].Error!, "timeout");
+        Assert.IsTrue(secondStarted.Task.IsCompleted);
+    }
+
+    [TestMethod]
+    public async Task Cancellation_aware_timeouts_finish_every_send_before_returning()
+    {
+        var active = 0;
+        var peak = 0;
+        var sync = new object();
+        var fuzz = new FuzzApi(new ConsoleApi());
+
+        var result = await fuzz.Run(new[] { "one", "two", "three" }, async (_, cancellationToken) =>
+        {
+            var current = Interlocked.Increment(ref active);
+            lock (sync)
+            {
+                peak = Math.Max(peak, current);
+            }
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return Response(200, 100, 1);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref active);
+            }
+        }, new() { MaxConcurrency = 1, TimeoutMs = 10, DelayMs = 0 });
+
+        Assert.AreEqual(1, peak);
+        Assert.AreEqual(0, active);
+        Assert.AreEqual(3, result.Count);
+        Assert.IsTrue(result.Attempts.All(attempt => attempt.Error?.Contains("timeout", StringComparison.Ordinal) == true));
+    }
+
+    [TestMethod]
+    public async Task Run_cancellation_stops_queued_attempts_and_finishes_the_active_send()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var active = 0;
+        var fuzz = new FuzzApi(new ConsoleApi(), null, cancellation.Token);
+        var run = fuzz.Run(new[] { "one", "two", "three" }, async (_, cancellationToken) =>
+        {
+            Interlocked.Increment(ref calls);
+            Interlocked.Increment(ref active);
+            started.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return Response(200, 100, 1);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref active);
+            }
+        }, new() { MaxConcurrency = 1, TimeoutMs = 0, DelayMs = 0 });
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual(0, active);
     }
 
     [TestMethod]

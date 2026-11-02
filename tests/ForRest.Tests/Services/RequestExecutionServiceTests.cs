@@ -503,7 +503,111 @@ public sealed class RequestExecutionServiceTests
 
     #endregion
 
+    #region Cancellation
+
+    [TestMethod]
+    public async Task Fuzz_deadlines_cancel_real_http_sends_without_a_fallback_request()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var connectionsClosed = ObserveCancelledConnections(listener, 2, deadline.Token);
+        List<ForRestScriptDiagnostic> diagnostics = [];
+        var flow = ForRestFlowScriptCompiler.Compile("""
+            let result = await fuzz.Run(new[] { "one", "two" }, async (string payload, System.Threading.CancellationToken cancellationToken) => {
+                var attempt = request.Clone();
+                var sent = await attempt.send(cancellationToken);
+                return sent.Snapshot;
+            }, new ForRest.Scripting.FuzzOptions { MaxConcurrency = 1, TimeoutMs = 500, DelayMs = 0 })
+            stash.Attempts = result.Count
+            stash.Errors = result.AnomalyCount
+            stash.Commit()
+            """, [], [], diagnostics);
+        Assert.IsEmpty(diagnostics);
+        var service = CreateScriptEnabledService(new RecordingExecutionHistoryRepository());
+
+        try
+        {
+            var result = await service.Execute(new(), new(), new()
+            {
+                Name = "Cancellation fixture",
+                UrlTemplate = $"http://127.0.0.1:{port}/slow",
+                PreRequestScript = flow,
+                MaxSendIterations = 2,
+                Retry = new() { Count = 2 },
+            }, null, deadline.Token);
+            Assert.AreEqual(ExecutionState.Completed, result.State, result.Runs.Single().ErrorMessage);
+            await connectionsClosed.WaitAsync(TimeSpan.FromSeconds(2));
+            var row = result.Runs.Single().Stash.Rows.Single();
+            Assert.AreEqual("2", row.Values["Attempts"]);
+            Assert.AreEqual("2", row.Values["Errors"]);
+            Assert.IsNull(result.LatestResponse);
+        }
+        finally
+        {
+            deadline.Cancel();
+            listener.Stop();
+            try
+            {
+                await connectionsClosed;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (SocketException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
+    #endregion
+
     #region Private Methods
+
+    private static async Task ObserveCancelledConnections(
+        TcpListener listener, int count, CancellationToken cancellationToken)
+    {
+        List<Task> pending = [];
+        try
+        {
+            for (var index = 0; index < count; index++)
+            {
+                var client = await listener.AcceptTcpClientAsync(cancellationToken);
+                pending.Add(ObserveConnectionClose(client, cancellationToken));
+            }
+        }
+        finally
+        {
+            await Task.WhenAll(pending);
+        }
+    }
+
+    private static async Task ObserveConnectionClose(TcpClient client, CancellationToken cancellationToken)
+    {
+        using (client)
+        {
+            var receivedBytes = 0;
+            var buffer = new byte[1024];
+            try
+            {
+                var read = await client.GetStream().ReadAsync(buffer, cancellationToken);
+                while (read > 0)
+                {
+                    receivedBytes += read;
+                    read = await client.GetStream().ReadAsync(buffer, cancellationToken);
+                }
+            }
+            catch (IOException)
+            {
+                // A cancelled client may reset the connection instead of sending FIN.
+            }
+            Assert.IsGreaterThan(0, receivedBytes);
+        }
+    }
 
     private static IRequestExecutionService CreateScriptEnabledService(RecordingExecutionHistoryRepository historyRepository)
     {
