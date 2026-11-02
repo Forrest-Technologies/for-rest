@@ -5,3 +5,5 @@ global using Microsoft.Extensions.Logging;
 global using ForRest.Browser;
 global using ForRest.Domain;
 global using ForRest.Models;
+global using Microsoft.CodeAnalysis.CSharp;
+global using Microsoft.CodeAnalysis.CSharp.Syntax;

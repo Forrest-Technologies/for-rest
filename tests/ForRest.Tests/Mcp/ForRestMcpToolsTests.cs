@@ -86,6 +86,56 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task Script_reads_do_not_expose_credentials_in_cached_pre_request_code(bool staleSource)
+    {
+        const string secret = "fake-secret-9000";
+        const string original = """
+            method GET
+            url "https://example.test/"
+            flow {
+                secret api_key = "fake-secret-9000"
+            }
+            """;
+        var compilation = new ForRestScriptCompiler(new()).Compile(original, new());
+        Assert.IsTrue(compilation.Succeeded);
+        Assert.IsNotNull(compilation.Payload);
+        var compiled = compilation.Payload.Request.PreRequestScript;
+        StringAssert.Contains(compiled, secret);
+        var current = staleSource ? "method GET\nurl \"https://example.test/\"" : original;
+        var tools = CreateTools(new FakeHost
+        {
+            Script = new(WorkspaceId: "ws", WorkspaceName: "Tests", Location: "/requests/probe",
+                Name: "Probe", Method: "GET", Summary: "", Source: current, PreRequestScript: compiled),
+        });
+
+        var json = await tools.get_script("ws", "/requests/probe");
+
+        Assert.DoesNotContain(secret, json);
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("***", parsed.RootElement.GetProperty("preRequestScript").GetString());
+        Assert.IsTrue(parsed.RootElement.GetProperty("preRequestScriptRedacted").GetBoolean());
+        StringAssert.Contains(parsed.RootElement.GetProperty("source").GetString()!, "method GET");
+    }
+
+    [TestMethod]
+    public async Task Script_reads_distinguish_empty_cached_code_from_redacted_code()
+    {
+        var tools = CreateTools(new FakeHost
+        {
+            Script = new(WorkspaceId: "ws", WorkspaceName: "Tests", Location: "/requests/probe",
+                Name: "Probe", Method: "GET", Summary: "", Source: "method GET", PreRequestScript: ""),
+        });
+
+        var json = await tools.get_script("ws", "/requests/probe");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(string.Empty, parsed.RootElement.GetProperty("preRequestScript").GetString());
+        Assert.IsFalse(parsed.RootElement.GetProperty("preRequestScriptRedacted").GetBoolean());
+    }
+
+    [TestMethod]
     public void Build_attack_script_emits_runnable_query_fuzz_harness()
     {
         ForRestMcpTools tools = CreateTools(host: null);
@@ -108,7 +158,7 @@ public sealed class ForRestMcpToolsTests
         string script = tools.build_attack_script("https://target.test/items", "xss", injection: "body");
 
         StringAssert.Contains(script, "method = POST");
-        StringAssert.Contains(script, "request.body = json.Stringify(new { value = payload })");
+        StringAssert.Contains(script, "request.body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload })");
     }
 
     [TestMethod]
@@ -188,7 +238,7 @@ public sealed class ForRestMcpToolsTests
             "https://target.test/items", "xss", injection: "body", restrict_to_host: false);
 
         StringAssert.Contains(script, "method = POST");
-        StringAssert.Contains(script, "request.body = json.Stringify(new { value = payload })");
+        StringAssert.Contains(script, "attempt.Body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload })");
         Assert.IsFalse(script.Contains("fuzz.AllowHost", System.StringComparison.Ordinal));
     }
 
@@ -384,6 +434,82 @@ public sealed class ForRestMcpToolsTests
     }
 
     [TestMethod]
+    [DataRow("target", 1, false)]
+    [DataRow("target\ntarget", 2, true)]
+    public async Task Grep_run_response_reports_actual_totals_and_exact_truncation(
+        string body, int total, bool truncated)
+    {
+        var tools = CreateTools(new FakeHost { Run = SampleRun(body) });
+
+        var json = await tools.grep_run_response("ws", "run-1", "target", max_matches: 1);
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(total, parsed.RootElement.GetProperty("totalMatches").GetInt32());
+        Assert.AreEqual(truncated, parsed.RootElement.GetProperty("truncated").GetBoolean());
+        Assert.AreEqual(1, parsed.RootElement.GetProperty("matches").GetArrayLength());
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_handles_maximum_integer_context_without_overflow()
+    {
+        var tools = CreateTools(new FakeHost { Run = SampleRun("before\ntarget\nafter") });
+
+        var json = await tools.grep_run_response("ws", "run-1", "target", context_lines: int.MaxValue);
+
+        using var parsed = JsonDocument.Parse(json);
+        var context = parsed.RootElement.GetProperty("matches")[0].GetProperty("context");
+        Assert.AreEqual(3, context.GetArrayLength());
+        Assert.AreEqual("before", context[0].GetProperty("text").GetString());
+        Assert.AreEqual("after", context[2].GetProperty("text").GetString());
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_regex_case_matching_is_independent_of_host_culture()
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+            var tools = CreateTools(new FakeHost { Run = SampleRun("file") });
+
+            var json = await tools.grep_run_response("ws", "run-1", "FILE", is_regex: true);
+
+            using var parsed = JsonDocument.Parse(json);
+            Assert.AreEqual(1, parsed.RootElement.GetProperty("totalMatches").GetInt32());
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+        }
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_bounds_catastrophic_regex_backtracking()
+    {
+        var tools = CreateTools(new FakeHost { Run = SampleRun($"{new string('a', 2000)}!") });
+
+        var result = await tools.grep_run_response("ws", "run-1", "(a+)+$", is_regex: true);
+
+        StringAssert.Contains(result, "timed out");
+        StringAssert.Contains(result, "substring search");
+    }
+
+    [TestMethod]
+    public async Task Grep_run_response_caps_context_windows_to_fifty_lines_each_side()
+    {
+        var lines = Enumerable.Range(0, 201).Select(index => index == 100 ? "target" : $"line {index}");
+        var tools = CreateTools(new FakeHost { Run = SampleRun(string.Join('\n', lines)) });
+
+        var json = await tools.grep_run_response("ws", "run-1", "target", context_lines: int.MaxValue);
+
+        using var parsed = JsonDocument.Parse(json);
+        var context = parsed.RootElement.GetProperty("matches")[0].GetProperty("context");
+        Assert.AreEqual(101, context.GetArrayLength());
+        Assert.AreEqual(51, context[0].GetProperty("line").GetInt32());
+        Assert.AreEqual(151, context[100].GetProperty("line").GetInt32());
+    }
+
+    [TestMethod]
     public async Task Grep_run_response_reports_invalid_regex()
     {
         FakeHost host = new() { Run = SampleRun("anything") };
@@ -392,6 +518,32 @@ public sealed class ForRestMcpToolsTests
         string result = await tools.grep_run_response("ws", "run-1", "[", is_regex: true);
 
         StringAssert.Contains(result, "Invalid regular expression");
+    }
+
+    [TestMethod]
+    [DataRow("raw")]
+    [DataRow("base64")]
+    [DataRow("url")]
+    public async Task Get_run_response_scrubs_secrets_before_truncating_the_body(string encoding)
+    {
+        const string secret = "token@private/user";
+        var encoded = encoding switch
+        {
+            "base64" => Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)),
+            "url" => Uri.EscapeDataString(secret),
+            _ => secret,
+        };
+        var host = new FakeHost
+        {
+            Run = SampleRun($"token={encoded};safe") with { SecretValues = [secret] },
+        };
+        var tools = CreateTools(host);
+
+        var json = await tools.get_run_response("ws", "run-1", max_body_chars: 12);
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("token=***;sa", parsed.RootElement.GetProperty("body").GetString());
+        Assert.IsTrue(parsed.RootElement.GetProperty("bodyTruncated").GetBoolean());
     }
 
     [TestMethod]
@@ -436,6 +588,58 @@ public sealed class ForRestMcpToolsTests
         StringAssert.Contains(json, "Accept: application/json");
         Assert.IsFalse(json.Contains("abc123", System.StringComparison.Ordinal));
         Assert.IsFalse(json.Contains("key-456", System.StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow("12345")]
+    [DataRow("false")]
+    [DataRow("a")]
+    [DataRow("\"")]
+    [DataRow("\\")]
+    [DataRow("🔑")]
+    public async Task Response_tools_redact_short_secrets_without_altering_JSON_field_names(string secret)
+    {
+        var run = SampleRun("credential=" + secret) with { SecretValues = [secret] };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_response("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        var expected = "credential=".Replace(secret, "***", StringComparison.Ordinal) + "***";
+        Assert.AreEqual(expected, parsed.RootElement.GetProperty("body").GetString());
+        Assert.IsFalse(parsed.RootElement.GetProperty("bodyTruncated").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task Stash_dictionary_keys_are_redacted_without_changing_protocol_property_names()
+    {
+        var run = SampleRun("safe") with
+        {
+            SecretValues = ["columns"],
+            Stash = new(["columns"], [new Dictionary<string, string> { ["columns"] = "safe" }]),
+        };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_stash("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual("***", parsed.RootElement.GetProperty("columns")[0].GetString());
+        Assert.AreEqual("safe", parsed.RootElement.GetProperty("rows")[0].GetProperty("***").GetString());
+    }
+
+    [TestMethod]
+    public async Task Numeric_secrets_do_not_corrupt_response_metadata_JSON()
+    {
+        var run = SampleRun("credential=123456") with { SecretValues = ["123456"] };
+        Assert.IsNotNull(run.Response);
+        run = run with { Response = run.Response with { SizeBytes = 123456 } };
+        var tools = CreateTools(new FakeHost { Run = run });
+
+        var json = await tools.get_run_response("ws", "run-1");
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.AreEqual(123456L, parsed.RootElement.GetProperty("sizeBytes").GetInt64());
+        Assert.AreEqual("credential=***", parsed.RootElement.GetProperty("body").GetString());
     }
 
     [TestMethod]
@@ -614,6 +818,98 @@ public sealed class ForRestMcpToolsTests
 
     #endregion
 
+    #region Cancellation
+
+    [TestMethod]
+    public void Cancellation_tokens_do_not_change_the_advertised_tool_arguments()
+    {
+        var tools = CreateTools(new FakeHost());
+        var methods = typeof(ForRestMcpTools).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(method => method.ReturnType == typeof(Task<string>));
+        foreach (var method in methods)
+        {
+            var tool = McpServerTool.Create(method, tools);
+            var properties = tool.ProtocolTool.InputSchema.GetProperty("properties");
+            Assert.IsFalse(properties.TryGetProperty("cancellationToken", out _), method.Name);
+        }
+    }
+
+    [TestMethod]
+    public async Task Already_cancelled_workspace_creation_does_not_mutate_the_host()
+    {
+        var host = new FakeHost();
+        var tools = CreateTools(host);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            tools.create_workspace("Do not create", cancellation.Token));
+
+        Assert.IsNull(host.LastCreatedWorkspaceName);
+    }
+
+    [TestMethod]
+    public async Task Server_shutdown_cancels_in_flight_script_execution()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cleanup = new CancellationTokenSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new FakeHost
+        {
+            ExecutionHandler = async cancellationToken =>
+            {
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cleanup.Token);
+                started.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, linked.Token);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    stopped.TrySetResult();
+                    throw;
+                }
+
+                throw new InvalidOperationException("The execution should only end through cancellation.");
+            },
+        };
+        using var portReservation = new TcpListener(IPAddress.Loopback, 0);
+        portReservation.Start();
+        var port = ((IPEndPoint)portReservation.LocalEndpoint).Port;
+        portReservation.Stop();
+        await using var server = new ForRestMcpServer(new()
+        {
+            Enabled = true,
+            Port = port,
+        }, CreateTools(host));
+        await server.StartAsync(deadline.Token);
+        await using var client = await McpClient.CreateAsync(new HttpClientTransport(new()
+        {
+            Endpoint = new Uri($"http://127.0.0.1:{port}/"),
+            TransportMode = HttpTransportMode.StreamableHttp,
+        }), cancellationToken: deadline.Token);
+        var request = client.CallToolAsync("execute_script", new Dictionary<string, object?>
+        {
+            ["workspace_id"] = "workspace",
+            ["source"] = "method GET\nurl \"https://example.test\"",
+        }, cancellationToken: deadline.Token).AsTask();
+        try
+        {
+            await started.Task.WaitAsync(deadline.Token);
+            await server.StopAsync(deadline.Token);
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(1), deadline.Token);
+        }
+        finally
+        {
+            await cleanup.CancelAsync();
+            await ((Task)request).WaitAsync(TimeSpan.FromSeconds(3))
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    #endregion
+
     #region Helpers
 
     private static ForRestMcpTools CreateTools(IForRestMcpHost? host)
@@ -667,7 +963,11 @@ public sealed class ForRestMcpToolsTests
 
         public ForRestMcpExecutionResult? Execution { get; set; }
 
+        public Func<CancellationToken, Task<ForRestMcpExecutionResult>>? ExecutionHandler { get; set; }
+
         public ForRestMcpRunDetail? Run { get; set; }
+
+        public ForRestMcpScriptDetail? Script { get; set; }
 
         public ForRestMcpServerSettingsView Settings { get; set; } =
             new(false, "127.0.0.1", 7341, false, 4, "http://127.0.0.1:7341/");
@@ -709,7 +1009,7 @@ public sealed class ForRestMcpToolsTests
             => Task.FromResult(ForRestMcpMutationResult.Ok("deleted"));
 
         public Task<ForRestMcpScriptDetail?> GetScript(string workspaceId, string location, CancellationToken cancellationToken)
-            => Task.FromResult<ForRestMcpScriptDetail?>(null);
+            => Task.FromResult(Script);
 
         public Task<ForRestMcpMutationResult> CreateScript(string workspaceId, string name, string source, CancellationToken cancellationToken)
         {
@@ -730,7 +1030,8 @@ public sealed class ForRestMcpToolsTests
             => new(true, [], "GET", "https://x.test", "Sample");
 
         public Task<ForRestMcpExecutionResult> ExecuteScript(string workspaceId, string source, string? requestName, CancellationToken cancellationToken)
-            => Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));
+            => ExecutionHandler?.Invoke(cancellationToken)
+                ?? Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));
 
         public Task<ForRestMcpExecutionResult> ExecuteStoredScript(string workspaceId, string location, CancellationToken cancellationToken)
             => Task.FromResult(Execution ?? throw new System.InvalidOperationException("No execution configured."));

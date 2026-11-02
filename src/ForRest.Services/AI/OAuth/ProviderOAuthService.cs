@@ -275,8 +275,8 @@ public sealed class ProviderOAuthService(
 
     private async Task PersistToken(AiProviderKind provider, ProviderOAuthToken token, CancellationToken cancellationToken)
     {
-        tokenCache[provider] = token;
         await tokenStore.Save(provider, token, cancellationToken);
+        tokenCache[provider] = token;
     }
 
     private static OAuthProviderConfig ResolveConfig(AiProviderKind provider, OAuthProviderConfig? configOverride)

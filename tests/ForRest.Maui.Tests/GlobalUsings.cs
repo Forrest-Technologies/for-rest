@@ -6,3 +6,6 @@ global using System.Threading;
 global using System.Threading.Tasks;
 global using Microsoft.Maui;
 global using Microsoft.Maui.Controls;
+global using System.Text;
+global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Logging.Abstractions;

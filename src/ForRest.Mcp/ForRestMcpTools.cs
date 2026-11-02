@@ -40,6 +40,12 @@ public sealed class ForRestMcpTools
     private readonly IAiDocumentationSearchService documentationSearch;
     private readonly Func<IForRestMcpHost?> hostAccessor;
 
+    private const int MaxGrepContextLines = 50;
+    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan RegexSearchTimeout = TimeSpan.FromSeconds(1);
+    private const string RegexTimeoutMessage =
+        "Regular expression search timed out. Use a simpler pattern or a substring search.";
+
     private const string NoHostMessage =
         "No desktop canvas host is wired to this MCP server. Workbench, execution, and results tools require the For-Rest desktop app to be running.";
 
@@ -67,12 +73,14 @@ public sealed class ForRestMcpTools
 
     #region Passive tools
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the canonical ForRest scripting language reference as markdown. Use this to learn the DSL (request surface, flow, auth modes, retry, delay, payloads, expect) before authoring or editing scripts.")]
     public string get_instructions()
     {
         return ForRestLanguageCatalog.BuildMarkdownReference();
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Searches the local ForRest documentation corpus and returns the top matching entries with their content. Use this before guessing about language or app behavior.")]
     public string search_docs(
         [Description("Natural-language query describing what you want to know about For-Rest.")] string query,
@@ -102,6 +110,7 @@ public sealed class ForRestMcpTools
         }));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists every AI provider preset For-Rest ships out of the box, with default endpoints, transports, and aliases.")]
     public string list_ai_providers()
     {
@@ -112,6 +121,7 @@ public sealed class ForRestMcpTools
         return providerDoc?.Content ?? "AI provider reference is not registered.";
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists every built-in security test payload category exposed to ForRest scripts via the `payloads` namespace, along with the number of payloads in each.")]
     public string list_payload_categories()
     {
@@ -124,6 +134,7 @@ public sealed class ForRestMcpTools
         }));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the raw payload list for a given category (sqli, xss, path_traversal, command_injection, ssti, open_redirect, xxe, nosqli, crlf, ssrf, or any custom category).")]
     public string get_payloads(
         [Description("Category name or alias.")] string category)
@@ -138,6 +149,7 @@ public sealed class ForRestMcpTools
         return Serialize(list);
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Generates a ready-to-run ForRest attack/fuzz script that iterates a built-in payload category against a target, sends one request per payload, and stashes the status, size, and payload for each attempt. Run the returned script with execute_script. Use this for authorized security testing only.")]
     public string build_attack_script(
         [Description("Absolute base target URL, e.g. https://api.example.test/items. For 'query' injection the payload is appended as a query value; for 'url_path' it is appended to the path; for 'body'/'header' the base URL is used as-is.")] string target_url,
@@ -184,20 +196,18 @@ public sealed class ForRestMcpTools
         switch (mode)
         {
             case "url_path":
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}/{{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    request.url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)}");
                 break;
             case "body":
                 builder.AppendLine("    request.content_type = \"application/json\"");
-                builder.AppendLine("    request.body = json.Stringify(new { value = payload })");
+                builder.AppendLine("    request.body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload })");
                 break;
             case "header":
                 string headerName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "X-Fuzz" : parameter.Trim());
                 builder.AppendLine($"    request.headers[\"{headerName}\"] = payload");
                 break;
             default: // query
-                string queryName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
-                string separator = target_url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}{separator}{queryName}={{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    request.url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)}");
                 break;
         }
 
@@ -211,6 +221,7 @@ public sealed class ForRestMcpTools
         return builder.ToString();
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Diffs and fingerprints two HTTP responses (a baseline and a candidate) the same way the ForRest `fuzz` engine does, and reports any anomalies: status changes, large size deltas, and time-based anomalies (the classic blind-injection signal). Pure analysis — no host or network required. Use it to triage whether a fuzz attempt's response is meaningfully different from a clean baseline.")]
     public string analyze_responses(
         [Description("Baseline (known-good) response status code.")] int baseline_status,
@@ -262,6 +273,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Generates a ready-to-run ForRest script that uses the new `fuzz` engine: it iterates a built-in payload category against a target with bounded concurrency, captures a baseline, diffs every response, and stashes the flagged anomalies. Optionally constrains the run to an in-scope host allowlist. Run the returned script with execute_script. Authorized security testing only.")]
     public string build_fuzz_script(
         [Description("Absolute base target URL, e.g. https://api.example.test/search.")] string target_url,
@@ -310,35 +322,35 @@ public sealed class ForRestMcpTools
         builder.AppendLine("flow {");
         if (restrict_to_host)
         {
-            builder.AppendLine($"  fuzz.AllowHost(\"{EscapeForRestString(host)}\")   # authorized scope only");
+            builder.AppendLine($"  fuzz.AllowHost(\"{EscapeForRestString(host)}\")");
         }
 
         builder.AppendLine($"  let opts = new ForRest.Scripting.FuzzOptions {{ MaxConcurrency = {safeConcurrency}, TimeoutMs = {safeTimeout}, DelayMs = {safeDelay} }}");
-        builder.AppendLine($"  let result = await fuzz.Run(payloads.Category(\"{categoryLiteral}\"), async (string payload) => {{");
+        builder.Append($"  let result = await fuzz.Run(payloads.Category(\"{categoryLiteral}\"), ");
+        builder.AppendLine("async (string payload, System.Threading.CancellationToken cancellationToken) => {");
+        builder.AppendLine("    var attempt = request.Clone();");
 
         switch (mode)
         {
             case "url_path":
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}/{{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    attempt.Url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
                 break;
             case "body":
-                builder.AppendLine("    request.content_type = \"application/json\"");
-                builder.AppendLine("    request.body = json.Stringify(new { value = payload })");
+                builder.AppendLine("    attempt.ContentType = \"application/json\";");
+                builder.AppendLine("    attempt.Body = json.Stringify(new System.Text.Json.Nodes.JsonObject { [\"value\"] = payload });");
                 break;
             case "header":
                 string headerName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "X-Fuzz" : parameter.Trim());
-                builder.AppendLine($"    request.headers[\"{headerName}\"] = payload");
+                builder.AppendLine($"    attempt.Headers[\"{headerName}\"] = payload;");
                 break;
             default: // query
-                string queryName = EscapeForRestString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
-                string separator = target_url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-                builder.AppendLine($"    request.url = $\"{baseUrlLiteral}{separator}{queryName}={{encoding.UrlEncode(payload)}}\"");
+                builder.AppendLine($"    attempt.Url = {BuildPayloadUrlExpression(target_url.Trim(), mode, parameter)};");
                 break;
         }
 
-        builder.AppendLine("    let sent = await request.send()");
-        builder.AppendLine("    return sent.Snapshot");
-        builder.AppendLine($"  }}, opts, \"{categoryLiteral}\")");
+        builder.AppendLine("    var sent = await attempt.send(cancellationToken);");
+        builder.AppendLine("    return sent.Snapshot;");
+        builder.AppendLine($"  }}, (ForRest.Scripting.FuzzOptions)opts, \"{categoryLiteral}\")");
         builder.AppendLine();
         builder.AppendLine("  console.Log(result.Summarize())");
         builder.AppendLine("  foreach f in result.Findings {");
@@ -355,12 +367,13 @@ public sealed class ForRestMcpTools
 
     #region Active document
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns a JSON snapshot of the active ForRest request document (the selected document in the selected workspace): id, title, language, workspace, and full source text. Secret values are redacted.")]
-    public Task<string> get_active_request()
+    public Task<string> get_active_request(CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpDocumentSnapshot? snapshot = await host.GetActiveDocument(CancellationToken.None);
+            ForRestMcpDocumentSnapshot? snapshot = await host.GetActiveDocument(cancellationToken);
             if (snapshot is null)
             {
                 return "No active document is open.";
@@ -377,89 +390,109 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Replaces the entire source of the active ForRest request document with the supplied text. The host restores any redacted secret declarations before saving. The new source should be valid ForRest script.")]
     public Task<string> replace_active_request(
-        [Description("Full ForRest script to install as the new active document body.")] string new_source)
+        [Description("Full ForRest script to install as the new active document body.")] string new_source,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(new_source))
         {
             return Task.FromResult("new_source must not be empty.");
         }
 
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpUpdateResult result = await host.ReplaceActiveDocument(new_source, CancellationToken.None);
+            ForRestMcpUpdateResult result = await host.ReplaceActiveDocument(new_source, cancellationToken);
             return result.Succeeded
                 ? "Active document replaced."
                 : $"Active document replace failed: {result.ErrorMessage}";
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Selects which document is active by workspace id and script location, so subsequent active-document tools target it.")]
     public Task<string> set_active_request(
         [Description("Workspace id (GUID) from list_workspaces.")] string workspace_id,
-        [Description("Script location/path from list_workspaces (e.g. /requests/get-users).")] string location)
+        [Description("Script location/path from list_workspaces (e.g. /requests/get-users).")] string location,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Describe(await host.SetActiveDocument(workspace_id, location, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.SetActiveDocument(workspace_id, location, cancellationToken)));
     }
 
     #endregion
 
     #region Workspace CRUD
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists the workspaces in the live workbench, each with its scripts (name, HTTP method, URL template, location). Start here to orient before editing or executing.")]
-    public Task<string> list_workspaces()
+    public Task<string> list_workspaces(CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Serialize((await host.ListWorkspaces(CancellationToken.None)).Select(MapWorkspace)));
+        return WithHostAsync(cancellationToken, async host =>
+            Serialize((await host.ListWorkspaces(cancellationToken)).Select(MapWorkspace)));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns a single workspace by id with its scripts.")]
     public Task<string> get_workspace(
-        [Description("Workspace id (GUID).")] string workspace_id)
+        [Description("Workspace id (GUID).")] string workspace_id,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpWorkspaceSummary? workspace = await host.GetWorkspace(workspace_id, CancellationToken.None);
+            ForRestMcpWorkspaceSummary? workspace = await host.GetWorkspace(workspace_id, cancellationToken);
             return workspace is null
                 ? $"No workspace found with id '{workspace_id}'."
                 : Serialize(MapWorkspace(workspace));
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Creates a new empty workspace and returns its id.")]
     public Task<string> create_workspace(
-        [Description("Display name for the new workspace.")] string name)
+        [Description("Display name for the new workspace.")] string name,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Describe(await host.CreateWorkspace(name, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.CreateWorkspace(name, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Renames a workspace.")]
     public Task<string> rename_workspace(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("New display name.")] string new_name)
+        [Description("New display name.")] string new_name,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Describe(await host.RenameWorkspace(workspace_id, new_name, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.RenameWorkspace(workspace_id, new_name, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Deletes a workspace and all of its scripts. This is destructive and cannot be undone.")]
     public Task<string> delete_workspace(
-        [Description("Workspace id (GUID).")] string workspace_id)
+        [Description("Workspace id (GUID).")] string workspace_id,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Describe(await host.DeleteWorkspace(workspace_id, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.DeleteWorkspace(workspace_id, cancellationToken)));
     }
 
     #endregion
 
     #region Script CRUD
 
-    [Description("Returns a single script's full detail (name, method, summary, source, pre-request script). Secret values in the source are redacted.")]
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Returns a script's name, method, summary, and ForRest source with secret declarations redacted. Cached pre-request code is withheld because it can contain credentials.")]
     public Task<string> get_script(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("Script location/path from list_workspaces.")] string location)
+        [Description("Script location/path from list_workspaces.")] string location,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpScriptDetail? script = await host.GetScript(workspace_id, location, CancellationToken.None);
+            ForRestMcpScriptDetail? script = await host.GetScript(workspace_id, location, cancellationToken);
             if (script is null)
             {
                 return $"No script found at '{location}' in workspace '{workspace_id}'.";
@@ -474,60 +507,74 @@ public sealed class ForRestMcpTools
                 method = script.Method,
                 summary = script.Summary,
                 source = McpSecretRedactor.Redact(script.Source),
-                preRequestScript = script.PreRequestScript,
+                preRequestScript = string.IsNullOrEmpty(script.PreRequestScript) ? string.Empty : "***",
+                preRequestScriptRedacted = !string.IsNullOrEmpty(script.PreRequestScript),
             });
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Creates a new request script in a workspace from ForRest source text and returns its location.")]
     public Task<string> create_script(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Display name for the new script.")] string name,
-        [Description("Full ForRest script source.")] string source)
+        [Description("Full ForRest script source.")] string source,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(source))
         {
             return Task.FromResult("source must not be empty.");
         }
 
-        return WithHostAsync(async host => Describe(await host.CreateScript(workspace_id, name, source, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.CreateScript(workspace_id, name, source, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Replaces the source of an existing script. The host restores any redacted secret declarations before saving.")]
     public Task<string> update_script(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Script location/path.")] string location,
-        [Description("Full replacement ForRest script source.")] string new_source)
+        [Description("Full replacement ForRest script source.")] string new_source,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(new_source))
         {
             return Task.FromResult("new_source must not be empty.");
         }
 
-        return WithHostAsync(async host => Describe(await host.UpdateScript(workspace_id, location, new_source, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.UpdateScript(workspace_id, location, new_source, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Renames an existing script.")]
     public Task<string> rename_script(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Script location/path.")] string location,
-        [Description("New display name.")] string new_name)
+        [Description("New display name.")] string new_name,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Describe(await host.RenameScript(workspace_id, location, new_name, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.RenameScript(workspace_id, location, new_name, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Deletes a script from a workspace. This is destructive and cannot be undone.")]
     public Task<string> delete_script(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("Script location/path.")] string location)
+        [Description("Script location/path.")] string location,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Describe(await host.DeleteScript(workspace_id, location, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.DeleteScript(workspace_id, location, cancellationToken)));
     }
 
     #endregion
 
     #region Compile / execute
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Compiles a ForRest script without sending any request and returns diagnostics plus the resolved method, URL, and request name. Use this to validate edits before executing.")]
     public string compile_script(
         [Description("Workspace id (GUID) the script belongs to. Affects variable scoping.")] string workspace_id,
@@ -547,37 +594,41 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Compiles and executes a ForRest script against the live HTTP pipeline (real network request) and returns the response, tests, debug logs, and stash. The run is saved to the workspace's history. Use for authorized testing only.")]
     public Task<string> execute_script(
         [Description("Workspace id (GUID) to execute under.")] string workspace_id,
         [Description("Full ForRest script source to execute.")] string source,
-        [Description("Optional request name used in history and diagnostics.")] string request_name = "")
+        [Description("Optional request name used in history and diagnostics.")] string request_name = "",
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(source))
         {
             return Task.FromResult("source must not be empty.");
         }
 
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
             ForRestMcpExecutionResult result = await host.ExecuteScript(
                 workspace_id,
                 source,
                 string.IsNullOrWhiteSpace(request_name) ? null : request_name,
-                CancellationToken.None);
-            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
+                cancellationToken);
+            return Serialize(MapExecution(result), result.SecretValues);
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Executes a stored script (by workspace id and location) against the live HTTP pipeline and returns the response, tests, debug logs, and stash. The run is saved to history.")]
     public Task<string> execute_stored_script(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("Script location/path from list_workspaces.")] string location)
+        [Description("Script location/path from list_workspaces.")] string location,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpExecutionResult result = await host.ExecuteStoredScript(workspace_id, location, CancellationToken.None);
-            return McpSecretValueScrubber.Scrub(Serialize(MapExecution(result)), result.SecretValues);
+            var result = await host.ExecuteStoredScript(workspace_id, location, cancellationToken);
+            return Serialize(MapExecution(result), result.SecretValues);
         });
     }
 
@@ -585,23 +636,28 @@ public sealed class ForRestMcpTools
 
     #region Results / monitoring
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Lists recent execution runs for a workspace (most recent first) with status, target, timing, and any error. Use this to monitor what has been executed.")]
     public Task<string> list_runs(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("Maximum number of runs to return. Defaults to 20, capped at 200.")] int max_results = 20)
+        [Description("Maximum number of runs to return. Defaults to 20, capped at 200.")] int max_results = 20,
+        CancellationToken cancellationToken = default)
     {
         int limit = Math.Clamp(max_results, 1, 200);
-        return WithHostAsync(async host => Serialize((await host.ListRuns(workspace_id, limit, CancellationToken.None)).Select(MapRunSummary)));
+        return WithHostAsync(cancellationToken, async host =>
+            Serialize((await host.ListRuns(workspace_id, limit, cancellationToken)).Select(MapRunSummary)));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the full detail of a single execution run: response (status, headers, cookies, body), all responses for multi-send flows, tests, debug logs, stash, and the raw request. Secret values and credential-bearing headers are redacted.")]
     public Task<string> get_run(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("Run id (GUID) from list_runs.")] string run_id)
+        [Description("Run id (GUID) from list_runs.")] string run_id,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, CancellationToken.None);
+            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, cancellationToken);
             if (run is null)
             {
                 return $"No run found with id '{run_id}' in workspace '{workspace_id}'.";
@@ -616,20 +672,22 @@ public sealed class ForRestMcpTools
                 logs = run.Logs.Select(MapLog),
                 stash = MapStash(run.Stash),
                 rawRequest = McpRawRequestRedactor.Redact(run.RawRequest),
-            });
-            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
+            }, run.SecretValues);
+            return payload;
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns just the response of a run (status, headers, cookies, content type, size, timing, body). Optionally truncates the body to keep results compact.")]
     public Task<string> get_run_response(
         [Description("Workspace id (GUID).")] string workspace_id,
         [Description("Run id (GUID).")] string run_id,
-        [Description("Maximum body characters to return. 0 (default) returns the full body; otherwise the body is truncated.")] int max_body_chars = 0)
+        [Description("Maximum body characters to return. 0 (default) returns the full body; otherwise the body is truncated.")] int max_body_chars = 0,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, CancellationToken.None);
+            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, cancellationToken);
             if (run is null)
             {
                 return $"No run found with id '{run_id}' in workspace '{workspace_id}'.";
@@ -640,10 +698,15 @@ public sealed class ForRestMcpTools
                 return "This run produced no response.";
             }
 
-            return McpSecretValueScrubber.Scrub(Serialize(MapResponse(run.Response, max_body_chars)!), run.SecretValues);
+            var response = run.Response with
+            {
+                Body = McpSecretValueScrubber.Scrub(run.Response.Body, run.SecretValues),
+            };
+            return Serialize(MapResponse(response, max_body_chars)!, run.SecretValues);
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Searches (greps) a run's response body for a pattern and returns matching lines with line numbers. Supports substring or regex matching, case sensitivity, and optional surrounding context lines.")]
     public Task<string> grep_run_response(
         [Description("Workspace id (GUID).")] string workspace_id,
@@ -652,17 +715,18 @@ public sealed class ForRestMcpTools
         [Description("Treat the pattern as a regular expression. Defaults to false.")] bool is_regex = false,
         [Description("Case-insensitive matching. Defaults to true.")] bool ignore_case = true,
         [Description("Maximum number of matches to return. Defaults to 50, capped at 500.")] int max_matches = 50,
-        [Description("Number of context lines to include before and after each match. Defaults to 0.")] int context_lines = 0,
-        [Description("Also search the raw response (status line + headers + body) instead of just the decoded body. Defaults to false.")] bool include_raw = false)
+        [Description("Number of context lines to include before and after each match. Defaults to 0, capped at 50.")] int context_lines = 0,
+        [Description("Also search the raw response (status line + headers + body) instead of just the decoded body. Defaults to false.")] bool include_raw = false,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(pattern))
         {
             return Task.FromResult("pattern must not be empty.");
         }
 
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, CancellationToken.None);
+            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, cancellationToken);
             if (run is null)
             {
                 return $"No run found with id '{run_id}' in workspace '{workspace_id}'.";
@@ -677,37 +741,41 @@ public sealed class ForRestMcpTools
                 ? (string.IsNullOrEmpty(run.Response.RawResponse) ? run.Response.Body : run.Response.RawResponse)
                 : run.Response.Body;
 
-            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Max(0, context_lines));
-            return McpSecretValueScrubber.Scrub(grepResult, run.SecretValues);
+            string grepResult = GrepText(haystack, pattern, is_regex, ignore_case, Math.Clamp(max_matches, 1, 500), Math.Clamp(context_lines, 0, MaxGrepContextLines), run.SecretValues);
+            return grepResult;
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the stash table captured by a run (columns and rows). The stash is how ForRest scripts record structured per-iteration results for batch probes and fuzz runs.")]
     public Task<string> get_run_stash(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("Run id (GUID).")] string run_id)
+        [Description("Run id (GUID).")] string run_id,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, CancellationToken.None);
+            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, cancellationToken);
             if (run is null)
             {
                 return $"No run found with id '{run_id}' in workspace '{workspace_id}'.";
             }
 
             object? stash = MapStash(run.Stash);
-            return stash is null ? "This run captured no stash rows." : McpSecretValueScrubber.Scrub(Serialize(stash), run.SecretValues);
+            return stash is null ? "This run captured no stash rows." : Serialize(stash, run.SecretValues);
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns a run's debug logs (console entries) and test assertion results — the equivalent of reading the debug pane. Useful for diagnosing failures.")]
     public Task<string> get_run_logs(
         [Description("Workspace id (GUID).")] string workspace_id,
-        [Description("Run id (GUID).")] string run_id)
+        [Description("Run id (GUID).")] string run_id,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host =>
+        return WithHostAsync(cancellationToken, async host =>
         {
-            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, CancellationToken.None);
+            ForRestMcpRunDetail? run = await host.GetRun(workspace_id, run_id, cancellationToken);
             if (run is null)
             {
                 return $"No run found with id '{run_id}' in workspace '{workspace_id}'.";
@@ -719,8 +787,8 @@ public sealed class ForRestMcpTools
                 errorMessage = run.Summary.ErrorMessage,
                 tests = run.Tests.Select(MapTest),
                 logs = run.Logs.Select(MapLog),
-            });
-            return McpSecretValueScrubber.Scrub(payload, run.SecretValues);
+            }, run.SecretValues);
+            return payload;
         });
     }
 
@@ -728,85 +796,108 @@ public sealed class ForRestMcpTools
 
     #region Browser automation
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Navigates the embedded For-Rest browser pane to a URL. The desktop Browser tab must be open. This is the agent's 'hands': pair it with browser_snapshot/browser_query for 'eyes', then record the actions into a script for deterministic replay.")]
     public Task<string> browser_navigate(
-        [Description("Absolute URL to load, e.g. https://app.example.test/login.")] string url)
+        [Description("Absolute URL to load, e.g. https://app.example.test/login.")] string url,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => await host.BrowserNavigate(url, CancellationToken.None));
+        return WithHostAsync(cancellationToken, async host => await host.BrowserNavigate(url, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Returns the page's interactive elements (links, buttons, inputs, role/aria nodes) with their stable selectors (css, xpath, role+name, id) and on-screen positions. Use this as the agent's 'eyes' to decide what to target next.")]
-    public Task<string> browser_snapshot()
+    public Task<string> browser_snapshot(CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Serialize(await host.BrowserSnapshot(CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host => Serialize(await host.BrowserSnapshot(cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Captures a screenshot of the current page and returns it as a base64-encoded PNG.")]
-    public Task<string> browser_screenshot()
+    public Task<string> browser_screenshot(CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => await host.BrowserScreenshot(CancellationToken.None));
+        return WithHostAsync(cancellationToken, async host => await host.BrowserScreenshot(cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Locates a single element and returns its stable selectors (css, xpath, role+name, id), text, and bounding box. Use the returned selectors when authoring or recording a replayable script. Target forms: '#id', 'css=.row', 'xpath=//a', 'text=Save', 'role=button:Save', 'testid=submit'.")]
     public Task<string> browser_query(
-        [Description("Element target expression, e.g. '#submit' or 'role=button:Save'.")] string target)
+        [Description("Element target expression, e.g. '#submit' or 'role=button:Save'.")] string target,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Serialize(await host.BrowserQuery(target, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Serialize(await host.BrowserQuery(target, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Clicks the element matching the target, moving the visible cursor to it first. Target forms: '#id', 'css=.row', 'xpath=//a', 'text=Save', 'role=button:Save', 'testid=submit'.")]
     public Task<string> browser_click(
-        [Description("Element target expression.")] string target)
+        [Description("Element target expression.")] string target,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => await host.BrowserClick(target, CancellationToken.None));
+        return WithHostAsync(cancellationToken, async host => await host.BrowserClick(target, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Types text into the element matching the target (clicks to focus first).")]
     public Task<string> browser_type(
         [Description("Element target expression.")] string target,
-        [Description("Text to type.")] string text)
+        [Description("Text to type.")] string text,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => await host.BrowserType(target, text, CancellationToken.None));
+        return WithHostAsync(cancellationToken, async host => await host.BrowserType(target, text, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Presses a key or key name in the page (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown', or a single character).")]
     public Task<string> browser_press(
-        [Description("Key name or single character.")] string keys)
+        [Description("Key name or single character.")] string keys,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => await host.BrowserPress(keys, CancellationToken.None));
+        return WithHostAsync(cancellationToken, async host => await host.BrowserPress(keys, cancellationToken));
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Waits up to a timeout for an element matching the target to appear, then returns its selectors and position. Use before interacting with elements that load asynchronously.")]
     public Task<string> browser_wait_for(
         [Description("Element target expression.")] string target,
-        [Description("Maximum time to wait in milliseconds (default 5000).")] int timeout_ms = 5000)
+        [Description("Maximum time to wait in milliseconds (default 5000).")] int timeout_ms = 5000,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Serialize(await host.BrowserWaitFor(target, timeout_ms, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Serialize(await host.BrowserWaitFor(target, timeout_ms, cancellationToken)));
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true)]
     [Description("Evaluates a JavaScript expression in the current page and returns the result as JSON. Use for reads the other tools do not cover.")]
     public Task<string> browser_eval(
-        [Description("JavaScript expression to evaluate in the page.")] string expression)
+        [Description("JavaScript expression to evaluate in the page.")] string expression,
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => await host.BrowserEvaluate(expression, CancellationToken.None));
+        return WithHostAsync(cancellationToken, async host =>
+            await host.BrowserEvaluate(expression, cancellationToken));
     }
 
     #endregion
 
     #region App surface
 
+    [McpServerTool(ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = true)]
     [Description("Focuses a pane/tab in the running For-Rest desktop app so the user looks at it before you respond — making the experience feel seamless (e.g. flip to the live browser, or show the response after a run). Center targets: 'browser', 'request'. Inspector targets: 'response', 'requests', 'stash', 'headers', 'trace', 'raw', 'debug'. To open a specific document instead, use set_active_request. Requires the desktop app to be running.")]
     public Task<string> show_in_app(
         [Description("Which pane/tab to focus: browser, request, response, requests, stash, headers, trace, raw, or debug.")] string target,
-        [Description("Reserved for future targets; leave empty.")] string id = "")
+        [Description("Reserved for future targets; leave empty.")] string id = "",
+        CancellationToken cancellationToken = default)
     {
-        return WithHostAsync(async host => Describe(await host.ShowInApp(target, string.IsNullOrWhiteSpace(id) ? null : id, CancellationToken.None)));
+        return WithHostAsync(cancellationToken, async host =>
+            Describe(await host.ShowInApp(target, string.IsNullOrWhiteSpace(id) ? null : id, cancellationToken)));
     }
 
     #endregion
 
     #region Settings
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the current For-Rest MCP server settings (enabled, bind address, port, whether an auth token is set, max concurrent sessions, and the active endpoint). The token value itself is never returned.")]
     public string get_server_settings()
     {
@@ -825,6 +916,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Returns the settings.toml content for the For-Rest app so an agent can inspect theme, AI, and MCP configuration before proposing changes. Secret values (api keys, the MCP auth token, and custom headers) are redacted to \"***\".")]
     public string get_settings_text()
     {
@@ -835,6 +927,7 @@ public sealed class ForRestMcpTools
         });
     }
 
+    [McpServerTool(ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
     [Description("Overwrites the settings.toml content. The host validates the supplied TOML before persisting. Any secret you leave as the redacted \"***\" marker keeps its original value; set a real value to change a secret. Note: changes to the MCP bind address or port only take effect after the server restarts.")]
     public string update_settings_text(
         [Description("Full replacement settings.toml content.")] string raw_toml)
@@ -967,9 +1060,12 @@ public sealed class ForRestMcpTools
         return host is null ? NoHostMessage : action(host);
     }
 
-    private async Task<string> WithHostAsync(Func<IForRestMcpHost, Task<string>> action)
+    private async Task<string> WithHostAsync(
+        CancellationToken cancellationToken,
+        Func<IForRestMcpHost, Task<string>> action)
     {
-        IForRestMcpHost? host = hostAccessor();
+        cancellationToken.ThrowIfCancellationRequested();
+        var host = hostAccessor();
         return host is null ? NoHostMessage : await action(host);
     }
 
@@ -983,7 +1079,8 @@ public sealed class ForRestMcpTools
         });
     }
 
-    private static string GrepText(string haystack, string pattern, bool isRegex, bool ignoreCase, int maxMatches, int contextLines)
+    private static string GrepText(string haystack, string pattern, bool isRegex, bool ignoreCase, int maxMatches, int contextLines,
+        IReadOnlyCollection<string>? secretValues)
     {
         if (string.IsNullOrEmpty(haystack))
         {
@@ -992,57 +1089,101 @@ public sealed class ForRestMcpTools
 
         string[] lines = haystack.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
-        Func<string, bool> isMatch;
-        if (isRegex)
+        try
         {
-            Regex regex;
-            try
+            var regex = isRegex
+                ? new Regex(pattern, RegexOptions.CultureInvariant |
+                    (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None), RegexMatchTimeout)
+                : null;
+            var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var timer = Stopwatch.StartNew();
+            List<object> matches = [];
+            var total = 0;
+            for (var index = 0; index < lines.Length; index++)
             {
-                regex = new Regex(pattern, ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
-            }
-            catch (ArgumentException exception)
-            {
-                return $"Invalid regular expression: {exception.Message}";
+                if (isRegex && timer.Elapsed >= RegexSearchTimeout)
+                {
+                    return RegexTimeoutMessage;
+                }
+
+                if (!(regex?.IsMatch(lines[index]) ?? lines[index].Contains(pattern, comparison)))
+                {
+                    continue;
+                }
+
+                total++;
+                if (matches.Count >= maxMatches)
+                {
+                    continue;
+                }
+
+                matches.Add(new
+                {
+                    line = index + 1,
+                    text = lines[index],
+                    context = contextLines > 0 ? BuildGrepContext(lines, index, contextLines) : null,
+                });
             }
 
-            isMatch = line => regex.IsMatch(line);
+            return Serialize(new
+            {
+                pattern,
+                isRegex,
+                ignoreCase,
+                totalMatches = total,
+                truncated = total > matches.Count,
+                matches,
+            }, secretValues);
+        }
+        catch (ArgumentException exception) when (isRegex)
+        {
+            return McpSecretValueScrubber.Scrub($"Invalid regular expression: {exception.Message}", secretValues);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return RegexTimeoutMessage;
+        }
+    }
+
+    private static List<object> BuildGrepContext(string[] lines, int matchIndex, int contextLines)
+    {
+        var start = Math.Max(0, matchIndex - contextLines);
+        var end = matchIndex + Math.Min(contextLines, lines.Length - matchIndex - 1);
+        List<object> context = [];
+        for (var index = start; index <= end; index++)
+        {
+            context.Add(new { line = index + 1, text = lines[index], isMatch = index == matchIndex });
+        }
+
+        return context;
+    }
+
+    private static string BuildPayloadUrlExpression(string targetUrl, string mode, string parameter)
+    {
+        string prefix;
+        string suffix;
+        if (mode == "url_path")
+        {
+            var suffixIndex = targetUrl.IndexOfAny(['?', '#']);
+            var path = suffixIndex < 0 ? targetUrl : targetUrl[..suffixIndex];
+            suffix = suffixIndex < 0 ? string.Empty : targetUrl[suffixIndex..];
+            prefix = path.EndsWith('/') ? path : path + "/";
         }
         else
         {
-            StringComparison comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            isMatch = line => line.Contains(pattern, comparison);
+            var fragmentIndex = targetUrl.IndexOf('#');
+            var beforeFragment = fragmentIndex < 0 ? targetUrl : targetUrl[..fragmentIndex];
+            suffix = fragmentIndex < 0 ? string.Empty : targetUrl[fragmentIndex..];
+            var separator = "?";
+            if (beforeFragment.Contains('?'))
+            {
+                separator = beforeFragment.EndsWith('?') || beforeFragment.EndsWith('&') ? string.Empty : "&";
+            }
+            var queryName = Uri.EscapeDataString(string.IsNullOrWhiteSpace(parameter) ? "q" : parameter.Trim());
+            prefix = beforeFragment + separator + queryName + "=";
         }
 
-        List<object> matches = [];
-        int total = 0;
-        for (int i = 0; i < lines.Length && matches.Count < maxMatches; i++)
-        {
-            if (!isMatch(lines[i]))
-            {
-                continue;
-            }
-
-            total++;
-            int start = Math.Max(0, i - contextLines);
-            int end = Math.Min(lines.Length - 1, i + contextLines);
-            List<object> window = [];
-            for (int j = start; j <= end; j++)
-            {
-                window.Add(new { line = j + 1, text = lines[j], isMatch = j == i });
-            }
-
-            matches.Add(new { line = i + 1, text = lines[i], context = contextLines > 0 ? window : null });
-        }
-
-        return Serialize(new
-        {
-            pattern,
-            isRegex,
-            ignoreCase,
-            totalMatches = total,
-            truncated = matches.Count >= maxMatches,
-            matches,
-        });
+        return $"\"{EscapeForRestString(prefix)}\" + encoding.UrlEncode(payload) + \"{EscapeForRestString(suffix)}\"";
     }
 
     private static string EscapeForRestString(string value)
@@ -1052,9 +1193,16 @@ public sealed class ForRestMcpTools
             .Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
-    private static string Serialize(object value)
+    private static string Serialize(object value, IReadOnlyCollection<string>? secretValues = null)
     {
-        return JsonSerializer.Serialize(value, JsonOptions);
+        if (secretValues is null || secretValues.Count == 0)
+        {
+            return JsonSerializer.Serialize(value, JsonOptions);
+        }
+
+        var options = new JsonSerializerOptions(JsonOptions);
+        options.Converters.Add(new McpSecretJsonConverter(secretValues));
+        return JsonSerializer.Serialize(value, options);
     }
 
     #endregion

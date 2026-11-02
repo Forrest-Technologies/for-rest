@@ -20,10 +20,6 @@ public static class McpSecretValueScrubber
 
     private const string RedactedValue = "***";
 
-    // Values shorter than this are skipped: scrubbing trivial strings like "1" or "true"
-    // would shred unrelated output, and such values carry no real secrecy.
-    private const int MinimumSecretLength = 6;
-
     // Matches the encoder ForRestMcpTools uses to serialize payloads, so the escaped form
     // of a secret inside a JSON string is caught as well as the raw form.
     private static readonly JsonSerializerOptions EncodingOptions = new()
@@ -43,24 +39,41 @@ public static class McpSecretValueScrubber
             return text ?? string.Empty;
         }
 
+        return ScrubKnownForms(text, BuildNeedles(secretValues));
+    }
+
+    #endregion
+
+    #region Internal Methods
+
+    internal static Func<string, string> CreateScrubber(IReadOnlyCollection<string> secretValues)
+    {
+        var needles = BuildNeedles(secretValues);
+        return value => ScrubKnownForms(value, needles);
+    }
+
+    #endregion
+
+    #region Private Methods
+
+    private static IReadOnlyList<string> BuildNeedles(IReadOnlyCollection<string> secretValues)
+    {
         List<string> needles = [];
-        foreach (string value in secretValues)
+        foreach (var value in secretValues)
         {
-            if (string.IsNullOrWhiteSpace(value) || value.Length < MinimumSecretLength)
+            if (!string.IsNullOrEmpty(value))
             {
-                continue;
+                AddNeedleVariants(needles, value);
             }
-
-            AddNeedleVariants(needles, value);
         }
 
-        if (needles.Count == 0)
-        {
-            return text;
-        }
+        return needles.Distinct(StringComparer.Ordinal).OrderByDescending(static needle => needle.Length).ToArray();
+    }
 
-        string scrubbed = text;
-        foreach (string needle in needles.Distinct(StringComparer.Ordinal).OrderByDescending(static needle => needle.Length))
+    private static string ScrubKnownForms(string text, IReadOnlyList<string> needles)
+    {
+        var scrubbed = text;
+        foreach (var needle in needles)
         {
             scrubbed = scrubbed.Replace(needle, RedactedValue, StringComparison.Ordinal);
         }
@@ -68,20 +81,34 @@ public static class McpSecretValueScrubber
         return scrubbed;
     }
 
-    #endregion
-
-    #region Private Methods
-
     private static void AddNeedleVariants(List<string> needles, string value)
     {
         AddWithJsonEscapedForm(needles, value);
-        AddWithJsonEscapedForm(needles, Convert.ToBase64String(Encoding.UTF8.GetBytes(value)));
+        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+        AddWithJsonEscapedForm(needles, base64);
+        AddWithJsonEscapedForm(needles, base64.TrimEnd('='));
+        var base64Url = base64.Replace('+', '-').Replace('/', '_');
+        AddWithJsonEscapedForm(needles, base64Url);
+        AddWithJsonEscapedForm(needles, base64Url.TrimEnd('='));
+        AddUrlEncodedForms(needles, Uri.EscapeDataString(value));
+        AddUrlEncodedForms(needles, WebUtility.UrlEncode(value));
+    }
 
-        string urlEncoded = Uri.EscapeDataString(value);
-        if (!string.Equals(urlEncoded, value, StringComparison.Ordinal))
+    private static void AddUrlEncodedForms(List<string> needles, string encoded)
+    {
+        AddWithJsonEscapedForm(needles, encoded);
+        var characters = encoded.ToCharArray();
+        for (var index = 0; index + 2 < characters.Length; index++)
         {
-            AddWithJsonEscapedForm(needles, urlEncoded);
+            if (characters[index] == '%' && Uri.IsHexDigit(characters[index + 1]) && Uri.IsHexDigit(characters[index + 2]))
+            {
+                characters[index + 1] = char.ToLowerInvariant(characters[index + 1]);
+                characters[index + 2] = char.ToLowerInvariant(characters[index + 2]);
+                index += 2;
+            }
         }
+
+        AddWithJsonEscapedForm(needles, new string(characters));
     }
 
     private static void AddWithJsonEscapedForm(List<string> needles, string value)

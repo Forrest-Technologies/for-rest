@@ -432,9 +432,182 @@ public sealed class RequestExecutionServiceTests
         }
     }
 
+    [TestMethod]
+    public async Task Parallel_branches_do_not_trigger_an_extra_fallback_HTTP_request()
+    {
+        var history = new RecordingExecutionHistoryRepository();
+        var service = CreateScriptEnabledService(history);
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var serverTask = CaptureUntilCancelled();
+
+        async Task<List<CapturedRequest>> CaptureUntilCancelled()
+        {
+            List<CapturedRequest> captured = [];
+            try
+            {
+                while (true)
+                {
+                    captured.Add(await CaptureSingleRequest(listener, timeout.Token));
+                }
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                return captured;
+            }
+        }
+
+        try
+        {
+            List<ForRestScriptDiagnostic> diagnostics = [];
+            var flow = ForRestFlowScriptCompiler.Compile($$"""
+                parallel {
+                    GET "http://127.0.0.1:{{port}}/one"
+                    GET "http://127.0.0.1:{{port}}/two"
+                }
+                """, [], [], diagnostics);
+            Assert.IsEmpty(diagnostics);
+            var request = new RequestDefinition
+            {
+                Name = "Parallel loopback",
+                UrlTemplate = $"http://127.0.0.1:{port}/should-not-send",
+                PreRequestScript = flow,
+                MaxSendIterations = 2,
+                TimeoutMilliseconds = 2000,
+            };
+
+            var result = await service.Execute(new(), new(), request, null, timeout.Token);
+            timeout.Cancel();
+            var captured = await serverTask;
+
+            Assert.AreEqual(ExecutionState.Completed, result.State);
+            Assert.HasCount(2, captured);
+            Assert.HasCount(2, result.Runs.Single().Responses);
+            Assert.DoesNotContain(item => item.PathAndQuery == "/should-not-send", captured);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try
+            {
+                await serverTask;
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+    }
+
+    #endregion
+
+    #region Cancellation
+
+    [TestMethod]
+    public async Task Fuzz_deadlines_cancel_real_http_sends_without_a_fallback_request()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var connectionsClosed = ObserveCancelledConnections(listener, 2, deadline.Token);
+        List<ForRestScriptDiagnostic> diagnostics = [];
+        var flow = ForRestFlowScriptCompiler.Compile("""
+            let result = await fuzz.Run(new[] { "one", "two" }, async (string payload, System.Threading.CancellationToken cancellationToken) => {
+                var attempt = request.Clone();
+                var sent = await attempt.send(cancellationToken);
+                return sent.Snapshot;
+            }, new ForRest.Scripting.FuzzOptions { MaxConcurrency = 1, TimeoutMs = 500, DelayMs = 0 })
+            stash.Attempts = result.Count
+            stash.Errors = result.AnomalyCount
+            stash.Commit()
+            """, [], [], diagnostics);
+        Assert.IsEmpty(diagnostics);
+        var service = CreateScriptEnabledService(new RecordingExecutionHistoryRepository());
+
+        try
+        {
+            var result = await service.Execute(new(), new(), new()
+            {
+                Name = "Cancellation fixture",
+                UrlTemplate = $"http://127.0.0.1:{port}/slow",
+                PreRequestScript = flow,
+                MaxSendIterations = 2,
+                Retry = new() { Count = 2 },
+            }, null, deadline.Token);
+            Assert.AreEqual(ExecutionState.Completed, result.State, result.Runs.Single().ErrorMessage);
+            await connectionsClosed.WaitAsync(TimeSpan.FromSeconds(2));
+            var row = result.Runs.Single().Stash.Rows.Single();
+            Assert.AreEqual("2", row.Values["Attempts"]);
+            Assert.AreEqual("2", row.Values["Errors"]);
+            Assert.IsNull(result.LatestResponse);
+        }
+        finally
+        {
+            deadline.Cancel();
+            listener.Stop();
+            try
+            {
+                await connectionsClosed;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (SocketException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
     #endregion
 
     #region Private Methods
+
+    private static async Task ObserveCancelledConnections(
+        TcpListener listener, int count, CancellationToken cancellationToken)
+    {
+        List<Task> pending = [];
+        try
+        {
+            for (var index = 0; index < count; index++)
+            {
+                var client = await listener.AcceptTcpClientAsync(cancellationToken);
+                pending.Add(ObserveConnectionClose(client, cancellationToken));
+            }
+        }
+        finally
+        {
+            await Task.WhenAll(pending);
+        }
+    }
+
+    private static async Task ObserveConnectionClose(TcpClient client, CancellationToken cancellationToken)
+    {
+        using (client)
+        {
+            var receivedBytes = 0;
+            var buffer = new byte[1024];
+            try
+            {
+                var read = await client.GetStream().ReadAsync(buffer, cancellationToken);
+                while (read > 0)
+                {
+                    receivedBytes += read;
+                    read = await client.GetStream().ReadAsync(buffer, cancellationToken);
+                }
+            }
+            catch (IOException)
+            {
+                // A cancelled client may reset the connection instead of sending FIN.
+            }
+            Assert.IsGreaterThan(0, receivedBytes);
+        }
+    }
 
     private static IRequestExecutionService CreateScriptEnabledService(RecordingExecutionHistoryRepository historyRepository)
     {

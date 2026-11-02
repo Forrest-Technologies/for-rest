@@ -75,6 +75,11 @@ internal static class BrowserJs
         return $"{kind},{value},{name}";
     }
 
+    private static string WithHelpers(string parameters, string body)
+    {
+        return $"function({parameters}){{\n{Helpers}\n{body}\n}}";
+    }
+
     #endregion
 
     #region Private Fields
@@ -124,22 +129,17 @@ internal static class BrowserJs
         }
         """;
 
-    private static readonly string LocateFunction =
-        Helpers +
+    private static readonly string LocateFunction = WithHelpers("kind,value,name",
         """
-        ;function(kind,value,name){
           var el=null;
           try{el=__frFind(kind,value,name);}catch(e){return JSON.stringify({found:false,error:String(e)});}
           if(!el){return JSON.stringify({found:false});}
           el.scrollIntoView({block:'center',inline:'center'});
           return JSON.stringify(__frInfo(el));
-        }
-        """;
+        """);
 
-    private static readonly string OperateFunction =
-        Helpers +
+    private static readonly string OperateFunction = WithHelpers("kind,value,name,op,arg",
         """
-        ;function(kind,value,name,op,arg){
           var el=null;
           try{el=__frFind(kind,value,name);}catch(e){return JSON.stringify({ok:false,error:String(e)});}
           if(!el){return JSON.stringify({ok:false});}
@@ -183,13 +183,10 @@ internal static class BrowserJs
             el.dispatchEvent(new Event('change',{bubbles:true}));
           }
           return JSON.stringify({ok:true,value:out});
-        }
-        """;
+        """);
 
-    private static readonly string SnapshotFunction =
-        Helpers +
+    private static readonly string SnapshotFunction = WithHelpers("",
         """
-        ;function(){
           var nodes=[].slice.call(document.querySelectorAll('a,button,input,select,textarea,[role],[onclick],[contenteditable=true]'));
           var out=[];
           for(var i=0;i<nodes.length&&out.length<200;i++){
@@ -198,8 +195,7 @@ internal static class BrowserJs
             out.push(__frInfo(el));
           }
           return JSON.stringify({url:location.href,title:document.title,elements:out});
-        }
-        """;
+        """);
 
     private const string CursorFunction =
         """

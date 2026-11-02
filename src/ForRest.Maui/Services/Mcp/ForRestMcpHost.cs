@@ -36,6 +36,7 @@ public sealed class ForRestMcpHost(
     ThemeConfigParser themeConfigParser,
     McpLiveWorkbenchAccessor liveWorkbenchAccessor,
     IBrowserAutomationProvider browserProvider,
+    IScriptEngine scriptEngine,
     ILogger<ForRestMcpHost>? logger = null) : IForRestMcpHost
 {
     #region Private Fields
@@ -83,7 +84,11 @@ public sealed class ForRestMcpHost(
         if (Live is { } live)
         {
             McpWorkbenchDocument? active = await live.GetActiveDocument();
-            string liveRestored = McpSecretRedactor.Restore(active?.Source, newSource);
+            if (!McpSecretRedactor.TryRestore(active?.Source, newSource, out var liveRestored, out var error))
+            {
+                return ForRestMcpUpdateResult.Failure(error);
+            }
+
             McpWorkbenchResult liveResult = await live.ReplaceActiveDocument(liveRestored);
             return liveResult.Succeeded
                 ? ForRestMcpUpdateResult.Success()
@@ -99,7 +104,11 @@ public sealed class ForRestMcpHost(
                 return (false, ForRestMcpUpdateResult.Failure("No active document is open."), state);
             }
 
-            string restored = McpSecretRedactor.Restore(document.RequestSource, newSource);
+            if (!McpSecretRedactor.TryRestore(document.RequestSource, newSource, out var restored, out var error))
+            {
+                return (false, ForRestMcpUpdateResult.Failure(error), state);
+            }
+
             ReplaceDocument(workspace, document, UpdateSource(workspace.Id, document, restored));
             return (true, ForRestMcpUpdateResult.Success(), state);
         });
@@ -319,7 +328,11 @@ public sealed class ForRestMcpHost(
         if (Live is { } live)
         {
             McpWorkbenchScriptDetail? detail = await live.GetScript(workspaceId, location);
-            string liveRestored = McpSecretRedactor.Restore(detail?.Source, newSource);
+            if (!McpSecretRedactor.TryRestore(detail?.Source, newSource, out var liveRestored, out var error))
+            {
+                return ForRestMcpMutationResult.Fail(error);
+            }
+
             return MapLive(await live.UpdateScript(workspaceId, location, liveRestored));
         }
 
@@ -332,7 +345,11 @@ public sealed class ForRestMcpHost(
                 return (false, ForRestMcpMutationResult.Fail($"No script found at '{location}' in workspace '{workspaceId}'."), state);
             }
 
-            string restored = McpSecretRedactor.Restore(document.RequestSource, newSource);
+            if (!McpSecretRedactor.TryRestore(document.RequestSource, newSource, out var restored, out var error))
+            {
+                return (false, ForRestMcpMutationResult.Fail(error), state);
+            }
+
             ReplaceDocument(workspace, document, UpdateSource(workspace.Id, document, restored));
             return (true, ForRestMcpMutationResult.Ok("Script updated.", document.Location), state);
         });
@@ -393,7 +410,7 @@ public sealed class ForRestMcpHost(
     {
         Guid id = TryParseWorkspaceId(workspaceId);
         ForRestScriptCompilationResult compilation = scriptExecutionService.Compile(source, id);
-        return MapCompilation(compilation);
+        return MapCompilation(compilation.ValidateScripts(scriptEngine));
     }
 
     public async Task<ForRestMcpExecutionResult> ExecuteScript(
@@ -537,7 +554,7 @@ public sealed class ForRestMcpHost(
     {
         Guid id = TryParseWorkspaceId(workspaceId);
         List<ExecutionRun> runs = await executionHistoryRepository.Load(id, cancellationToken);
-        return [.. runs.Take(max).Select(MapRunSummary)];
+        return [.. runs.Take(max).Select(McpRunSummaryMapper.Map)];
     }
 
     public async Task<ForRestMcpRunDetail?> GetRun(string workspaceId, string runId, CancellationToken cancellationToken)
@@ -556,7 +573,7 @@ public sealed class ForRestMcpHost(
         }
 
         return new ForRestMcpRunDetail(
-            Summary: MapRunSummary(run),
+            Summary: McpRunSummaryMapper.Map(run),
             Response: MapResponse(run.Response),
             Responses: [.. run.Responses.Select(MapResponse).Where(static response => response is not null).Cast<ForRestMcpResponseView>()],
             Tests: [.. run.Tests.Select(MapTest)],
@@ -575,7 +592,7 @@ public sealed class ForRestMcpHost(
         return
         [
             .. variables
-                .Where(static variable => variable.IsSecret && !string.IsNullOrWhiteSpace(variable.Value))
+                .Where(static variable => variable.IsSecret && !string.IsNullOrEmpty(variable.Value))
                 .Select(static variable => variable.Value)
                 .Distinct(StringComparer.Ordinal),
         ];
@@ -891,23 +908,6 @@ public sealed class ForRestMcpHost(
     private static ForRestMcpLogView MapLog(ConsoleEntry entry)
     {
         return new ForRestMcpLogView(entry.Level.ToString(), entry.Message, entry.TimestampUtc);
-    }
-
-    private static ForRestMcpRunSummary MapRunSummary(ExecutionRun run)
-    {
-        return new ForRestMcpRunSummary(
-            Id: run.Id.ToString(),
-            RequestName: run.RequestName,
-            State: run.State.ToString(),
-            Iteration: run.Iteration,
-            StartedUtc: run.StartedUtc,
-            CompletedUtc: run.CompletedUtc,
-            TargetUri: run.TargetUri,
-            Status: run.Response?.StatusCode,
-            DurationMilliseconds: run.Response?.DurationMilliseconds,
-            // Exception text can quote a secret (e.g. a failed auth header value); summaries go
-            // straight to external agents via list_runs, so scrub here rather than in the tools.
-            ErrorMessage: McpSecretValueScrubber.Scrub(run.ErrorMessage, CollectSecretValues(run.RuntimeVariables)));
     }
 
     private static ForRestMcpStashView? MapStash(StashTable? stash)

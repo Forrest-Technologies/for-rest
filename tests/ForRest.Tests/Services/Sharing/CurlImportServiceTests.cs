@@ -20,6 +20,157 @@ public sealed class CurlImportServiceTests
     }
 
     [TestMethod]
+    [DataRow("curl\thttps://example.com")]
+    [DataRow("curl.exe\nhttps://example.com")]
+    [DataRow("$ curl\r\nhttps://example.com")]
+    public void Command_detection_accepts_shell_whitespace(string command)
+    {
+        Assert.IsTrue(service.LooksLikeCurl(command));
+        Assert.AreEqual(ImportContentClassifier.ContentKind.CurlCommand,
+            ImportContentClassifier.ClassifyText(command));
+    }
+
+    [TestMethod]
+    [DataRow("curl 'https://example.com")]
+    [DataRow("curl \"https://example.com")]
+    [DataRow("curl $'https://example.com")]
+    [DataRow("curl https://example.com -H X-Trace:\\")]
+    public void Incomplete_shell_tokens_are_rejected(string command)
+    {
+        Assert.ThrowsExactly<FormatException>(() => service.ConvertToScript(command, out _));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("curl")]
+    [DataRow("curl -s")]
+    [DataRow("curl --url ''")]
+    [DataRow("curl ''")]
+    public void Commands_without_a_URL_are_rejected(string command)
+    {
+        Assert.ThrowsExactly<FormatException>(() => service.ConvertToScript(command, out _));
+    }
+
+    [TestMethod]
+    [DataRow("-X")]
+    [DataRow("--header")]
+    [DataRow("--data")]
+    [DataRow("--data-urlencode")]
+    [DataRow("--json")]
+    [DataRow("--user")]
+    [DataRow("--oauth2-bearer")]
+    [DataRow("--user-agent")]
+    [DataRow("--referer")]
+    [DataRow("--cookie")]
+    [DataRow("--max-time")]
+    [DataRow("--url")]
+    [DataRow("--output")]
+    public void Options_without_a_required_value_are_rejected(string option)
+    {
+        Assert.ThrowsExactly<FormatException>(() => service.ConvertToScript(
+            $"curl https://example.com {option}", out _));
+    }
+
+    [TestMethod]
+    [DataRow("-XPUT", "method PUT")]
+    [DataRow("-H'X-Test: hello world'", "header \"X-Test\" = \"hello world\"")]
+    [DataRow("-d'a=1'", "body text")]
+    [DataRow("-ureader:fake-value", "username = \"{{curl_username}}\"")]
+    [DataRow("-A'Test Agent'", "header \"User-Agent\" = \"Test Agent\"")]
+    [DataRow("-ehttps://ref.example.test/", "header \"Referer\" = \"https://ref.example.test/\"")]
+    [DataRow("-bsession=fake", "secret curl_header_1 = \"session=fake\"")]
+    [DataRow("-m0.5", "timeout 500")]
+    public void Short_option_values_can_be_attached_without_a_space(string option, string expected)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, expected);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("--request=PUT", "method PUT")]
+    [DataRow("--header='X-Test: hello world'", "header \"X-Test\" = \"hello world\"")]
+    [DataRow("--data=a=1", "body text")]
+    [DataRow("--data-urlencode='q=hello world'", "q=hello%20world")]
+    [DataRow("--json='{}'", "body json")]
+    [DataRow("--user=reader:fake-value", "username = \"{{curl_username}}\"")]
+    [DataRow("--oauth2-bearer=fake-token", "secret curl_bearer_token = \"fake-token\"")]
+    [DataRow("--max-time=0.5", "timeout 500")]
+    public void Long_option_values_accept_an_equals_separator(string option, string expected)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, expected);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Combined_short_flags_keep_redirects_and_a_following_attached_value()
+    {
+        var script = service.ConvertToScript("curl -sSLkXPUT https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "redirects true");
+        StringAssert.Contains(script, "ssl false");
+        StringAssert.Contains(script, "method PUT");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void A_cluster_can_take_its_final_option_value_from_the_next_token()
+    {
+        var script = service.ConvertToScript("curl -sSX PUT https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "method PUT");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Clustered_data_options_do_not_expand_their_attached_body_text()
+    {
+        var script = service.ConvertToScript("curl -sSLd'--request=DELETE' https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "method POST");
+        StringAssert.Contains(script, "redirects true");
+        StringAssert.Contains(script, "--request=DELETE");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Inline_URL_and_empty_data_values_are_preserved()
+    {
+        var script = service.ConvertToScript("curl --url=https://api.example.test/items --data=", out _);
+
+        StringAssert.Contains(script, "url \"https://api.example.test/items\"");
+        StringAssert.Contains(script, "method POST");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("-d '--request=DELETE'")]
+    [DataRow("--data=--request=DELETE")]
+    public void Option_like_data_values_are_not_reinterpreted_as_options(string option)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "method POST");
+        StringAssert.Contains(script, "--request=DELETE");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("-oout.json")]
+    [DataRow("--output=out.json")]
+    public void Attached_ignored_option_values_are_consumed(string option)
+    {
+        var script = service.ConvertToScript($"curl {option} https://api.example.test/items", out _);
+
+        StringAssert.Contains(script, "url \"https://api.example.test/items\"");
+        Assert.DoesNotContain("out.json", script);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
     public void Simple_get_produces_parsable_script_with_url_and_name()
     {
         string script = service.ConvertToScript("curl https://api.example.com/users", out string suggestedName);
@@ -89,8 +240,10 @@ public sealed class CurlImportServiceTests
 
         StringAssert.Contains(script, "auth {");
         StringAssert.Contains(script, "mode = basic");
-        StringAssert.Contains(script, "username = \"alice\"");
-        StringAssert.Contains(script, "password = \"s3cret\"");
+        StringAssert.Contains(script, "username = \"{{curl_username}}\"");
+        StringAssert.Contains(script, "secret curl_username = \"alice\"");
+        StringAssert.Contains(script, "password = \"{{curl_password}}\"");
+        StringAssert.Contains(script, "secret curl_password = \"s3cret\"");
         FrsParseAssert.Parses(script);
     }
 
@@ -100,7 +253,8 @@ public sealed class CurlImportServiceTests
         string script = service.ConvertToScript("curl --oauth2-bearer tok123 https://api.example.com/me", out _);
 
         StringAssert.Contains(script, "mode = bearer");
-        StringAssert.Contains(script, "token = \"tok123\"");
+        StringAssert.Contains(script, "token = \"{{curl_bearer_token}}\"");
+        StringAssert.Contains(script, "secret curl_bearer_token = \"tok123\"");
         FrsParseAssert.Parses(script);
     }
 
@@ -132,7 +286,8 @@ public sealed class CurlImportServiceTests
 
         StringAssert.Contains(script, "header \"User-Agent\" = \"MyAgent/1.0\"");
         StringAssert.Contains(script, "header \"Referer\" = \"https://ref.example.com\"");
-        StringAssert.Contains(script, "header \"Cookie\" = \"session=abc\"");
+        StringAssert.Contains(script, "header \"Cookie\" = \"{{curl_header_1}}\"");
+        StringAssert.Contains(script, "secret curl_header_1 = \"session=abc\"");
         FrsParseAssert.Parses(script);
     }
 
@@ -198,6 +353,144 @@ public sealed class CurlImportServiceTests
         StringAssert.Contains(script, "url \"https://api.example.com/search\"");
         StringAssert.Contains(script, "q=hello%20world");
         StringAssert.Contains(script, "method POST");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("-G")]
+    [DataRow("--get")]
+    public void Get_flag_moves_data_into_the_query_without_a_request_body(string flag)
+    {
+        var script = service.ConvertToScript(
+            $"curl {flag} --data-urlencode 'q=hello world' https://api.example.com/search", out var name);
+
+        StringAssert.Contains(script, "method GET");
+        StringAssert.Contains(script, "url \"https://api.example.com/search?q=hello%20world\"");
+        Assert.DoesNotContain("body ", script);
+        StringAssert.StartsWith(name, "GET ");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("https://api.example.com/search?", "https://api.example.com/search?q=x")]
+    [DataRow("https://api.example.com/search?active=1&", "https://api.example.com/search?active=1&q=x")]
+    [DataRow("https://api.example.com/search?active=1", "https://api.example.com/search?active=1&q=x")]
+    [DataRow("https://api.example.com/search#part", "https://api.example.com/search?q=x#part")]
+    [DataRow("https://api.example.com/search?active=1#part", "https://api.example.com/search?active=1&q=x#part")]
+    public void Get_flag_preserves_existing_queries_and_fragments(string url, string expected)
+    {
+        var script = service.ConvertToScript($"curl --get --data 'q=x' '{url}'", out _);
+
+        StringAssert.Contains(script, $"url \"{expected}\"");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Explicit_method_is_preserved_when_get_moves_data_into_the_query()
+    {
+        var script = service.ConvertToScript(
+            "curl --get --request DELETE --data 'id=3' https://api.example.com/items", out _);
+
+        StringAssert.Contains(script, "method DELETE");
+        StringAssert.Contains(script, "url \"https://api.example.com/items?id=3\"");
+        Assert.DoesNotContain("body ", script);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void No_get_restores_post_body_handling()
+    {
+        var script = service.ConvertToScript(
+            "curl --get --no-get --data 'q=x' https://api.example.com/search", out _);
+
+        StringAssert.Contains(script, "method POST");
+        StringAssert.Contains(script, "url \"https://api.example.com/search\"");
+        StringAssert.Contains(script, "body text");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    [DataRow("-I")]
+    [DataRow("--head")]
+    public void Head_flag_selects_head_method(string flag)
+    {
+        var script = service.ConvertToScript($"curl {flag} https://api.example.com/health", out _);
+
+        StringAssert.Contains(script, "method HEAD");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Head_and_get_flags_move_data_to_a_head_request_query()
+    {
+        var script = service.ConvertToScript(
+            "curl -I -G --data 'q=x' https://api.example.com/search", out _);
+
+        StringAssert.Contains(script, "method HEAD");
+        StringAssert.Contains(script, "url \"https://api.example.com/search?q=x\"");
+        Assert.DoesNotContain("body ", script);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Head_with_post_data_is_rejected_like_curl()
+    {
+        Assert.ThrowsExactly<FormatException>(() => service.ConvertToScript(
+            "curl --head --data 'q=x' https://api.example.com/search", out _));
+    }
+
+    [TestMethod]
+    public void No_head_restores_the_default_request_method()
+    {
+        var script = service.ConvertToScript("curl --head --no-head https://api.example.com/health", out _);
+
+        StringAssert.Contains(script, "method GET");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Explicit_method_overrides_head_flag()
+    {
+        var script = service.ConvertToScript("curl --head --request OPTIONS https://api.example.com/health", out _);
+
+        StringAssert.Contains(script, "method OPTIONS");
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Empty_get_data_does_not_add_a_query_separator()
+    {
+        var script = service.ConvertToScript("curl --get --data '' https://api.example.com/search", out _);
+
+        StringAssert.Contains(script, "url \"https://api.example.com/search\"");
+        Assert.DoesNotContain("body ", script);
+        FrsParseAssert.Parses(script);
+    }
+
+    [TestMethod]
+    public void Json_get_retains_its_content_type_without_a_body()
+    {
+        var script = service.ConvertToScript("curl --get --json '{}' https://api.example.com/search", out _);
+
+        StringAssert.Contains(script, "method GET");
+        StringAssert.Contains(script, "header \"Content-Type\" = \"application/json\"");
+        StringAssert.Contains(script, "header \"Accept\" = \"application/json\"");
+        Assert.DoesNotContain("body ", script);
+        var compilation = new ForRestScriptCompiler(new()).Compile(script, new());
+        Assert.IsTrue(compilation.Succeeded);
+        Assert.IsNotNull(compilation.Payload);
+        Assert.AreEqual(RequestBodyMode.None, compilation.Payload.Request.Body.Mode);
+        Assert.HasCount(1, compilation.Payload.Request.Headers.Where(header => header.Key == "Content-Type"));
+    }
+
+    [TestMethod]
+    public void Explicit_content_type_overrides_the_json_flag_default()
+    {
+        var script = service.ConvertToScript(
+            "curl --json '{}' -H 'Content-Type: application/custom' https://api.example.com/items", out _);
+
+        StringAssert.Contains(script, "content_type \"application/custom\"");
+        StringAssert.Contains(script, "body text");
         FrsParseAssert.Parses(script);
     }
 

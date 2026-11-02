@@ -18,7 +18,7 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -26,23 +26,34 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-latest
+    permissions:
+      contents: write
+    runs-on: [self-hosted, macOS, ARM64, ft-mac-mini]
+    timeout-minutes: 60
     env:
       MACCATALYST_TFM: net10.0-maccatalyst
       MAC_ONLY_BUILD: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Compute version metadata
         id: version
         shell: bash
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="$VERSION_INPUT"
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must contain three numeric components (for example, 1.0.0)." >&2
+            exit 1
           fi
           APP_VERSION=$(TZ=America/New_York date +%Y%m%d)
           BUILD_TIMESTAMP_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -52,40 +63,46 @@ jobs:
             echo "build_timestamp_utc=${BUILD_TIMESTAMP_UTC}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Configure writable toolchain state
+        shell: pwsh
+        run: |
+          "DOTNET_INSTALL_DIR=$(Join-Path $env:RUNNER_TOOL_CACHE 'for-rest-dotnet')" >> $env:GITHUB_ENV
+          "DOTNET_CLI_HOME=$(Join-Path $env:RUNNER_TEMP 'for-rest-dotnet-home')" >> $env:GITHUB_ENV
+          "NUGET_HTTP_CACHE_PATH=$(Join-Path $env:RUNNER_TEMP 'for-rest-nuget-http')" >> $env:GITHUB_ENV
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 10.0.x
-          dotnet-quality: preview
-          global-json-file: global.json
+          dotnet-version: '10.0.302'
 
       - name: Restore MAUI workloads
         shell: bash
-        run: dotnet workload restore src/ForRest.Maui/ForRest.Maui.csproj -p:ForRestMacOnly=${MAC_ONLY_BUILD}
+        run: dotnet workload install maui-maccatalyst --version 10.0.103
 
       - name: Run core unit tests
         shell: bash
         run: dotnet test tests/ForRest.Tests/ForRest.Tests.csproj -c Debug
 
+      - name: Run MAUI unit tests
+        shell: bash
+        run: dotnet test tests/ForRest.Maui.Tests/ForRest.Maui.Tests.csproj -c Debug
+
       - name: Build macOS (Mac Catalyst) app
         shell: bash
         run: |
           set -euo pipefail
-          OUTPUT_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-build/maccatalyst"
-          dotnet build src/ForRest.Maui/ForRest.Maui.csproj \
+          dotnet publish src/ForRest.Maui/ForRest.Maui.csproj \
             -c Release \
             -f "${MACCATALYST_TFM}" \
-            -p:ForRestMacOnly=${MAC_ONLY_BUILD} \
+            -p:ForRestMacOnly="${MAC_ONLY_BUILD}" \
             -p:ForRestMacUnsigned=true \
             -p:ContinuousIntegrationBuild=true \
             -p:CreatePackage=false \
-            -p:EnableCodeSigning=false \
             -p:ApplicationDisplayVersion=${{ steps.version.outputs.version }} \
             -p:ApplicationVersion=${{ steps.version.outputs.app_version }} \
             -p:Version="${{ steps.version.outputs.version }}" \
             -p:InformationalVersion="${{ steps.version.outputs.version }}" \
-            -p:ForRestBuildDateUtc=${{ steps.version.outputs.build_timestamp_utc }} \
-            -o "${OUTPUT_DIRECTORY}"
+            -p:ForRestBuildDateUtc=${{ steps.version.outputs.build_timestamp_utc }}
 
       - name: Package release assets
         id: package
@@ -93,11 +110,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-build/maccatalyst"
+          BUILD_DIRECTORY="${GITHUB_WORKSPACE}/src/ForRest.Maui/bin/Release/${MACCATALYST_TFM}"
           ASSET_DIRECTORY="${GITHUB_WORKSPACE}/artifacts/release-assets"
           mkdir -p "${ASSET_DIRECTORY}"
 
-          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 3 -type d -name '*.app' | head -n 1 || true)
+          APP_BUNDLE=$(find "${BUILD_DIRECTORY}" -maxdepth 1 -type d -name '*.app' | head -n 1 || true)
           if [[ -z "${APP_BUNDLE}" ]]; then
             echo "No .app bundle was produced by the Mac Catalyst build." >&2
             exit 1
@@ -107,6 +124,13 @@ jobs:
           # for direct downloads.
           STABLE_ZIP="${ASSET_DIRECTORY}/For-Rest-macos.zip"
           VERSIONED_ZIP="${ASSET_DIRECTORY}/For-Rest-${VERSION}-macos.zip"
+          APP_EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "${APP_BUNDLE}/Contents/Info.plist")
+          ARCHITECTURES=$(/usr/bin/lipo -archs "${APP_BUNDLE}/Contents/MacOS/${APP_EXECUTABLE}")
+          if [[ " ${ARCHITECTURES} " != *" arm64 "* || " ${ARCHITECTURES} " != *" x86_64 "* ]]; then
+            echo "Expected Intel and Apple Silicon code; found: ${ARCHITECTURES}" >&2
+            exit 1
+          fi
+          /usr/bin/codesign --verify --deep --strict "${APP_BUNDLE}"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "${APP_BUNDLE}" "${STABLE_ZIP}"
           cp "${STABLE_ZIP}" "${VERSIONED_ZIP}"
 
@@ -126,10 +150,10 @@ jobs:
             ```
             brew install --cask forrest-technologies/tap/for-rest
             ```
-            The cask clears the Gatekeeper quarantine flag automatically, so this just works.
+            The cask removes the download quarantine attribute.
 
             **Direct download:** grab `For-Rest-${{ steps.version.outputs.version }}-macos.zip` below, unzip, and move `For-Rest.app` to Applications.
 
-            The app is unsigned, so a direct download (not via Homebrew) still needs one manual approval: `xattr -dr com.apple.quarantine /Applications/For-Rest.app`, or right-click → Open on first launch.
+            The app is ad-hoc signed and not notarized, so a direct download may require approval in macOS Privacy & Security. Existing quarantine can also be cleared with: `xattr -dr com.apple.quarantine /Applications/For-Rest.app`.
 
             `For-Rest-macos.zip` SHA-256: `${{ steps.package.outputs.sha256 }}`

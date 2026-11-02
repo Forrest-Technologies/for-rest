@@ -21,13 +21,23 @@ namespace ForRest.Scripting;
 /// console as an audit trail, and an optional in-scope host allowlist refuses
 /// targets outside the declared scope.
 /// </summary>
-public sealed class FuzzApi(ConsoleApi console, ScriptRequestApi? request = null)
+public sealed class FuzzApi(
+    ConsoleApi console, ScriptRequestApi? request, CancellationToken cancellationToken)
 {
     #region Private Fields
 
     private readonly HashSet<string> allowedHosts = new(StringComparer.OrdinalIgnoreCase);
 
     private bool allowlistEnabled;
+
+    #endregion
+
+    #region Constructors
+
+    public FuzzApi(ConsoleApi console, ScriptRequestApi? request = null)
+        : this(console, request, CancellationToken.None)
+    {
+    }
 
     #endregion
 
@@ -172,18 +182,35 @@ public sealed class FuzzApi(ConsoleApi console, ScriptRequestApi? request = null
     /// <paramref name="send"/> to fire each attempt. Concurrency is bounded by
     /// <see cref="FuzzOptions.MaxConcurrency"/>, each attempt honours
     /// <see cref="FuzzOptions.TimeoutMs"/>, and a <see cref="FuzzOptions.DelayMs"/>
-    /// throttle is applied before each send. Per-attempt errors are recorded,
-    /// not thrown. Results are clustered and diffed against the first successful
+    /// throttle is applied before each send. Per-attempt errors are recorded;
+    /// run cancellation propagates to the caller. Legacy send callbacks keep
+    /// their slot until completion because they cannot be cancelled. Results are
+    /// clustered and diffed against the first successful
     /// response (or an explicitly captured baseline) to flag anomalies.
     /// </summary>
-    public async Task<FuzzResult> Run(
+    public Task<FuzzResult> Run(
         IEnumerable payloads,
         Func<string, Task<ResponseSnapshot?>> send,
         FuzzOptions? options = null,
         string category = "")
     {
+        ArgumentNullException.ThrowIfNull(send);
+        return Run(payloads, (payload, _) => send(payload), options, category);
+    }
+
+    /// <summary>
+    /// Runs payloads with a cancellation-aware send callback. The callback must honor its token
+    /// to stop promptly at the deadline; its concurrency slot is held until the send completes.
+    /// </summary>
+    public async Task<FuzzResult> Run(
+        IEnumerable payloads,
+        Func<string, CancellationToken, Task<ResponseSnapshot?>> send,
+        FuzzOptions? options = null,
+        string category = "")
+    {
         ArgumentNullException.ThrowIfNull(payloads);
         ArgumentNullException.ThrowIfNull(send);
+        cancellationToken.ThrowIfCancellationRequested();
 
         FuzzOptions effectiveOptions = options ?? new FuzzOptions();
         List<string> payloadList = MaterializePayloads(payloads);
@@ -198,14 +225,14 @@ public sealed class FuzzApi(ConsoleApi console, ScriptRequestApi? request = null
 
         async Task RunAttempt(int index, string payload)
         {
-            await gate.WaitAsync();
+            await gate.WaitAsync(cancellationToken);
             int running = Interlocked.Increment(ref currentConcurrency);
             UpdatePeak(ref peakConcurrency, running);
             try
             {
                 if (effectiveOptions.DelayMs > 0)
                 {
-                    await Task.Delay(effectiveOptions.DelayMs);
+                    await Task.Delay(effectiveOptions.DelayMs, cancellationToken);
                 }
 
                 attemptsByIndex[index] = await ExecuteAttempt(index, payload, send, effectiveOptions);
@@ -242,7 +269,7 @@ public sealed class FuzzApi(ConsoleApi console, ScriptRequestApi? request = null
     private async Task<FuzzAttempt> ExecuteAttempt(
         int index,
         string payload,
-        Func<string, Task<ResponseSnapshot?>> send,
+        Func<string, CancellationToken, Task<ResponseSnapshot?>> send,
         FuzzOptions options)
     {
         if (!IsInScope(request?.Url))
@@ -252,18 +279,16 @@ public sealed class FuzzApi(ConsoleApi console, ScriptRequestApi? request = null
         }
 
         Stopwatch stopwatch = Stopwatch.StartNew();
+        using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (options.TimeoutMs > 0)
+        {
+            attemptCancellation.CancelAfter(options.TimeoutMs);
+        }
         try
         {
-            ResponseSnapshot? response;
-            if (options.TimeoutMs > 0)
-            {
-                using CancellationTokenSource cts = new(options.TimeoutMs);
-                response = await send(payload).WaitAsync(cts.Token);
-            }
-            else
-            {
-                response = await send(payload);
-            }
+            attemptCancellation.Token.ThrowIfCancellationRequested();
+            var response = await send(payload, attemptCancellation.Token);
+            attemptCancellation.Token.ThrowIfCancellationRequested();
 
             stopwatch.Stop();
             long duration = response?.DurationMilliseconds ?? stopwatch.ElapsedMilliseconds;
@@ -276,10 +301,17 @@ public sealed class FuzzApi(ConsoleApi console, ScriptRequestApi? request = null
                 null,
                 response);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (OperationCanceledException)
         {
             stopwatch.Stop();
-            return new FuzzAttempt(index, payload, 0, 0, stopwatch.ElapsedMilliseconds, $"timeout after {options.TimeoutMs}ms", null);
+            var error = attemptCancellation.IsCancellationRequested
+                ? $"timeout after {options.TimeoutMs}ms"
+                : "send cancelled";
+            return new FuzzAttempt(index, payload, 0, 0, stopwatch.ElapsedMilliseconds, error, null);
         }
         catch (Exception exception)
         {

@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using ForRest.Scripting;
 
 namespace ForRest.Mcp;
 
@@ -21,11 +21,6 @@ public static partial class McpSecretRedactor
 
     private const string RedactedSecretMarker = "\"***\"";
 
-    [GeneratedRegex(
-        @"^(?<indent>[ \t]*)secret[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(?<value>.+?)[ \t]*$",
-        RegexOptions.IgnoreCase | RegexOptions.Multiline)]
-    private static partial Regex SecretDeclarationPattern();
-
     #endregion
 
     #region Public Methods
@@ -38,10 +33,10 @@ public static partial class McpSecretRedactor
             return sourceText ?? string.Empty;
         }
 
-        return SecretDeclarationPattern().Replace(sourceText, static match =>
+        return ForRestSecretDeclarations.Replace(sourceText, static match =>
         {
-            string indent = match.Groups["indent"].Value;
-            string name = match.Groups["name"].Value;
+            string indent = match.Indent;
+            string name = match.Name;
             return $"{indent}secret {name} = {RedactedSecretMarker}";
         });
     }
@@ -55,25 +50,51 @@ public static partial class McpSecretRedactor
     /// </summary>
     public static string Restore(string? originalSourceText, string? newSourceText)
     {
+        if (!TryRestore(originalSourceText, newSourceText, out var restored, out var error))
+        {
+            throw new InvalidOperationException(error);
+        }
+
+        return restored;
+    }
+
+    /// <summary>Restores protected source, returning an error when repeated names make an edit ambiguous.</summary>
+    public static bool TryRestore(string? originalSourceText, string? newSourceText, out string restoredSourceText, out string errorMessage)
+    {
+        restoredSourceText = newSourceText ?? string.Empty;
+        errorMessage = string.Empty;
+        if (ForRestSecretDeclarations.HasRepeatedNames(originalSourceText))
+        {
+            if (string.Equals(newSourceText, Redact(originalSourceText), StringComparison.Ordinal))
+            {
+                restoredSourceText = originalSourceText ?? string.Empty;
+                return true;
+            }
+
+            restoredSourceText = string.Empty;
+            errorMessage = "Scripts with repeated secret names can only accept an unchanged redacted copy. Edit these declarations locally to preserve their values.";
+            return false;
+        }
+
         IReadOnlyDictionary<string, string> originals = ExtractDeclarations(originalSourceText);
         if (originals.Count == 0)
         {
-            return newSourceText ?? string.Empty;
+            return true;
         }
 
         string updated = newSourceText ?? string.Empty;
         HashSet<string> seen = new(StringComparer.Ordinal);
 
-        updated = SecretDeclarationPattern().Replace(updated, match =>
+        updated = ForRestSecretDeclarations.Replace(updated, match =>
         {
-            string name = match.Groups["name"].Value;
+            string name = match.Name;
             if (!originals.TryGetValue(name, out string? originalLine))
             {
-                return match.Value;
+                return match.Text;
             }
 
             seen.Add(name);
-            string indent = match.Groups["indent"].Value;
+            string indent = match.Indent;
             int firstNonWhitespace = 0;
             while (firstNonWhitespace < originalLine.Length &&
                 (originalLine[firstNonWhitespace] == ' ' || originalLine[firstNonWhitespace] == '\t'))
@@ -99,7 +120,8 @@ public static partial class McpSecretRedactor
             updated = string.Join(newline, missing) + newline + updated;
         }
 
-        return updated;
+        restoredSourceText = updated;
+        return true;
     }
 
     #endregion
@@ -114,15 +136,15 @@ public static partial class McpSecretRedactor
             return declarations;
         }
 
-        foreach (Match match in SecretDeclarationPattern().Matches(sourceText))
+        foreach (var match in ForRestSecretDeclarations.Read(sourceText))
         {
-            string name = match.Groups["name"].Value;
+            string name = match.Name;
             if (string.IsNullOrEmpty(name) || declarations.ContainsKey(name))
             {
                 continue;
             }
 
-            declarations[name] = match.Value.TrimEnd();
+            declarations[name] = match.Text.TrimEnd();
         }
 
         return declarations;

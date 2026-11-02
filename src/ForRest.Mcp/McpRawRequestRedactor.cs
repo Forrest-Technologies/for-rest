@@ -14,24 +14,6 @@ public static class McpRawRequestRedactor
 
     private const string RedactedValue = "***";
 
-    private static readonly string[] SensitiveHeaderNames =
-    [
-        "authorization",
-        "proxy-authorization",
-        "cookie",
-        "set-cookie",
-    ];
-
-    private static readonly string[] SensitiveHeaderNameFragments =
-    [
-        "api-key",
-        "apikey",
-        "token",
-        "secret",
-        "password",
-        "auth",
-    ];
-
     #endregion
 
     #region Public Methods
@@ -63,7 +45,7 @@ public static class McpRawRequestRedactor
             }
 
             string name = line[..separator].Trim();
-            if (!IsSensitiveHeaderName(name))
+            if (!HttpCredentialHeaders.IsSensitive(name))
             {
                 continue;
             }
@@ -77,28 +59,4 @@ public static class McpRawRequestRedactor
 
     #endregion
 
-    #region Private Methods
-
-    private static bool IsSensitiveHeaderName(string name)
-    {
-        foreach (string sensitiveName in SensitiveHeaderNames)
-        {
-            if (string.Equals(name, sensitiveName, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        foreach (string fragment in SensitiveHeaderNameFragments)
-        {
-            if (name.Contains(fragment, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    #endregion
 }

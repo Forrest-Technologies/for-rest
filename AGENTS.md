@@ -8,7 +8,7 @@ For-Rest is a local-first API workbench: a .NET 10 MAUI app (Windows, Android, M
 
 ## Build and test
 
-SDK is pinned to `.NET 10.0.200-preview.0.26103.119` via `global.json`.
+SDK baseline is `.NET 10.0.302` via `global.json`, with roll-forward to newer stable feature bands.
 
 ```bash
 dotnet build ForRest.slnx
