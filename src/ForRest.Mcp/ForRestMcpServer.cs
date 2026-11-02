@@ -75,6 +75,7 @@ public sealed class ForRestMcpServer : IAsyncDisposable
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (listener is not null)
         {
             return Task.CompletedTask;
@@ -97,13 +98,28 @@ public sealed class ForRestMcpServer : IAsyncDisposable
         // HttpListener is unavailable on some sandboxed platforms (e.g. Mac
         // Catalyst). The lifecycle adapter wraps StartAsync and degrades
         // gracefully if construction or Start throws here.
-        listener = new HttpListener();
-        listener.Prefixes.Add(prefix);
-        listener.Start();
+        var startingListener = new HttpListener();
+        CancellationTokenSource? startingShutdown = null;
+        try
+        {
+            startingListener.Prefixes.Add(prefix);
+            startingListener.Start();
+            cancellationToken.ThrowIfCancellationRequested();
+            startingShutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        }
+        catch
+        {
+            startingListener.Close();
+            startingShutdown?.Dispose();
+            throw;
+        }
+
+        listener = startingListener;
+        shutdown = startingShutdown;
         endpoint = $"http://{(prefixHost == "+" ? settings.BindAddress : prefixHost)}:{settings.Port}/";
-        shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var shutdownToken = startingShutdown.Token;
         logger.LogInformation("ForRest MCP server listening on {Endpoint} (Streamable HTTP).", endpoint);
-        acceptLoop = Task.Run(() => AcceptLoopAsync(shutdown.Token), shutdown.Token);
+        acceptLoop = Task.Run(() => AcceptLoopAsync(shutdownToken), shutdownToken);
         return Task.CompletedTask;
     }
 
