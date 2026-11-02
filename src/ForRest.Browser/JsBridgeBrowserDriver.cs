@@ -95,15 +95,17 @@ public sealed class JsBridgeBrowserDriver(IBrowserPageTransport transport) : IBr
         // Empty target text still clears the field; otherwise type character by character, firing real
         // key events per keystroke with a human-like gap so search-as-you-type and validation react.
         await Operate(target, "cleartype", string.Empty, cancellationToken);
-        IReadOnlyList<int> delays = ElementLocator.KeystrokeDelays(text, resolvedCadence);
-        for (int i = 0; i < text.Length; i++)
+        var delays = ElementLocator.KeystrokeDelays(text, resolvedCadence);
+        var characters = StringInfo.GetTextElementEnumerator(text);
+        while (characters.MoveNext())
         {
-            if (delays[i] > 0)
+            var delay = delays[characters.ElementIndex];
+            if (delay > 0)
             {
-                await Task.Delay(delays[i], cancellationToken);
+                await Task.Delay(delay, cancellationToken);
             }
 
-            await Operate(target, "typechar", text[i].ToString(), cancellationToken);
+            await Operate(target, "typechar", characters.GetTextElement(), cancellationToken);
         }
 
         await Operate(target, "typecommit", string.Empty, cancellationToken);

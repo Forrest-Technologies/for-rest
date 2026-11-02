@@ -73,6 +73,37 @@ public sealed class JsBridgeBrowserDriverTests
     }
 
     [TestMethod]
+    [DataRow("🦉", 1)]
+    [DataRow("A🦉B", 3)]
+    [DataRow("e\u0301", 1)]
+    [DataRow("👨‍👩‍👧‍👦", 1)]
+    public async Task Type_preserves_complete_unicode_characters_in_page_input(string text, int expectedKeystrokes)
+    {
+        const string marker = ",\"typechar\",";
+        List<string> typed = [];
+        var transport = new FakeBrowserPageTransport
+        {
+            Responder = script =>
+            {
+                var markerIndex = script.LastIndexOf(marker, StringComparison.Ordinal);
+                if (markerIndex >= 0)
+                {
+                    var value = script[(markerIndex + marker.Length)..^1];
+                    typed.Add(JsonSerializer.Deserialize<string>(value) ?? string.Empty);
+                }
+
+                return """{"found":true,"x":10,"y":10,"ok":true}""";
+            },
+        };
+        var driver = new JsBridgeBrowserDriver(transport);
+
+        await driver.Type(BrowserTarget.Css("#name"), text, CursorMotion.Instant, TypingCadence.Instant);
+
+        Assert.AreEqual(text, string.Concat(typed));
+        Assert.HasCount(expectedKeystrokes, typed);
+    }
+
+    [TestMethod]
     public async Task Type_paces_keystrokes_when_a_human_cadence_is_used()
     {
         FakeBrowserPageTransport transport = new()
