@@ -75,7 +75,7 @@ public sealed class CurlImportServiceTests
     [DataRow("-XPUT", "method PUT")]
     [DataRow("-H'X-Test: hello world'", "header \"X-Test\" = \"hello world\"")]
     [DataRow("-d'a=1'", "body text")]
-    [DataRow("-ureader:fake-value", "username = \"reader\"")]
+    [DataRow("-ureader:fake-value", "username = \"{{curl_username}}\"")]
     [DataRow("-A'Test Agent'", "header \"User-Agent\" = \"Test Agent\"")]
     [DataRow("-ehttps://ref.example.test/", "header \"Referer\" = \"https://ref.example.test/\"")]
     [DataRow("-bsession=fake", "secret curl_header_1 = \"session=fake\"")]
@@ -94,7 +94,7 @@ public sealed class CurlImportServiceTests
     [DataRow("--data=a=1", "body text")]
     [DataRow("--data-urlencode='q=hello world'", "q=hello%20world")]
     [DataRow("--json='{}'", "body json")]
-    [DataRow("--user=reader:fake-value", "username = \"reader\"")]
+    [DataRow("--user=reader:fake-value", "username = \"{{curl_username}}\"")]
     [DataRow("--oauth2-bearer=fake-token", "secret curl_bearer_token = \"fake-token\"")]
     [DataRow("--max-time=0.5", "timeout 500")]
     public void Long_option_values_accept_an_equals_separator(string option, string expected)
@@ -240,7 +240,8 @@ public sealed class CurlImportServiceTests
 
         StringAssert.Contains(script, "auth {");
         StringAssert.Contains(script, "mode = basic");
-        StringAssert.Contains(script, "username = \"alice\"");
+        StringAssert.Contains(script, "username = \"{{curl_username}}\"");
+        StringAssert.Contains(script, "secret curl_username = \"alice\"");
         StringAssert.Contains(script, "password = \"{{curl_password}}\"");
         StringAssert.Contains(script, "secret curl_password = \"s3cret\"");
         FrsParseAssert.Parses(script);
